@@ -35,6 +35,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase-browser";
 import { ADMIN_STUDENT_JOIN_CUTOFF } from "@/lib/constants";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
+import { readForStudents } from "@/lib/admin/people-common";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { getDayNumber } from "@/types/database";
 import type { RegionId, Student } from "@/types/database";
@@ -89,12 +90,14 @@ export type CourseActivity =
 /**
  * Reads the reset key, and the view of last counted lessons only when the
  * key exists (the view comes from v103 and means nothing before the
- * switch). Hand it `studentId` to read one student's row instead of all.
+ * switch). Hand it `studentId` to read one student's row instead of all, or
+ * a list of ids to read those students' rows alone (All students and the
+ * journey, the owner's review of 2026-10-21: readForStudents, in batches).
  * Never throws: a failed read comes back as `{ ok: false }`.
  */
 export async function loadCourseActivity(
   supabase: SupabaseClient,
-  studentId?: string,
+  studentId?: string | readonly string[],
 ): Promise<CourseActivity> {
   try {
     const resetAt = await getCurriculumResetAt(supabase);
@@ -103,13 +106,17 @@ export async function loadCourseActivity(
 
     type Row = { student_id: string; last_completed_at: string | null };
     let rows: Row[];
-    if (studentId) {
+    if (typeof studentId === "string" && studentId) {
       const { data, error } = await supabase
         .from("student_last_counted_completion")
         .select("student_id, last_completed_at")
         .eq("student_id", studentId);
       if (error) throw new Error(error.message);
       rows = (data ?? []) as Row[];
+    } else if (Array.isArray(studentId)) {
+      const read = await readForStudents<Row>(supabase, "student_last_counted_completion", "student_id, last_completed_at", studentId);
+      if (!read.ok) throw new Error(read.error);
+      rows = read.data;
     } else {
       const res = await fetchAllRowsPaginated<Row>(() =>
         supabase

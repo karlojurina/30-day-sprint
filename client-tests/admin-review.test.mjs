@@ -24,8 +24,9 @@
 //                 on a stand-in fetch), Approve on beside the coupon's
 //                 verdict, Approve anyway in Approve's place, Reject ghost,
 //                 "Reject the request" danger
-//   the coupon    a stored id that is not a membership's is logged; a cron
-//                 run Whop never answered is a failure
+//   the coupon    a stored id that is not a membership's is asked about
+//                 through the student's Whop user (T-122; it was logged and
+//                 never asked); a cron run Whop never answered is a failure
 //   student page  the quick DMs in the messages draft's words, the settings
 //                 at the foot
 //   the frame     buttons (one ink, danger for an undoable no), "Refresh"
@@ -366,8 +367,9 @@ console.log("\n=== The 30% page: every row's coupon check ===")
   const noLive = buildThirtyView(load.data, new Date(NOW), RESET)
   ok(noLive.requests.find((r) => r.id === 'r-a1').couponCheck === 'not-checked', 'with no live answers handed in, an Approved row falls back to what is stored')
 
-  // A stored Whop id that is a payment's (the webhook has written one there), or none: Whop is never asked about it,
-  // so nothing blocks the 30%, and "Approve asks Whop first" would not be true. The row says so instead.
+  // A stored Whop id that is a payment's (the webhook has written one there), or none. Since T-122 Approve asks
+  // Whop through the student's Whop user, so an Applied row says "not checked yet, Approve asks Whop first" as for
+  // any other; the Approved rows' own read asks by membership id alone, so such a row still says it could not ask.
   const odd = new FakeDb({
     students: [person('p4', 'pay_p4'), person('p5', null), person('a5', 'pay_a5'), person('p6')],
     lessons: [{ id: 'g1', region_id: 'a1', type: 'watch', title: 'Gate', sort_order: 1, requires_action: false, counts_toward_progress: true, is_gate: true, duration_seconds: 300 }],
@@ -381,10 +383,26 @@ console.log("\n=== The 30% page: every row's coupon check ===")
   const oddLoad = await loadThirtyData(fakeClient(odd))
   const oddView = buildThirtyView(oddLoad.data, new Date(NOW), RESET, await readApprovedCoupons(oddLoad.data, null))
   const oddRow = (id) => oddView.requests.find((r) => r.id === id)
-  ok(oddRow('r-p4').couponCheck === 'no-membership' && oddRow('r-p5').couponCheck === 'no-membership' && oddRow('r-a5').couponCheck === 'no-membership'
+  ok(oddRow('r-p4').couponCheck === 'not-checked' && oddRow('r-p5').couponCheck === 'not-checked' && oddRow('r-a5').couponCheck === 'no-membership'
        && oddRow('r-p6').couponCheck === 'not-checked',
-     'a payment\'s id or no id in whop_membership_id: "no-membership" on an Applied and an Approved row alike; a membership id with nothing stored stays "not checked yet"',
+     'a payment\'s id or no id in whop_membership_id: "not checked yet" on an Applied row (Approve asks through the Whop user, T-122), "no-membership" on an Approved one; a membership id with nothing stored "not checked yet"',
      show(['r-p4', 'r-p5', 'r-a5', 'r-p6'].map((id) => oddRow(id).couponCheck)))
+  // And a row stored for such a student (the cron found the membership through the Whop user) counts on their row.
+  const oddStored = new FakeDb({
+    students: [person('p4', 'pay_p4'), person('p5', null)],
+    lessons: [{ id: 'g1', region_id: 'a1', type: 'watch', title: 'Gate', sort_order: 1, requires_action: false, counts_toward_progress: true, is_gate: true, duration_seconds: 300 }],
+    lesson_videos: [{ lesson_id: 'g1', created_at: '2026-10-19T10:00:00.000Z' }],
+    student_lesson_completions: [],
+    discount_requests: [ask('r-p4', 'p4', 'pending'), ask('r-p5', 'p5', 'pending')],
+    team_members: [],
+    student_whop_sync: [],
+    student_membership_discounts: [coupon('p4', 'mem_found4', true), { ...coupon('p5', null, false), source: 'payment' }],
+  })
+  const oddStoredView = buildThirtyView((await loadThirtyData(fakeClient(oddStored))).data, new Date(NOW), RESET)
+  const storedRow = (id) => oddStoredView.requests.find((r) => r.id === id)
+  ok(storedRow('r-p4').couponCheck === 'stored' && storedRow('r-p4').verdict.reason === 'has-discount' && storedRow('r-p5').couponCheck === 'stored' && storedRow('r-p5').coupon.discounted === false,
+     'with a payment\'s id or no id on file, the row stored through the Whop user or a payment counts: the coupon\'s verdict, or a clean coupon',
+     show(['r-p4', 'r-p5'].map((id) => [storedRow(id).couponCheck, storedRow(id).verdict?.reason])))
 
   const nokey = await readApprovedCoupons(load.data, null)
   ok(show([...nokey.keys()].sort()) === show(['a1', 'a2', 'a3', 'a4']) && [...nokey.values()].every((c) => !c.ok && c.fail === 'no_api_key'),
@@ -425,18 +443,21 @@ console.log("\n=== The 30% page: every row's coupon check ===")
   ok(page.includes('Coupon not checked yet. Approve asks Whop first.') && page.includes('"Couldn\'t ask Whop about a coupon on this membership."')
        && page.includes('Check Whop before you add the 30% code.') && !page.includes(' Approve asks Whop again first.'),
      'the rows say it: "Coupon not checked yet" on an Applied row, "Couldn\'t ask Whop" on an Approved one; no "Approve asks Whop again" since a coupon row has no Approve')
-  ok(/row\.couponCheck === "no-membership" && \([\s\S]{0,400}?Coupon not checked: the student&apos;s Whop membership is not on file, so Approve can&apos;t ask Whop\. Check\s+Whop before you approve\./.test(page)
+  ok(!page.includes('so Approve can&apos;t ask Whop') && !page.includes('data-coupon="no-membership"')
        && page.includes('"Couldn\'t ask Whop about a coupon: the student\'s Whop membership is not on file."')
        && /const unchecked = approved && !row\.coupon && \(row\.couponCheck === "failed" \|\| row\.couponCheck === "no-membership"\);/.test(page),
-     'with no membership on file, an Applied row never says Approve asks Whop: it says to check Whop by hand, and so does an Approved row')
+     'an Applied row no longer says Approve can\'t ask Whop (since T-122 it asks through the Whop user); an Approved row still says its own read could not ask')
   const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/** The 30% code, and a button that copies it. */'))
   // The render review's fix round changed the coupon's row: no Approve at all beside the coupon's verdict (it
   // was kept on, for the route to refuse), and Reject is that row's one action, raised.
-  // Since the render review's second round "Check Whop again" stands in Approve's place on the coupon's row.
+  // Since the render review's second round "Check Whop again" stands on the coupon's row. Since the owner's review
+  // (2026-10-21) a founder's or an admin's Approve anyway stands in Approve's place wherever a check refuses, the
+  // coupon's row too (admin-owner-review.test.mjs holds that round's rules).
   ok(/disabled=\{locked \|\| \(busy !== null && busy !== "approve"\)\}/.test(pending) && !/disabled=\{!verdict\.ok/.test(pending)
-       && /\) : coupon \? \(\s*<button[\s\S]*?"Check Whop again"\}\s*<\/button>\s*\) : \(\s*<Button/.test(pending),
-     'Approve is on wherever it can approve, and gone beside the coupon\'s verdict (the route refuses it with no override)')
-  ok(/\{canOverride \? \(\s*<button[\s\S]*?Approve anyway[\s\S]*?\) : coupon \? \(\s*<button[\s\S]*?Check Whop again[\s\S]*?\) : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),
+       && /\{coupon && \(\s*<button[\s\S]*?"Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
+       && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button/.test(pending),
+     'Approve is on wherever it can approve, and gone beside the coupon\'s verdict')
+  ok(/\{canOverride && \(\s*<button[\s\S]*?Approve anyway\s*<\/button>\s*\)\}\s*\{!coupon && verdict\.ok && !canOverride && \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),
      'Approve anyway takes Approve\'s place in the row, as tall as Reject, never a disabled Approve beside a link')
   ok(/<Button\s+variant=\{coupon \? "raised" : "ghost"\}\s+size="md"\s+disabled=\{off\}\s+expanded=\{confirm === "reject"\}/.test(pending)
        && /variant="danger"[\s\S]{0,400}Reject the request/.test(pending),
@@ -450,22 +471,51 @@ console.log("\n=== The 30% page: every row's coupon check ===")
 
 console.log('\n=== The coupon rule: a stored id that is not a membership, and a cron Whop never answered ===')
 {
-  const db = new FakeDb({
-    students: [{ id: 's-pay', whop_membership_id: 'pay_123', first_paid_at: '2026-10-10T08:00:00.000Z', membership_status: 'active' }],
+  // Until T-122 (2026-10-21) a payment's id where the membership's belongs meant Whop was never asked, and a line
+  // said so. Now the membership is found through the student's Whop user. Whop stands in here: no request leaves
+  // the machine (membership-discount.test.mjs holds every path).
+  const db = () => new FakeDb({
+    students: [{ id: 's-pay', whop_membership_id: 'pay_123', whop_user_id: 'user_devPay', first_paid_at: '2026-10-10T08:00:00.000Z', membership_status: 'active' }],
     student_membership_discounts: [],
   })
+  const realFetch = globalThis.fetch
+  const realProducts = process.env.WHOP_PRODUCT_ID
+  process.env.WHOP_PRODUCT_ID = 'prod_devCourse'
+  const asked = []
+  let down = false
+  globalThis.fetch = async (url) => {
+    const u = new URL(String(url))
+    if (u.hostname !== 'api.whop.com') throw new Error(`the suite let a request go to ${u.hostname}`)
+    asked.push(u.pathname)
+    if (down) throw new TypeError('fetch failed')
+    const json = (body) => new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+    if (u.pathname === '/api/v2/memberships') return json({ data: [{ id: 'mem_devPay', user: 'user_devPay', product: 'prod_devCourse', status: 'active', valid: true }], pagination: { current_page: 1, total_page: 1 } })
+    if (u.pathname === '/api/v1/memberships/mem_devPay') return json({ id: 'mem_devPay', promo_code_id: null, plan_id: 'plan_m', renewal_price: '97.00' })
+    if (u.pathname === '/api/v1/plans/plan_m') return json({ id: 'plan_m', renewal_price: '97.00' })
+    return new Response('{}', { status: 404 })
+  }
   const warned = []
   const realWarn = console.warn
   console.warn = (...a) => warned.push(a.join(' '))
   let answer
+  let downAnswer
+  const found = db()
+  const empty = db()
   try {
-    answer = await MD.checkMembershipDiscount(fakeClient(db), 's-pay', { apiKey: 'test-key' })
+    answer = await MD.checkMembershipDiscount(fakeClient(found), 's-pay', { apiKey: 'test-key' })
+    down = true
+    downAnswer = await MD.checkMembershipDiscount(fakeClient(empty), 's-pay', { apiKey: 'test-key' })
   } finally {
     console.warn = realWarn
+    globalThis.fetch = realFetch
+    if (realProducts === undefined) delete process.env.WHOP_PRODUCT_ID
+    else process.env.WHOP_PRODUCT_ID = realProducts
   }
-  ok(answer.source === 'none' && !answer.discounted && answer.liveFail === 'not_a_membership'
-       && warned.some((w) => w.includes('student s-pay: the stored Whop id is not a membership id, so Whop was not asked and nothing blocks')),
-     'a payment id where the membership id belongs: nothing blocks, and now a line says so (it was silent)', warned.join(' | '))
+  ok(answer.source === 'live' && answer.via === 'user' && !answer.discounted && answer.saved && found.rows('student_membership_discounts')[0]?.whop_membership_id === 'mem_devPay'
+       && show(asked.slice(0, 3)) === show(['/api/v2/memberships', '/api/v1/memberships/mem_devPay', '/api/v1/plans/plan_m']),
+     'a payment id where the membership id belongs: the course membership is found through the Whop user and read (T-122), its answer stored', show({ answer, asked }))
+  ok(downAnswer.source === 'none' && downAnswer.liveFail === 'network' && warned.some((w) => w.includes('student s-pay: Whop gave no answer (network), so no answer is on file')),
+     'Whop down for it: no answer on file (the request routes refuse, the approve route goes on), and a line says so', warned.join(' | '))
 
   const members = Array.from({ length: 3 }, (_, i) => ({ id: `s-${i}`, whop_membership_id: `mem_${i}`, first_paid_at: '2026-10-10T08:00:00.000Z', membership_status: 'active' }))
   const hung = await MD.refreshMembershipDiscounts(fakeClient(new FakeDb({ students: members, discount_requests: [], student_membership_discounts: [] })), {

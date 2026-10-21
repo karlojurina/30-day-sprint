@@ -6,9 +6,10 @@ import tokens from "@/components/admin/admin-tokens.module.css";
 import { FailedMeta, ListHeader, ListPage, TAP } from "@/components/admin/list-parts";
 import { FailureList } from "@/components/admin/review-parts";
 import { Button, Card, T } from "@/components/admin/ui";
-import { clockLabel, dayLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
+import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import {
   allFailed,
+  bountyTrend,
   buildDashboard,
   deltaOf,
   momentMs,
@@ -41,8 +42,15 @@ import { TrendChart, pointDay } from "./TrendChart";
  * 2 is a compact tile (when the first renewals come and how many paid since
  * the launch) beside the Bounty Program's wider chart; from then on, its full
  * tile with its chart, the two halves of the row. Then the trends of the
- * last 14 days. Every tile says where its number comes from, and the ones
- * with a chart have "How it's counted" with the whole rule.
+ * last 14 days. The tiles with a chart have "How it's counted" (the (i)
+ * button) with the whole rule.
+ *
+ * The owner's review (2026-10-21): no source or explanation line under the
+ * program's and the trends' tiles (the (i) buttons keep the definitions), and
+ * the room they took goes to taller charts; beside the Bounty Program's
+ * 14-day number a small arrow says whether those days beat the 14 before
+ * them (bountyTrend), the earlier count in its tooltip and its words for a
+ * screen reader.
  *
  * The render review's fix round: the program row's order and heights above;
  * the three sections the same distance apart (each title row 20px tall, the
@@ -547,14 +555,14 @@ function useInfo(): Info {
   return { id, open, place, onToggle };
 }
 
-/** The line under a chart that says where its number comes from; `foot` puts it at the foot of a card stretched taller than its words. */
-function SourceLine({ children, foot = false }: { children: React.ReactNode; foot?: boolean }) {
-  return (
-    <p style={{ marginTop: foot ? "auto" : 12, paddingTop: foot ? 12 : 0, fontSize: 12, lineHeight: 1.45, color: "var(--color-text-secondary)" }}>
-      {children}
-    </p>
-  );
-}
+/**
+ * The charts' heights (the owner's review, 2026-10-21): the room the source
+ * lines took under the tiles went to the charts. The program's two charts,
+ * and each trend tile's line.
+ */
+const BOUNTY_CHART = 156;
+const MONTH2_CHART = 144;
+const TREND_CHART = 76;
 
 /** A big number, in proportional figures (the kit's rule for a number that stands alone). */
 function BigNumber({ children, size }: { children: React.ReactNode; size: number }) {
@@ -651,7 +659,6 @@ function MonthTwoCard({ tile }: { tile: Tile<MonthTwo> }) {
     <HeroCard tile="month2">
       <TileHead title="Month 2 conversion" level={2} info={info} />
       {!tile.ok ? <Failed big /> : tile.value.kind === "rate" ? <MonthTwoRate m={tile.value} /> : null}
-      <SourceLine foot>Students on the monthly plan who first paid from {LAUNCH_DAY}.</SourceLine>
       <HowCounted info={info} top={56}>
         <MonthTwoHow />
       </HowCounted>
@@ -669,11 +676,11 @@ function MonthTwoRate({ m }: { m: Extract<MonthTwo, { kind: "rate" }> }) {
         </p>
       </div>
       <DeltaLine delta={deltaOf(m.line)} upIsGood decimals={0} unit={["pt", "pts"]} />
-      <div style={{ marginTop: 40 }}>
+      <div style={{ marginTop: "auto", paddingTop: 32 }}>
         <TrendChart
           points={m.line}
           kind="line"
-          height={112}
+          height={MONTH2_CHART}
           label="Month 2 conversion"
           format={pct0}
           axis
@@ -699,7 +706,6 @@ function MonthTwoCompact({ m, nowMs }: { m: Extract<MonthTwo, { kind: "waiting" 
     <HeroCard tile="month2">
       <TileHead title="Month 2 conversion" level={2} info={info} />
       <MonthTwoWaiting m={m} nowMs={nowMs} />
-      <SourceLine foot>Students on the monthly plan who first paid from {LAUNCH_DAY}.</SourceLine>
       <HowCounted info={info} top={56}>
         <MonthTwoHow />
       </HowCounted>
@@ -764,6 +770,38 @@ function MonthTwoWaiting({ m, nowMs }: { m: Extract<MonthTwo, { kind: "waiting" 
   );
 }
 
+/**
+ * Beside the Bounty Program's 14-day number (the owner's review,
+ * 2026-10-21): a small arrow, green and up when the last 14 days beat the 14
+ * days before them, red and down when they hold fewer, nothing when the two
+ * are equal (bountyTrend). The earlier count is in its tooltip and in its
+ * words for a screen reader; the arrow itself is hidden from one. Exported
+ * for client-tests/admin-owner-review.test.mjs, which draws it.
+ */
+export function BountyArrow({ b }: { b: Pick<Bounty, "last14" | "previous14"> }) {
+  const trend = bountyTrend(b);
+  if (!trend) return null;
+  const up = trend === "up";
+  const before = `${int(b.previous14)} in the 14 days before`;
+  return (
+    <span
+      data-bounty-arrow={trend}
+      title={before}
+      style={{
+        alignSelf: "center",
+        fontSize: 22,
+        fontWeight: 600,
+        lineHeight: 1,
+        color: up ? "var(--color-success)" : "var(--color-danger)",
+        cursor: "default",
+      }}
+    >
+      <span aria-hidden="true">{up ? "↑" : "↓"}</span>
+      <span className="sr-only">{`${up ? "Up" : "Down"} from ${before}`}</span>
+    </span>
+  );
+}
+
 function BountyCard({ tile }: { tile: Tile<Bounty> }) {
   const info = useInfo();
   return (
@@ -774,20 +812,26 @@ function BountyCard({ tile }: { tile: Tile<Bounty> }) {
       ) : (
         <>
           <div className="flex flex-wrap items-baseline" style={{ gap: "6px 12px", marginTop: 14 }}>
-            <BigNumber size={56}>{int(tile.value.last14)}</BigNumber>
+            <div className="inline-flex items-baseline" style={{ gap: 8 }}>
+              <BigNumber size={56}>{int(tile.value.last14)}</BigNumber>
+              <BountyArrow b={tile.value} />
+            </div>
             <p style={{ ...T.bodyDim, fontSize: 13 }}>
               in the last 14 days · {int(tile.value.allTime)} all time
             </p>
           </div>
-          <p style={{ marginTop: 8, fontSize: 12, lineHeight: "16px", color: "var(--color-text-secondary)" }}>
-            {tile.value.last14 === 0 ? "Nobody joined in these 14 days." : "Joined per day"}
-          </p>
-          <div style={{ marginTop: 16 }}>
-            <TrendChart points={tile.value.line} kind="bars" height={124} label="Joined the Bounty Program" format={int} axis />
+          {/* No caption over the bars since the owner's review (no explanation line under a tile, as Churned's
+              per-day caption went); a 14 days with nobody still says so. */}
+          {tile.value.last14 === 0 && (
+            <p style={{ marginTop: 8, fontSize: 12, lineHeight: "16px", color: "var(--color-text-secondary)" }}>
+              Nobody joined in these 14 days.
+            </p>
+          )}
+          <div style={{ marginTop: "auto", paddingTop: 16 }}>
+            <TrendChart points={tile.value.line} kind="bars" height={BOUNTY_CHART} label="Joined the Bounty Program" format={int} axis />
           </div>
         </>
       )}
-      <SourceLine foot>Students on the monthly plan since Mon 25 May who joined on the bounty site.</SourceLine>
       <HowCounted info={info} top={56}>
         Students who joined the Bounty Program, by the day the bounty site stamped them (in UTC), among the students on
         the monthly plan who first paid on or after Mon 25 May. The same count as before the new program.
@@ -862,16 +906,16 @@ function CountTile<V extends { count: number }>({
 // ── Trends ──────────────────────────────────────────────────────────────────
 
 /**
- * A trend tile: its name, the number and its change, where they come from,
- * then the line at the foot of the tile, so the four lines of a row sit level
- * whatever the words above them take.
+ * A trend tile: its name, the number and its change, then the line at the
+ * foot of the tile, so the four lines of a row sit level whatever the words
+ * above them take. Where the number comes from is in "How it's counted"
+ * alone (the owner's review, 2026-10-21: no source line under the number).
  */
 function TrendCard({
   tile,
   title,
   info,
   how,
-  source,
   chart,
   children,
 }: {
@@ -880,8 +924,6 @@ function TrendCard({
   title: string;
   info: Info;
   how: React.ReactNode;
-  /** Where the number and the line come from, in a few words. */
-  source: React.ReactNode;
   /** The line, or why there is none. */
   chart?: React.ReactNode;
   children: React.ReactNode;
@@ -891,7 +933,6 @@ function TrendCard({
       <div data-tile={tile} className="p-4" style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%" }}>
         <TileHead title={title} info={info} />
         {children}
-        <SourceLine>{source}</SourceLine>
         {chart}
         <HowCounted info={info} top={46}>
           {how}
@@ -933,7 +974,7 @@ function Spark({
       <TrendChart
         points={line.value}
         kind={kind}
-        height={44}
+        height={TREND_CHART}
         label={label}
         format={format}
         emptyText={from ? (date) => (date < from ? "Before the switch" : "No snapshot") : "No snapshot"}
@@ -958,7 +999,6 @@ function ActiveTile({ tile }: { tile: Tile<WithLine> }) {
       tile="active"
       title="Active on platform"
       info={info}
-      source="Whop status now, the line from the nightly snapshot"
       chart={tile.ok ? <Spark line={tile.value.line} label="Active on platform" format={int} /> : null}
       how={
         <>
@@ -987,7 +1027,6 @@ function CancelingTile({ tile }: { tile: Tile<WithLine> }) {
       tile="canceling"
       title="Canceling"
       info={info}
-      source="Whop now, the line from the nightly snapshot"
       chart={tile.ok ? <Spark line={tile.value.line} label="Canceling" format={int} /> : null}
       how={
         <>
@@ -1000,7 +1039,7 @@ function CancelingTile({ tile }: { tile: Tile<WithLine> }) {
         <Failed />
       ) : (
         <>
-          <TrendNumber unit="pressed cancel">{int(tile.value.count)}</TrendNumber>
+          <TrendNumber>{int(tile.value.count)}</TrendNumber>
           <DeltaLine delta={tile.value.line.ok ? deltaOf(tile.value.line.value) : null} upIsGood={false} />
         </>
       )}
@@ -1016,7 +1055,6 @@ function ChurnedTile({ tile }: { tile: Tile<Churned> }) {
       tile="churned"
       title="Churned"
       info={info}
-      source="The nightly snapshot"
       chart={read ? <Spark line={{ ok: true, value: read.line }} label="Churned" format={int} kind="bars" /> : null}
       how={
         <>
@@ -1034,7 +1072,6 @@ function ChurnedTile({ tile }: { tile: Tile<Churned> }) {
           <TrendNumber unit={read.daysRead === 14 ? "in 14 days" : `in ${plural(read.daysRead, "day", "days")} with a snapshot`}>
             {int(read.total)}
           </TrendNumber>
-          <p style={{ marginTop: 8, fontSize: 12, lineHeight: "16px", color: "var(--color-text-secondary)" }}>Access ended, per day</p>
         </>
       )}
     </TrendCard>
@@ -1049,13 +1086,6 @@ function AvgProgressTile({ tile }: { tile: Tile<AvgProgress> }) {
       tile="avg-progress"
       title="Avg progress"
       info={info}
-      source={
-        v
-          ? v.builtAt
-            ? `The nightly snapshot, built ${dayTimeLabel(v.builtAt)}`
-            : `The nightly snapshot of ${pointDay(v.date)}`
-          : "The nightly snapshot"
-      }
       chart={v ? <Spark line={{ ok: true, value: v.line }} label="Avg progress" format={pct2} from={v.from} /> : null}
       how={
         <>
@@ -1125,7 +1155,7 @@ export function DashboardSkeleton() {
                   <Bar w="38%" h={11} />
                   <Bar w="30%" h={48} mt={18} />
                   <Bar w="55%" mt={14} />
-                  <Bar w="100%" h={112} mt={32} />
+                  <Bar w="100%" h={MONTH2_CHART} mt={32} />
                 </HeroCard>
               </div>
             ))}
@@ -1140,7 +1170,7 @@ export function DashboardSkeleton() {
                   <Bar w="55%" h={11} />
                   <Bar w="40%" h={28} mt={14} />
                   <Bar w="70%" mt={12} />
-                  <Bar w="100%" h={44} mt={24} />
+                  <Bar w="100%" h={TREND_CHART} mt={24} />
                 </div>
               </Card>
             ))}

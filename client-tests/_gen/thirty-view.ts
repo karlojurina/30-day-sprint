@@ -14,8 +14,10 @@
  * (D5 first, then the rule):
  *   1. the coupon: the student's stored membership row says a discount is on
  *      the next renewal (student_membership_discounts, for the membership the
- *      student has now). The approve route refuses that with no override,
- *      in the same words (couponApprovalRefusal).
+ *      student has now). The approve route refuses that in the same words
+ *      (couponApprovalRefusal); since the owner's review (2026-10-21) a
+ *      founder's or an admin's Approve anyway passes it (anywaySkip,
+ *      approveAnywayText).
  *   2. the rule on the new course: approvalVerdict, then
  *      explainOldCourseRequest for a request made before the switch. The page
  *      shows its own fixed sentence for each answer (VERDICT_TEXT): the
@@ -58,7 +60,7 @@ import {
   videoDoneIds,
 } from "./discount-server.ts";
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "./discount-server.ts";
-import { isMembershipId } from "./membership-discount.ts";
+import { isMembershipId, storedRowApplies } from "./membership-discount.ts";
 import { dayLabel } from "./croatia-dates.ts";
 import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data.ts";
 
@@ -102,7 +104,8 @@ export interface Facts {
 /**
  * Why a request may not be approved. ApprovalRefusal's reasons are the
  * rule's; "has-discount": a discount is already on the student's next Whop
- * renewal (D5, no override); "read-failed": the student's progress could not
+ * renewal (D5; only a founder's or an admin's Approve anyway passes it);
+ * "read-failed": the student's progress could not
  * be read; "unknown": the rule gave no reason (it cannot, today).
  */
 export type VerdictReason = ApprovalRefusal | "has-discount" | "read-failed" | "unknown";
@@ -145,13 +148,18 @@ export interface Coupon {
  * Where a row's coupon comes from (the review's fix round):
  *   live         Whop answered now (an Approved row)
  *   stored       the stored row for the membership the student has now
+ *                (storedRowApplies: with no membership id on file, the
+ *                student's row)
  *   not-checked  no stored row applies to this membership yet: never
  *                checked, or a membership changed since (an Applied row
- *                says so; Approve asks Whop first)
- *   no-membership  the student's Whop id is missing or is not a
- *                membership's (the webhook has stored a payment's id
- *                there): neither the cron nor Approve can ask Whop, so
- *                nothing blocks the 30% and the row says to check Whop
+ *                says so; Approve asks Whop first, through the student's
+ *                Whop user when the id on file is not a membership's, T-122)
+ *   no-membership  a decided row whose student's Whop id is missing or is
+ *                not a membership's (the webhook has stored a payment's id
+ *                there): the page's own read of the Approved rows asks by
+ *                membership id alone, so the row says to check Whop. Never
+ *                an Applied row since T-122: the cron and Approve find the
+ *                membership through the student's Whop user.
  *   failed       Whop gave no answer now and nothing is stored (an Approved row)
  *   unread       the stored coupons could not be read at all (couponsUnread)
  */
@@ -232,11 +240,12 @@ function priceOf(value: number | string | null | undefined): number | null {
 
 /**
  * The stored coupon for the membership the student has now, or null. A row
- * read from another membership says nothing about this one
- * (membership-discount.ts storedRowApplies).
+ * read from another membership says nothing about this one; with no
+ * membership id on file the student's row counts (membership-discount.ts
+ * storedRowApplies, T-122).
  */
 export function couponOf(row: ThirtyCouponRow | undefined, student: Pick<ThirtyStudent, "whop_membership_id">): Coupon | null {
-  if (!row || !row.whop_membership_id || row.whop_membership_id !== student.whop_membership_id) return null;
+  if (!row || !storedRowApplies(row, student.whop_membership_id)) return null;
   return {
     code: row.promo_code ?? row.promo_code_id ?? null,
     promoCodeId: row.promo_code_id ?? null,
@@ -286,6 +295,41 @@ export function couponWarns(row: Pick<ThirtyRequestRow, "status" | "coupon">): b
  * stays on the row's verdict line for the team.
  */
 export const COUPON_REJECT_REASON = MEMBERSHIP_DISCOUNT_LINE;
+
+/**
+ * What "Approve anyway" skips on an Applied row (the owner's review,
+ * 2026-10-21: a founder or an admin approves past any check), or null where
+ * nothing refused it: "coupon" on a row the coupon refuses (the coupon check
+ * and the rule: the approve route's `overrideCoupon` and `override`), "rule"
+ * where the rule's verdict says no (`override`), and "check" where the
+ * verdict says yes but the approve route refused this row's Approve with a
+ * check (its code "rule": the rule said no, or could not run).
+ */
+export type AnywaySkip = "coupon" | "rule" | "check";
+
+export function anywaySkip(verdict: Pick<Verdict, "ok" | "reason">, refusal: string | null): AnywaySkip | null {
+  if (verdict.reason === "has-discount") return "coupon";
+  if (!verdict.ok) return "rule";
+  return refusal !== null ? "check" : null;
+}
+
+/**
+ * Approve anyway's confirm, asked once before the code is made: what it
+ * skips, in the row's own words, and what it does. `verdictText` is the
+ * row's verdict line, `refusal` the approve route's refusal the row showed.
+ * A skip of the rule still has the coupon checked first, so a discount found
+ * then turns the row to the coupon, whose Approve anyway names it. The
+ * coupon's confirm says nothing about what Whop does with two codes on one
+ * membership: nobody has checked it.
+ */
+export function approveAnywayText(skip: AnywaySkip, verdictText: string, refusal: string | null): string {
+  if (skip === "coupon") {
+    return `Approve anyway skips the coupon check and the 30% rule, and creates the student's Whop code now. ${verdictText}`;
+  }
+  const what = skip === "rule" ? "the 30% rule" : "the check that refused this approval";
+  const said = skip === "rule" ? `The rule says: ${verdictText}` : `The check said: ${refusal ?? ""}`;
+  return `Approve anyway skips ${what}, and creates the student's Whop code now. ${said} A discount already on the membership is still checked first.`;
+}
 
 /** The first payment and the deadline, with no counts: the progress could not be read. */
 function factsWithoutProgress(firstPaidAt: string | null, now: Date): Facts {
@@ -424,7 +468,7 @@ export function judgeRequest(
   return { verdict: toVerdict(raw, explained, facts.deadlinePassed), facts };
 }
 
-/** The verdict for a student whose membership already has a discount on its next renewal: the approve route's words, no override. */
+/** The verdict for a student whose membership already has a discount on its next renewal: the approve route's words. */
 export function couponVerdict(coupon: Coupon): Verdict {
   return { ok: false, reason: "has-discount", text: couponApprovalRefusal(coupon.code), oldCourse: false };
 }
@@ -459,8 +503,9 @@ export function buildThirtyView(
       // loadThirtyData reads every student holding a listed request, or fails.
       const s = students.get(r.student_id)!;
       const stored = couponOf(data.coupons.data?.get(s.id), s);
-      // Whop is asked by membership id only: with no id, or a payment's, nothing can be checked.
-      const askable = isMembershipId(s.whop_membership_id);
+      // Approve asks Whop about any student, through their Whop user when the id on file is not a membership's
+      // (T-122); the Approved rows' read below asks by membership id alone: with no id, or a payment's, it cannot.
+      const askable = r.status === "pending" || isMembershipId(s.whop_membership_id);
       let coupon = stored;
       let couponCheck: CouponCheck =
         data.coupons.data === null ? "unread" : stored ? "stored" : askable ? "not-checked" : "no-membership";

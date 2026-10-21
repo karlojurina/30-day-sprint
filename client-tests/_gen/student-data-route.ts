@@ -8,6 +8,7 @@ import {
   REGIONS_TABLE,
 } from "./stub-server.ts";
 import { currentStreakAsOf, getTodayUtc } from "./streak.ts";
+import { storedRowApplies } from "./membership-discount.ts";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -215,8 +216,10 @@ export async function GET(request: NextRequest) {
   );
 
   // The map's 30% panel reads this (discount.ts membershipDiscounted). A
-  // stored row counts only for the membership it was read from (as
-  // membership-discount.ts storedRowApplies says). A failed read, or a
+  // stored row counts only for the membership it was read from, or, when the
+  // Whop id on file is not a membership's, as the row the check wrote for
+  // this student through their Whop user or a payment (T-122):
+  // membership-discount.ts storedRowApplies. A failed read, or a
   // database without v111, is no flag: the request routes ask Whop
   // themselves before anything is written, so nothing is lost but the
   // panel's early line.
@@ -228,8 +231,7 @@ export async function GET(request: NextRequest) {
     : (membershipDiscountRes.data as { whop_membership_id: string | null; discounted: boolean } | null);
   const membershipDiscounted =
     !!storedDiscount &&
-    !!storedDiscount.whop_membership_id &&
-    storedDiscount.whop_membership_id === student.whop_membership_id &&
+    storedRowApplies(storedDiscount, student.whop_membership_id) &&
     storedDiscount.discounted === true;
   // The client learns THAT a lesson has a video, never which one.
   const lessons = (lessonsRes.data ?? []).map((lesson) => ({

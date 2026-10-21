@@ -16,8 +16,11 @@
  * the way the routes do, so a click and the reload after it show what the
  * team would see: Approve refuses a student whose membership has a discount
  * on its next renewal with the approve route's own sentence and code
- * "has-discount", override or not, and stores what it read, as the route
- * does (checkMembershipDiscount).
+ * "has-discount" (with `override` too), and stores what it read, as the
+ * route does (checkMembershipDiscount); Approve anyway on the coupon's row
+ * (`overrideCoupon`, a founder's or an admin's, the owner's review of
+ * 2026-10-21) passes it. A refusal of the rule carries code "rule", as the
+ * route's does, and a csm's override is refused as the route refuses it.
  *
  *   ?state=full | empty | loading | error   (default full)
  *          partial    full, plus a student whose progress cannot be read
@@ -387,6 +390,16 @@ export function parseFixtureState(value: string | null): FixtureState {
   return STATES.find((s) => s === value) ?? "full";
 }
 
+/** Whose page the dev page draws: Approve anyway is a founder's or an admin's. Default admin (Robin Hale, tm-robin, the member the decisions record). */
+export type FixtureRole = "admin" | "founder" | "csm";
+const ROLES: FixtureRole[] = ["admin", "founder", "csm"];
+export function parseFixtureRole(value: string | null): FixtureRole {
+  return ROLES.find((r) => r === value) ?? "admin";
+}
+
+/** The old course's refusal of an approval it cannot check (the approve route's 409 with no v2 catalog shape). */
+const COURSE_CHANGED = "The course changed and this check cannot run. Nothing was approved.";
+
 /** One call the page made, for world-tests to read (window.__adminCalls on the dev page). */
 export interface FixtureCall {
   name: "loadThirty" | "approve" | "reject" | "markApplied" | "checkCoupon";
@@ -410,6 +423,10 @@ export function fixtureThirtyTransport(opts: {
   reloadFails?: boolean;
   /** Check Whop again gets no answer from Whop (?whop=down). */
   whopDown?: boolean;
+  /** A plain Approve answers the old course's 409 with code "rule" (?approve=coursechanged). */
+  courseChanged?: boolean;
+  /** Whose page (?role=): the stand-in refuses a csm's override, as the approve route does. */
+  role?: FixtureRole;
 }): ThirtyTransport & { calls: FixtureCall[] } {
   const db =
     opts.state === "empty"
@@ -459,8 +476,12 @@ export function fixtureThirtyTransport(opts: {
       return answer;
     },
 
-    approve(id, override) {
-      calls.push({ name: "approve", args: [id, override] });
+    approve(id, override, overrideCoupon) {
+      calls.push({ name: "approve", args: [id, override, overrideCoupon] });
+      // Approve anyway is a founder's or an admin's: the route's 403, in the transport's words for it.
+      if ((override || overrideCoupon) && opts.role === "csm") {
+        return later<{ promoCode: string | null }>({ ok: false, status: 403, error: "Your team account can't do this." });
+      }
       const a = ask(id);
       if (!a) return later<{ promoCode: string | null }>(notFound);
       if (opts.conflict) {
@@ -474,10 +495,11 @@ export function fixtureThirtyTransport(opts: {
         });
       }
       if (a.status !== "pending") return later<{ promoCode: string | null }>({ ok: false, status: 400, error: "Request already processed" });
-      // D5, as the route: Whop now (the stored row when Whop says nothing new), stored, then refused with no override.
+      // D5, as the route: Whop now (the stored row when Whop says nothing new), stored, then refused, with `override`
+      // too. Approve anyway on the coupon's row (`overrideCoupon`) does not ask Whop at all.
       const p = person(a.studentId);
       const now = p?.live ?? p?.stored;
-      if (p && now) {
+      if (p && now && !overrideCoupon) {
         p.stored = now;
         const row = couponRow(p, now, at());
         if (row.discounted) {
@@ -490,9 +512,12 @@ export function fixtureThirtyTransport(opts: {
         }
       }
       if (!override) {
+        if (opts.courseChanged) {
+          return later<{ promoCode: string | null }>({ ok: false, status: 409, error: COURSE_CHANGED, code: "rule" });
+        }
         const verdict = view().requests.find((r) => r.id === id)?.verdict;
         if (!verdict?.ok) {
-          return later<{ promoCode: string | null }>({ ok: false, status: 400, error: "Cannot approve: the rule says no." });
+          return later<{ promoCode: string | null }>({ ok: false, status: 400, error: "Cannot approve: the rule says no.", code: "rule" });
         }
       }
       Object.assign(a, { status: "approved", promoCode: codeFor(a.studentId), promoId: promoIdOf(codeFor(a.studentId)), reviewedAt: at(), reviewedBy: ME });

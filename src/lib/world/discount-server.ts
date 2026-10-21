@@ -17,6 +17,9 @@
  *                          a discount already on the student's next Whop
  *                          renewal (admin rebuild 2, D5): the request routes'
  *                          refusal and the approve route's
+ *   membershipUncheckedRefusal
+ *                          the request routes' refusal when that check could
+ *                          not run (the owner's review, 2026-10-21)
  *
  * Everything fails closed. A read that errors, or comes back empty where a
  * row must exist, means no request and no approval: a believable "you're not
@@ -331,11 +334,34 @@ export function membershipDiscountRefusal(): Extract<RequestDecision, { grant: f
   return { grant: false, status: 400, state: state.kind, error: discountRefusalMessage(state) };
 }
 
+/** What the student reads when the coupon check could not run (membershipUncheckedRefusal), word for word. */
+export const MEMBERSHIP_UNCHECKED = "We couldn't check your membership just now. Try again in a minute.";
+
+/**
+ * Both request routes on the new course, once decideDiscountRequest has
+ * granted: the coupon check could not run (the owner's review, 2026-10-21:
+ * applying fails closed, so a student whose membership may hold a code never
+ * gets a request in). Whop gave no answer and nothing is stored for the membership the
+ * student has now (checkMembershipDiscount's source "none": Whop down or
+ * refusing the key, no key or no course product on the deployment, the
+ * student's row unreadable), so nothing is written and the student is asked
+ * to try again. It used to let the request through and leave the coupon to
+ * the approve route. Since T-122 a Whop id on file that is missing, a
+ * payment's, or one Whop does not know is no reason any more: the check
+ * finds the membership through the student's Whop user, or judges the
+ * latest real payment.
+ */
+export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: false }> {
+  return { grant: false, status: 503, state: "read-failed", error: MEMBERSHIP_UNCHECKED };
+}
+
 /**
  * The approve route's refusal for a student whose membership already has a
  * discount on its next renewal (D5), and the admin 30% page's verdict for
- * one. No "Approve anyway" passes it. `code` is the code's name, or its Whop
- * promo id when the name could not be read.
+ * one. Since the owner's review (2026-10-21) a founder's or an admin's
+ * "Approve anyway" on such a row passes it (the route's `overrideCoupon`);
+ * nothing else does. `code` is the code's name, or its Whop promo id when the
+ * name could not be read.
  */
 export function couponApprovalRefusal(code: string | null): string {
   return `This student already has a discount on their membership (${code ?? "code not known"}).`;

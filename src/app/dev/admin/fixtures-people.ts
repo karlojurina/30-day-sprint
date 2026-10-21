@@ -29,6 +29,7 @@
 
 import type { Answer } from "@/lib/admin/admin-transport";
 import { MONTHLY_97_PLAN_IDS } from "@/lib/constants";
+import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE } from "@/lib/world/discount";
 import type { InsightsTransport, PeopleTransport, TasksTransport } from "@/lib/admin/people-transport";
 import type { CourseActivity } from "@/lib/useJourneyPaceCounts";
 import type { OutreachInsights } from "@/lib/outreach-insights";
@@ -176,11 +177,16 @@ const PEOPLE: Person[] = [
     username: "max.featherstonehaugh.smythe", status: "active", paid: "2026-10-09T10:00:00.000Z", lastActive: "2026-10-21T06:00:00.000Z",
     done: 14, lastLesson: "2026-10-21T05:30:00.000Z", streak: { current: 6, last: "2026-10-21" },
   },
-  // Before the launch: on All students, never on the journey.
+  // Paid in September, before 1 October: on neither All students nor the journey (the owner's review, 2026-10-21).
   {
     id: "p-leo", name: "Leo Hartmann", email: "leo@example.com", username: "leo.h", status: "active",
     paid: "2026-09-15T10:00:00.000Z", lastActive: "2026-10-20T10:00:00.000Z", done: 11, lastLesson: "2026-10-20T09:00:00.000Z",
     request: { status: "pending", at: "2026-10-14T09:00:00.000Z" },
+  },
+  // Paid on 2 October, before the launch, and the membership expired: on All students under Ended, never on the journey.
+  {
+    id: "p-hana", name: "Hana Sato", email: "hana@example.com", username: "hana.s", status: "expired",
+    paid: "2026-10-02T09:00:00.000Z", lastActive: "2026-10-05T09:00:00.000Z", done: 0,
   },
   {
     id: "p-ruby", name: "Ruby Okafor", email: "ruby@example.com", username: "ruby.ok", status: "canceled",
@@ -212,6 +218,8 @@ const PEOPLE: Person[] = [
 
 /** The plans line of All students and the journey, as the database draws it for their reads (`whop_plan_id in MONTHLY_97_PLAN_IDS`). */
 const onA97Plan = (p: Person) => MONTHLY_97_PLAN_IDS.includes(p.plan ?? VISIBLE_97);
+/** All students' date line, as the database draws it (`first_paid_at >= DISCOUNT_ELIGIBLE_FROM`, 1 October in Croatia). */
+const paidFromOctober = (p: Person) => p.paid >= DISCOUNT_ELIGIBLE_FROM;
 
 /** The journey's ?at=later: more students, paid in September and October, read on 12 November. */
 const LATER_PEOPLE: Person[] = [
@@ -242,13 +250,6 @@ function completionsOf(p: Person) {
     skipped_at: null,
     discord_message_link: l.requires_action ? `https://discord.com/channels/100000000000000001/100000000000000002/1000000000000${p.done}0${l.id.length}` : null,
   }));
-}
-
-/** The area of the furthest counted lesson, as student_current_region gives it. */
-function areaOf(p: Person): string | null {
-  if (p.done === 0) return null;
-  const counting = LESSONS.filter((l) => l.counts_toward_progress !== false);
-  return counting[p.done - 1]?.region_id ?? null;
 }
 
 function courseOf(people: Person[], failed: boolean): CourseActivity {
@@ -288,13 +289,15 @@ export function fixturePeopleTransport(opts: { state: PeopleState; reloadFails?:
       if (opts.state === "loading") return never();
       if (failNow()) return later(errAnswer(`Couldn't load the students (${READ_FAILED}).`));
       served++;
-      // The reader's own filters, applied here as the database applies them: a $97 plan and a first payment (every person here has one).
+      // The reader's own filters, applied here as the database applies them: a $97 plan and a first payment from 1
+      // October; then the progress and the last lessons of those students alone.
+      const listed = people.filter((p) => onA97Plan(p) && paidFromOctober(p));
       const reads: StudentsListReads & { students: { ok: true; data: ListStudent[] } } = {
-        students: { ok: true, data: people.filter(onA97Plan).map(listStudent) },
-        progress: partial ? bad() : ok(people.filter((p) => p.done > 0).map((p) => ({ student_id: p.id, completed_count: p.done }))),
+        students: { ok: true, data: listed.map(listStudent) },
+        progress: partial ? bad() : ok(listed.filter((p) => p.done > 0).map((p) => ({ student_id: p.id, completed_count: p.done }))),
         countingLessons: ok(COUNTING),
       };
-      return later(okAnswer(buildStudentsList(reads, courseOf(people, partial), now)));
+      return later(okAnswer(buildStudentsList(reads, courseOf(listed, partial), now)));
     },
 
     loadStudent(studentId) {
@@ -352,28 +355,25 @@ export function fixturePeopleTransport(opts: { state: PeopleState; reloadFails?:
       if (opts.state === "loading") return never();
       if (failNow()) return later(errAnswer(`Couldn't load the students on the journey (${READ_FAILED}).`));
       served++;
-      // The reader's own filters, applied here as the database applies them.
+      // The reader's own filters, applied here as the database applies them; then the progress and the last lessons of
+      // the students on the board alone.
       const onBoard = people.filter(
-        (p) => !p.noWhopMembership && ["active", "past_due", "canceled"].includes(p.status) && onA97Plan(p) && p.paid >= "2026-10-08T22:00:00.000Z",
+        (p) => !p.noWhopMembership && ["active", "past_due", "canceled"].includes(p.status) && onA97Plan(p) && p.paid >= DISCOUNT_LAUNCH_DATE,
       );
       const students: JourneyStudent[] = onBoard.map((p) => ({
         id: p.id,
         name: p.name,
         email: p.email,
-        discord_username: p.username ?? null,
         membership_status: p.status,
         first_paid_at: p.paid,
         last_active_at: p.lastActive ?? null,
-        cancel_scheduled_at: p.canceling ?? null,
       }));
       const reads: JourneyReads & { students: { ok: true; data: JourneyStudent[] } } = {
         students: { ok: true, data: students },
         progress: partial ? bad() : ok(onBoard.filter((p) => p.done > 0).map((p) => ({ student_id: p.id, completed_count: p.done }))),
-        currentArea: partial ? bad() : ok(onBoard.flatMap((p) => (areaOf(p) ? [{ student_id: p.id, current_region: areaOf(p) as string }] : []))),
-        areas: ok(REGIONS),
         countingLessons: ok(COUNTING),
       };
-      return later(okAnswer(buildJourney(reads, courseOf(people, partial), now)));
+      return later(okAnswer(buildJourney(reads, courseOf(onBoard, partial), now)));
     },
 
     setExempt(studentId, exempt) {

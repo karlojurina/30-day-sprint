@@ -24,6 +24,14 @@
  * The legacy /api/discounts/request route is still wired and works
  * (the W2.6 hook + admin queue still depend on a pending row landing
  * in discount_requests) — but the dashboard widget now points here.
+ *
+ * The owner's review (2026-10-21), before anything is written: every active
+ * question marked is_required must have an answer (requiredAnswersRefusal,
+ * src/lib/discount-feedback.ts: the forms' own rule, a 400 in plain words,
+ * and a 503 when the questions cannot be read), and on the new course the
+ * coupon check must have run (membershipUncheckedRefusal: Whop gave no
+ * answer and nothing is stored is a 503 asking the student to try again,
+ * where the request used to go through).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -33,11 +41,13 @@ import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
 import { checkMembershipDiscount } from "@/lib/membership-discount";
+import { requiredAnswersRefusal } from "@/lib/discount-feedback";
 import {
   SAVE_FAILED,
   decideDiscountRequest,
   loadDiscountReads,
   membershipDiscountRefusal,
+  membershipUncheckedRefusal,
   secondPendingRequest,
 } from "@/lib/world/discount-server";
 
@@ -108,6 +118,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // The survey (the owner's review, 2026-10-21): every required question
+  // answered, as the form asks, or nothing is written.
+  const unanswered = await requiredAnswersRefusal(supabase, rawAnswers as IncomingAnswer[]);
+  if (unanswered) {
+    console.error(`[discounts/submit-feedback] student ${studentId}: ${unanswered.log}`);
+    return NextResponse.json({ error: unanswered.error }, { status: unanswered.status });
+  }
+
   if (CATALOG_IS_V2) {
     // The new course: the same rule and the same refusals as
     // /api/discounts/request (src/lib/world/discount.ts), decided before
@@ -122,10 +140,18 @@ export async function POST(request: NextRequest) {
       );
     }
     // The coupon (admin rebuild 2, D5), as /api/discounts/request checks it:
-    // the map's Apply sends here whenever the team has questions.
+    // the map's Apply sends here whenever the team has questions. A check
+    // that could not run refuses too (the owner's review, 2026-10-21).
     const coupon = await checkMembershipDiscount(supabase, studentId);
     if (coupon.discounted) {
       const refusal = membershipDiscountRefusal();
+      return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
+    }
+    if (coupon.source === "none") {
+      console.error(
+        `[discounts/submit-feedback] student ${studentId}: nothing written, the coupon check could not run (${coupon.liveFail ?? "no answer"}) and nothing is stored`,
+      );
+      const refusal = membershipUncheckedRefusal();
       return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
     }
   } else {

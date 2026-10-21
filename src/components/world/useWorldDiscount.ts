@@ -33,9 +33,11 @@ import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/d
  *
  * WITH NONE HELD Apply first reads them again
  * (StudentContext.loadDiscountFeedbackQuestions): the visit's own read may
- * have failed, and /api/discounts/request takes a plain request whether or
- * not there are questions. A read that fails sends nothing and says so; one
- * that finds some opens the form.
+ * have failed, and a plain request carries no answers (since the owner's
+ * review of 2026-10-21 /api/discounts/request refuses one while a required
+ * question is active; before, it took one whether or not there were
+ * questions). A read that fails sends nothing and says so; one that finds
+ * some opens the form.
  *
  * WITH NO ACTIVE QUESTIONS Apply sends the plain request: it posts to
  * /api/discounts/request exactly as the old dashboard's

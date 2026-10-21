@@ -24,7 +24,7 @@ import { adminTransport } from "@/lib/admin/admin-transport";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { DISCOUNT_STATUS } from "@/lib/admin/discount-status";
-import { COUPON_REJECT_REASON, couponWarns } from "@/lib/admin/thirty-view";
+import { COUPON_REJECT_REASON, anywaySkip, approveAnywayText, couponWarns } from "@/lib/admin/thirty-view";
 import type {
   StudentBrief,
   TeamRef,
@@ -50,19 +50,30 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * line (meets the rule, or why not), the coupon, and the actions, on the
  * right from 768px wide and under the words on a phone (RowSplit): Approve
  * and Reject (with a reason) on Applied, Mark code applied on Approved.
- * "Approve anyway" is a small link in the place of Approve after a refusal,
- * never after the coupon's: a student whose Whop membership already has a
- * discount on its next renewal gets no 30%, and the approve route refuses
- * it with no override (D5). Such a row (the render review's fix round) has
- * no Approve at all: Reject is its one decision, its reason filled in with
- * the map's own sentence to the student ("You can't apply for this discount
+ *
+ * APPROVE ANYWAY (the owner's review, 2026-10-21: approving past any check).
+ * A founder or an admin (`canApproveAnyway`; the
+ * approve route refuses a csm's override too) gets "Approve anyway", a small
+ * link, on every Applied row a check refuses: the rule's verdict, the
+ * coupon's, and a refusal the approve route answered when Approve was
+ * pressed (its code "rule": the rule said no, or could not run, as "The
+ * course changed and this check cannot run"). It asks once, inline, naming
+ * what it skips, then creates the code: `override` skips the rule, and on a
+ * row the coupon refuses `overrideCoupon` skips the coupon check as well. A
+ * csm sees no Approve anyway: Reject, and Approve again after a refusal of
+ * the route, which may have been a read that failed.
+ *
+ * A student whose Whop membership already has a discount on its next
+ * renewal gets no 30% from Approve (D5). Such a row (the render review's fix
+ * round) has no Approve: Reject is raised, its reason filled in with the
+ * map's own sentence to the student ("You can't apply for this discount
  * because you already have a discount applied to your account.", since the
  * render review's second round: the student reads the reason on the map),
- * which the team can change before sending. In Approve's place it has "Check
- * Whop again", a small link like Approve anyway: Whop is asked now for that
- * one student (POST /api/admin/thirty/check-coupon), the answer is stored,
- * and the list is read again, so a coupon taken off the membership since the
- * stored read brings Approve back. The verdicts, the counts
+ * which the team can change before sending. It also has "Check Whop again",
+ * a small link like Approve anyway: Whop is asked now for that one student
+ * (POST /api/admin/thirty/check-coupon), the answer is stored, and the list
+ * is read again, so a coupon taken off the membership since the stored read
+ * brings Approve back. The verdicts, the counts
  * and the coupons come from GET /api/admin/thirty, which runs the student
  * app's own rule and asks Whop now about the Approved rows' coupons; this
  * file only shows them and sends the team's decisions to the existing
@@ -72,7 +83,9 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * (Approve cannot ask Whop then, and nothing blocks the 30%) says to check
  * Whop by hand; an Approved row says when Whop could not be asked. The
  * team's own 30% code on a membership (an ECOM30 code, or the request's own
- * Whop promo id: thirty-view.ts, Coupon.ours) is never warned about.
+ * Whop promo id: thirty-view.ts, Coupon.ours) is never warned about. When the
+ * stored coupons cannot be read at all, the rows show no coupon and the page
+ * says nothing more (the owner's review: the sentence above the list went).
  *
  * Buttons (the brand kit: one ink primary at most, verbs that say what
  * happens): Approve, Mark code applied and Refresh are raised; Reject is
@@ -161,6 +174,13 @@ function byWhom(ref: TeamRef | null): string {
 type RowCall = "approve" | "reject" | "applied" | "check";
 
 /**
+ * How Approve asks: "plain" runs every check; Approve anyway skips the 30%
+ * rule ("rule", the route's `override`), or on a row the coupon refuses the
+ * coupon check and the rule ("coupon", `overrideCoupon` too).
+ */
+type ApproveHow = "plain" | "rule" | "coupon";
+
+/**
  * The page's own words for a call the route refused. A 409 is the route's
  * sentence as it is (it names the Whop code to delete), and so is the
  * coupon's refusal (it names the code on the membership). The approve route's
@@ -187,7 +207,14 @@ function listIsStale(kind: RowCall, status: number): boolean {
   return status === 409 || status === 404 || (status === 400 && (kind === "approve" || kind === "applied"));
 }
 
-export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyTransport }) {
+export function ThirtyView({
+  transport = adminTransport,
+  canApproveAnyway = false,
+}: {
+  transport?: ThirtyTransport;
+  /** A founder or an admin: Approve anyway on every Applied row a check refuses (the approve route allows no one else). */
+  canApproveAnyway?: boolean;
+}) {
   const params = useSearchParams();
   const pathname = usePathname();
   const student = params.get("student") || null;
@@ -202,6 +229,12 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   const [stale, setStale] = useState(false);
   /** The requests changed since the last read that worked: their buttons stay off until a read works. */
   const [locked, setLocked] = useState<ReadonlySet<string>>(() => new Set());
+  /**
+   * The rows whose Approve the route refused with code "rule" (the rule said
+   * no, or a check could not run), with the sentence it said: Approve anyway
+   * is offered on them whatever the list's verdict.
+   */
+  const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [pickedTab, setPickedTab] = useState<TabKey | null>(null);
   const seq = useRef(0);
 
@@ -283,8 +316,22 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     return null;
   }
 
-  async function approve(row: ThirtyRequestRow, override: boolean): RowResult {
-    const r = await transport.approve(row.id, override);
+  /**
+   * Approve, or Approve anyway (`how`). A refusal of a check (the route's
+   * code "rule": the rule said no, or a check could not run, as the 409
+   * "The course changed and this check cannot run") stays on the row in the
+   * route's words or the page's, and is remembered, so a founder or an admin
+   * gets Approve anyway there even where the list's verdict says yes; the
+   * list is read again, since its verdict may have changed.
+   */
+  async function approve(row: ThirtyRequestRow, how: ApproveHow): RowResult {
+    const r = await transport.approve(row.id, how !== "plain", how === "coupon");
+    if (!r.ok && r.code === "rule") {
+      const text = decisionError("approve", r);
+      setRefusals((cur) => new Map(cur).set(row.id, text));
+      await reload();
+      return text;
+    }
     if (!r.ok) return refused("approve", row, r);
     lock(row.id);
     const name = studentName(row.student);
@@ -410,11 +457,6 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
           Couldn&apos;t read the course&apos;s videos, so no request has a verdict. Press Refresh to try again.
         </Warning>
       )}
-      {data.couponsUnread && (
-        <Warning>
-          Couldn&apos;t read the membership coupons, so no row shows one. Approve still asks Whop before it makes a code.
-        </Warning>
-      )}
 
       {student && (
         <div
@@ -457,6 +499,8 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
                 row={row}
                 locked={locked.has(row.id)}
                 stale={stale}
+                canApproveAnyway={canApproveAnyway}
+                refusal={refusals.get(row.id) ?? null}
                 onApprove={approve}
                 onReject={reject}
                 onCheck={checkCoupon}
@@ -658,16 +702,19 @@ function verdictDetail(row: ThirtyRequestRow, v: Verdict): string[] {
 
 /**
  * An Applied row: the date applied, the verdict line, and the actions on the
- * right (RowSplit): Approve and Reject, Approve anyway in Approve's place
- * after a refusal that is not the coupon's. A row the coupon refuses has no
- * Approve and no Approve anyway: Reject is its one decision, raised, and its
- * reason starts filled in (the render review's fix round); "Check Whop
- * again" stands in Approve's place (its second round).
+ * right (RowSplit): Approve and Reject. A row the coupon refuses has no
+ * Approve: Reject is raised, its reason starts filled in (the render
+ * review's fix round), and "Check Whop again" stands beside it (its second
+ * round). For a founder or an admin, "Approve anyway" stands in Approve's
+ * place on every row a check refuses, the coupon's too, and after a refusal
+ * the route answered (the owner's review, 2026-10-21).
  */
 function PendingRow({
   row,
   locked,
   stale,
+  canApproveAnyway,
+  refusal,
   onApprove,
   onReject,
   onCheck,
@@ -676,7 +723,11 @@ function PendingRow({
   /** Decided since the last read that worked: its buttons stay off until a read works. */
   locked: boolean;
   stale: boolean;
-  onApprove: (row: ThirtyRequestRow, override: boolean) => RowResult;
+  /** A founder or an admin. */
+  canApproveAnyway: boolean;
+  /** The approve route's refusal of this row's Approve (its code "rule"), in the words the row showed; null when none. */
+  refusal: string | null;
+  onApprove: (row: ThirtyRequestRow, how: ApproveHow) => RowResult;
   onReject: (row: ThirtyRequestRow, reason: string | null) => RowResult;
   /** Check Whop again: Whop now for this student, stored, then the list read again. */
   onCheck: (row: ThirtyRequestRow) => RowResult;
@@ -687,9 +738,10 @@ function PendingRow({
     text: "The rule could not judge this request. Judge it by hand.",
     oldCourse: false,
   };
-  // D5: the coupon's refusal has no override, so no Approve and no Approve anyway after it.
+  // D5: no Approve beside the coupon's verdict. Approve anyway passes it (the owner's review), naming it.
   const coupon = verdict.reason === "has-discount";
-  const canOverride = !verdict.ok && !coupon;
+  const skip = anywaySkip(verdict, refusal);
+  const canOverride = canApproveAnyway && skip !== null;
   const [busy, setBusy] = useState<null | "approve" | "override" | "reject" | "check">(null);
   const [confirm, setConfirm] = useState<null | "override" | "reject">(null);
   const [reason, setReason] = useState("");
@@ -712,19 +764,10 @@ function PendingRow({
 
   const actions = (
     <>
-      {/* Approve; in its place "Approve anyway" after a refusal that is not the coupon's, and "Check Whop again" on the
-          coupon's row: small links, as tall as Reject. */}
-      {canOverride ? (
-        <button
-          type="button"
-          style={{ ...SMALL_LINK, padding: "0 6px", opacity: off ? 0.5 : 1, cursor: off ? "not-allowed" : "pointer" }}
-          disabled={off}
-          aria-expanded={confirm === "override"}
-          onClick={() => setConfirm((c) => (c === "override" ? null : "override"))}
-        >
-          Approve anyway
-        </button>
-      ) : coupon ? (
+      {/* Small links, as tall as Reject: "Check Whop again" on the coupon's row, then, for a founder or an admin,
+          "Approve anyway" wherever a check refuses (the coupon's row too). Approve is on where the verdict says yes
+          and no Approve anyway stands in its place. */}
+      {coupon && (
         <button
           type="button"
           data-check-whop=""
@@ -742,13 +785,26 @@ function PendingRow({
         >
           {busy === "check" ? "Checking Whop" : "Check Whop again"}
         </button>
-      ) : (
+      )}
+      {canOverride && (
+        <button
+          type="button"
+          data-approve-anyway={skip ?? ""}
+          style={{ ...SMALL_LINK, padding: "0 6px", opacity: off ? 0.5 : 1, cursor: off ? "not-allowed" : "pointer" }}
+          disabled={off}
+          aria-expanded={confirm === "override"}
+          onClick={() => setConfirm((c) => (c === "override" ? null : "override"))}
+        >
+          Approve anyway
+        </button>
+      )}
+      {!coupon && verdict.ok && !canOverride && (
         <Button
           variant="raised"
           size="md"
           disabled={locked || (busy !== null && busy !== "approve")}
           busy={busy === "approve"}
-          onClick={() => void run("approve", () => onApprove(row, false))}
+          onClick={() => void run("approve", () => onApprove(row, "plain"))}
         >
           Approve
         </Button>
@@ -803,26 +859,17 @@ function PendingRow({
                 <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>Coupon not checked yet. Approve asks Whop first.</span>
               </p>
             )}
-            {row.couponCheck === "no-membership" && (
-              <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="no-membership">
-                <Dot color="var(--color-warning)" />
-                <span style={{ ...T.body, lineHeight: 1.5 }}>
-                  Coupon not checked: the student&apos;s Whop membership is not on file, so Approve can&apos;t ask Whop. Check
-                  Whop before you approve.
-                </span>
-              </p>
-            )}
             {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
           </>
         }
         actions={actions}
       />
 
-      {confirm === "override" && canOverride && (
+      {confirm === "override" && canOverride && skip && (
         <div style={PANEL}>
-          <p style={{ ...T.body, lineHeight: 1.5 }}>
-            Approve anyway skips the 30% rule and creates the student&apos;s Whop code now. A discount already on the
-            student&apos;s membership still stops it.
+          {/* Asked once, naming what it skips (the owner's review, 2026-10-21). */}
+          <p data-approve-anyway-confirm="" style={{ ...T.body, lineHeight: 1.5 }}>
+            {approveAnywayText(skip, verdict.text, refusal)}
           </p>
           <div className="flex flex-wrap" style={{ gap: 8 }}>
             <Button
@@ -830,7 +877,7 @@ function PendingRow({
               size="md"
               disabled={locked}
               busy={busy === "override"}
-              onClick={() => void run("override", () => onApprove(row, true))}
+              onClick={() => void run("override", () => onApprove(row, skip === "coupon" ? "coupon" : "rule"))}
             >
               Yes, create the code
             </Button>

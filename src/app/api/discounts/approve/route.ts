@@ -21,10 +21,24 @@ import {
  *      rule says and with `override` too. Whop is asked now
  *      (checkMembershipDiscount); when it does not answer, the stored row
  *      decides; with neither, nothing blocks. The refusal is a 400 with
- *      code "has-discount" and names the code.
+ *      code "has-discount" and names the code. `overrideCoupon` skips it
+ *      (below).
  *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
- *      the ads are not checked (Lovro's decision: the 30% already asks for
- *      61 videos), so students.ad_submissions_verified decides nothing here.
+ *      the ads are not checked (the owner's decision: the 30% already asks
+ *      for 61 videos), so students.ad_submissions_verified decides nothing
+ *      here. A refusal of the rule, or of a read it needs (the check could
+ *      not run), carries code "rule": the 30% page then offers Approve
+ *      anyway, which `override` is.
+ *
+ * APPROVE ANYWAY (the owner's review, 2026-10-21: a founder or an admin can
+ * approve past any check). `override` skips the 30% rule; `overrideCoupon`
+ * skips the coupon check, so a code is made for a student whose membership
+ * already has a discount (what Whop does with the two codes on one
+ * membership has not been checked). Each is
+ * a founder's or an admin's: a csm sending either is refused with a 403
+ * before anything is read. The page sends `override` alone after a refusal
+ * of the rule, and both on a row the coupon refuses; its confirm names what
+ * is skipped.
  *   2. Call Whop API to generate a 30%-off, 1-month, single-use promo code
  *   3. Store promo_code + whop_promo_id + status='approved' on our row
  *   4. Return the code so the admin UI can show it for copy-paste
@@ -48,11 +62,19 @@ import {
  * the code can take off is set here, by WHOP_DISCOUNT_PLAN_IDS below.
  *
  * Body:
- *   requestId  — id of the discount_requests row (required)
- *   reviewerId — ignored. The reviewer recorded (reviewed_by, and the
- *                "Generate anyway" log line) is the logged-in team member,
- *                never what the browser sends (admin PRD review, 2026-10-19).
+ *   requestId      — id of the discount_requests row (required)
+ *   override       — Approve anyway: skips the 30% rule (founder or admin)
+ *   overrideCoupon — Approve anyway on a row the coupon refuses: skips the
+ *                    coupon check (founder or admin)
+ *   reviewerId     — ignored. The reviewer recorded (reviewed_by, and the
+ *                    "Generate anyway" log line) is the logged-in team
+ *                    member, never what the browser sends (admin PRD review,
+ *                    2026-10-19).
  */
+
+/** The refusals Approve anyway skips with `override`: the 30% rule said no, or a read it needs failed. */
+const RULE = { code: "rule" } as const;
+
 export async function POST(request: NextRequest) {
   // v75.31: TEAM-only. Previously this route was anonymous — anyone
   // who knew a requestId could trigger Whop promo code minting.
@@ -62,17 +84,26 @@ export async function POST(request: NextRequest) {
   const supabase = auth.supabase;
 
   const body = await request.json();
-  const { requestId, override } = body as {
+  const { requestId, override, overrideCoupon } = body as {
     requestId?: string;
     // v77: team can force-approve past the eligibility gates
     // (missing first_paid_at, R1+R2 completion, window).
     // The admin reviews every application manually and is the control —
     // surfaced as the "Generate anyway" button in the admin UI.
     override?: boolean;
+    // The owner's review (2026-10-21): past the coupon check too.
+    overrideCoupon?: boolean;
   };
 
   if (!requestId) {
     return NextResponse.json({ error: "Missing requestId" }, { status: 400 });
+  }
+
+  // Approve anyway is a founder's or an admin's (the owner's review,
+  // 2026-10-21): the page shows it to them alone, and a csm's override is
+  // refused here before anything is read or made.
+  if ((override || overrideCoupon) && auth.teamMember.role !== "founder" && auth.teamMember.role !== "admin") {
+    return NextResponse.json({ error: "Only a founder or an admin can approve past a check." }, { status: 403 });
   }
 
   const { data: discountReq, error: fetchError } = await supabase
@@ -103,13 +134,17 @@ export async function POST(request: NextRequest) {
   }
 
   // D5: a discount already on the next renewal, before the rule and before
-  // any override. No Whop code is made for this student.
-  const coupon = await checkMembershipDiscount(supabase, discountReq.student_id);
-  if (coupon.discounted) {
-    return NextResponse.json(
-      { error: couponApprovalRefusal(coupon.code), code: "has-discount" },
-      { status: 400 },
-    );
+  // `override`. No Whop code is made for this student, unless a founder or an
+  // admin pressed Approve anyway on the row the coupon refuses
+  // (`overrideCoupon`): then Whop is not asked at all.
+  if (!overrideCoupon) {
+    const coupon = await checkMembershipDiscount(supabase, discountReq.student_id);
+    if (coupon.discounted) {
+      return NextResponse.json(
+        { error: couponApprovalRefusal(coupon.code), code: "has-discount" },
+        { status: 400 },
+      );
+    }
   }
 
   if (CATALOG_IS_V2) {
@@ -131,7 +166,7 @@ export async function POST(request: NextRequest) {
           `[discount approve] request ${requestId}: nothing approved, the course switch could not be read: ${e instanceof Error ? e.message : String(e)}`,
         );
         return NextResponse.json(
-          { error: "Couldn't read the course switch date, so nothing was approved. Try again." },
+          { error: "Couldn't read the course switch date, so nothing was approved. Try again.", ...RULE },
           { status: 500 },
         );
       }
@@ -146,7 +181,7 @@ export async function POST(request: NextRequest) {
       }
       if (!verdict.ok) {
         if (verdict.log) console.error(`[discount approve] request ${requestId}: ${verdict.log}`);
-        return NextResponse.json({ error: verdict.error }, { status: verdict.status });
+        return NextResponse.json({ error: verdict.error, ...RULE }, { status: verdict.status });
       }
     }
   } else {
@@ -163,6 +198,7 @@ export async function POST(request: NextRequest) {
         {
           error:
             "Cannot approve: student has no first_paid_at on file. Run the Whop sync (Refresh on /admin) to backfill, then retry. If still NULL, this student's Whop membership history needs manual review.",
+          ...RULE,
         },
         { status: 400 },
       );
@@ -197,7 +233,7 @@ export async function POST(request: NextRequest) {
     // "Generate anyway" skips the checks, as it does today.
     if (!override && required.length === 0) {
       return NextResponse.json(
-        { error: "The course changed and this check cannot run. Nothing was approved." },
+        { error: "The course changed and this check cannot run. Nothing was approved.", ...RULE },
         { status: 409 },
       );
     }
@@ -228,7 +264,7 @@ export async function POST(request: NextRequest) {
         : watchDone || skipped;
       if (!override && !fullyDone) {
         return NextResponse.json(
-          { error: "Student has not completed all required R1 + R2 lessons" },
+          { error: "Student has not completed all required R1 + R2 lessons", ...RULE },
           { status: 400 }
         );
       }
@@ -242,15 +278,18 @@ export async function POST(request: NextRequest) {
 
     if (!override && latestCompletion > deadline) {
       return NextResponse.json(
-        { error: "Student finished R1 + R2 after the discount window closed" },
+        { error: "Student finished R1 + R2 after the discount window closed", ...RULE },
         { status: 400 }
       );
     }
   }
 
-  if (override) {
+  if (override || overrideCoupon) {
+    const skipped = [override ? "Eligibility gates skipped." : null, overrideCoupon ? "The coupon check skipped." : null]
+      .filter(Boolean)
+      .join(" ");
     console.warn(
-      `[discount approve] OVERRIDE by team member ${auth.teamMember.id}, request ${requestId}, student ${discountReq.student_id}. Eligibility gates skipped.`,
+      `[discount approve] OVERRIDE by team member ${auth.teamMember.id}, request ${requestId}, student ${discountReq.student_id}. ${skipped}`,
     );
   }
 

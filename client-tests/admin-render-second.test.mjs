@@ -106,7 +106,9 @@ const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/
 
 // ── The 30%: Check Whop again ───────────────────────────────────────────────
 {
-  ok(/\) : coupon \? \(\s*<button[\s\S]*?data-check-whop=""[\s\S]*?onCheck\(row\)[\s\S]*?\{busy === "check" \? "Checking Whop" : "Check Whop again"\}\s*<\/button>\s*\) : \(\s*<Button/.test(pending),
+  // Since the owner's review (2026-10-21) a founder's or an admin's Approve anyway stands beside it (admin-owner-review.test.mjs).
+  ok(/\{coupon && \(\s*<button[\s\S]*?data-check-whop=""[\s\S]*?onCheck\(row\)[\s\S]*?\{busy === "check" \? "Checking Whop" : "Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
+       && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button/.test(pending),
      'the coupon\'s row: "Check Whop again" in Approve\'s place ("Checking Whop" while Whop is asked), and still no Approve')
   ok(/data-check-whop=""\s*style=\{\{ \.\.\.SMALL_LINK, padding: "0 6px"/.test(pending), 'a small link, as Approve anyway is (SMALL_LINK: 13px words, a 44px target)')
   ok(/if \(!e\) setReason\(\(cur\) => \(cur === COUPON_REJECT_REASON \? "" : cur\)\);/.test(pending),
@@ -240,7 +242,8 @@ console.log('\n=== The name part: a long username, a name nothing opens from ===
       if (!/className="flex flex-wrap/.test(src.slice(Math.max(0, m.index - 320), m.index))) unwrapped.push(`${f}@${m.index}`)
     }
   }
-  ok(uses >= 8 && unwrapped.length === 0, `every StudentName with a username sits in a wrapping flex line (${uses} of them in ${files.length} files)`, unwrapped.join(', '))
+  // 7 since the owner's review (2026-10-21): a journey card names the student with no username.
+  ok(uses >= 7 && unwrapped.length === 0, `every StudentName with a username sits in a wrapping flex line (${uses} of them in ${files.length} files)`, unwrapped.join(', '))
   const students = fromSrc('src/components/admin/students/StudentsView.tsx')
   ok(/<p title=\{row\.name\} style=\{\{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" \}\}>/.test(students)
        && /title=\{row\.username \? `@\$\{row\.username\}` : undefined\}/.test(students),

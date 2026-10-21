@@ -15,7 +15,9 @@
  *                       first renewals come: never 0%, and never the rate of
  *                       the students from before the launch.
  *   Bounty Program      unchanged: the bounty stamps of the shared population
- *                       per UTC day for 14 days, and all of them.
+ *                       per UTC day for 14 days, and all of them. Since the
+ *                       owner's review (2026-10-21) also the 14 days before
+ *                       them, for the arrow beside the number (bountyTrend).
  *   Open tasks          the database's count of the open tasks the Tasks page
  *                       lists, from admin_config.tasks_reset_at on once the
  *                       tasks reset (v109) has run.
@@ -380,26 +382,51 @@ export function monthTwo(students: DashStudent[], days: string[], nowMs: number)
 export interface Bounty {
   /** Stamps in the 14 days. */
   last14: number;
+  /**
+   * Stamps in the 14 UTC days before them (the owner's review, 2026-10-21):
+   * what the arrow beside the 14-day number compares with (bountyTrend).
+   */
+  previous14: number;
   /** Every stamp of the population. */
   allTime: number;
   /** Stamps per UTC day. */
   line: Point[];
 }
 
-/** Unchanged: the bounty stamps of the students in the shared population, per UTC day, and all of them. */
+/**
+ * Unchanged: the bounty stamps of the students in the shared population, per
+ * UTC day, and all of them; with the count of the 14 UTC days before the
+ * window, for the arrow.
+ */
 export function bounty(students: DashStudent[], stamps: BountyStamp[], days: string[]): Bounty {
   const ids = new Set(students.map((s) => s.id));
   const mine = stamps.filter((m) => m.bounty_access_claimed_at && ids.has(m.student_id));
   const perDay = new Map(days.map((d) => [d, 0] as [string, number]));
+  // The 14 days before the window: from 14 days before its first day, up to that day.
+  const first = days[0] ?? null;
+  const before = first ? utcDate(Date.parse(`${first}T00:00:00.000Z`) - TREND_DAYS * DAY_MS) : null;
+  let previous14 = 0;
   for (const m of mine) {
     const t = Date.parse(m.bounty_access_claimed_at!);
     if (!Number.isFinite(t)) continue;
     const d = utcDate(t);
     const n = perDay.get(d);
     if (n !== undefined) perDay.set(d, n + 1);
+    else if (first && before && d >= before && d < first) previous14 += 1;
   }
   const line = days.map((date) => ({ date, value: perDay.get(date)! }));
-  return { last14: line.reduce((sum, p) => sum + (p.value ?? 0), 0), allTime: mine.length, line };
+  return { last14: line.reduce((sum, p) => sum + (p.value ?? 0), 0), previous14, allTime: mine.length, line };
+}
+
+/**
+ * The arrow beside the Bounty Program's 14-day number (the owner's review,
+ * 2026-10-21): "up" when the last 14 days beat the 14 days before them,
+ * "down" when they hold fewer, null (no arrow) when the two are equal.
+ */
+export function bountyTrend(b: Pick<Bounty, "last14" | "previous14">): "up" | "down" | null {
+  if (b.last14 > b.previous14) return "up";
+  if (b.last14 < b.previous14) return "down";
+  return null;
 }
 
 // ── The snapshot tiles ──────────────────────────────────────────────────────

@@ -5,11 +5,13 @@ import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { onDiscountRequested } from "@/lib/csm-events";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
 import { checkMembershipDiscount } from "@/lib/membership-discount";
+import { requiredAnswersRefusal } from "@/lib/discount-feedback";
 import {
   SAVE_FAILED,
   decideDiscountRequest,
   loadDiscountReads,
   membershipDiscountRefusal,
+  membershipUncheckedRefusal,
   secondPendingRequest,
 } from "@/lib/world/discount-server";
 
@@ -22,9 +24,15 @@ import {
  * until then; never for an earlier one). It grants only on `ready` and fails
  * closed on any read error.
  * Then the coupon (admin rebuild 2, D5): a Whop membership that already has a
- * discount on its next renewal gets no 30%. Whop is asked now; when it does
- * not answer, the stored row decides; with neither the request goes through
- * and the approve route's own check decides (checkMembershipDiscount).
+ * discount on its next renewal gets no 30%. Whop is asked now (since T-122:
+ * the membership on file, else the course membership found through the
+ * student's Whop user, else the latest real payment, under 97.00 being a
+ * discount); when it does not answer, the stored row decides
+ * (checkMembershipDiscount). With neither, since the owner's review
+ * (2026-10-21) nothing is written and the student reads "We couldn't check
+ * your membership just now. Try again in a minute." (membershipUncheckedRefusal,
+ * a 503); the request used to go through and leave the coupon to the approve
+ * route.
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */
@@ -42,6 +50,13 @@ async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string
   const coupon = await checkMembershipDiscount(supabase, studentId);
   if (coupon.discounted) {
     const refusal = membershipDiscountRefusal();
+    return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
+  }
+  if (coupon.source === "none") {
+    console.error(
+      `[discounts/request] student ${studentId}: nothing written, the coupon check could not run (${coupon.liveFail ?? "no answer"}) and nothing is stored`,
+    );
+    const refusal = membershipUncheckedRefusal();
     return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
   }
 
@@ -112,6 +127,16 @@ export async function POST(request: NextRequest) {
   }
   // Server-derived; body.studentId (if any) is ignored.
   const studentId = authedStudent.id;
+
+  // The survey (the owner's review, 2026-10-21): a plain request carries no
+  // answers, so while the team has a required question it is refused and the
+  // application goes through the form (POST /api/discounts/submit-feedback).
+  // The map sends a plain request only when it finds no active question.
+  const unanswered = await requiredAnswersRefusal(supabase, []);
+  if (unanswered) {
+    console.error(`[discounts/request] student ${studentId}: ${unanswered.log}`);
+    return NextResponse.json({ error: unanswered.error }, { status: unanswered.status });
+  }
 
   if (CATALOG_IS_V2) return requestUnderNewCourse(supabase, studentId);
 

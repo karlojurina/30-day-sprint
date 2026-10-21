@@ -141,16 +141,19 @@ console.log('\n=== A failed read says so in the header too ===')
 console.log('\n=== The journey: the board in the page\'s column ===')
 {
   const view = fromSrc('src/components/admin/journey/JourneyView.tsx')
-  ok(!/maxWidth: wide \? 1584/.test(view) && !view.includes('function BoardPage') && !view.includes('function BoardColumn') && (view.match(/<ListPage>/g) ?? []).length === 3,
-     'no board breaking out to 1584px: the page, loading, failed and loaded, is ListPage\'s column')
+  // Since the owner's review (2026-10-21) the page takes the window's whole width with the pages' side margins
+  // (ListPage wide), the cards hold only the name, the day, the activity, the progress and the last activity, and
+  // the area chip went (admin-owner-review.test.mjs holds that round's rules).
+  ok(!/maxWidth: wide \? 1584/.test(view) && !view.includes('function BoardPage') && !view.includes('function BoardColumn') && (view.match(/<ListPage wide>/g) ?? []).length === 3,
+     'no board breaking out to 1584px on its own: the page, loading, failed and loaded, is one ListPage (wide since the owner\'s review)')
   ok(view.includes('className="grid grid-cols-[repeat(6,minmax(232px,1fr))] lg:grid-cols-[repeat(6,minmax(164px,1fr))]"')
        && /data-board=""[\s\S]{0,200}overflowX: "auto"/.test(view),
-     'six columns of 164px at least from 1024px (they fit in the 1084px column from 1120px wide), 232px under that, the board scrolling sideways inside itself')
+     'six columns of 164px at least from 1024px (they fit side by side from 1120px wide), 232px under that, the board scrolling sideways inside itself')
   ok(/data-journey-card=\{c\.id\}[\s\S]{0,700}<button[\s\S]{0,200}position: "absolute",\s*inset: 0/.test(view) && /pointerEvents: "none"/.test(view)
-       && /<StudentName id=\{c\.id\} name=\{c\.name\} username=\{c\.username\} size=\{14\} \/>/.test(view),
+       && /<StudentName id=\{c\.id\} name=\{c\.name\} size=\{14\} \/>/.test(view),
      'a card: one button under it opens the drawer, the name over it is the student\'s link')
-  ok(view.includes('<span style={{ color: "var(--color-text-primary)", fontWeight: 600 }}>{numeral}</span>') && !view.includes('color: "var(--color-accent-dark)", fontWeight: 600 }}>{numeral}'),
-     'the area\'s numeral in the primary ink, not Airy Blue')
+  ok(!view.includes('function AreaChip') && !view.includes('{numeral}'),
+     'no area chip on a card since the owner\'s review (its numeral was in the primary ink, not Airy Blue)')
   const old = git('show', `${BEFORE}:src/components/admin/journey/JourneyView.tsx`)
   ok(/maxWidth: wide \? 1584 : 1084/.test(old), `control: at ${BEFORE} the board broke out to 1584px`)
 }
@@ -166,8 +169,10 @@ console.log('\n=== The Dashboard: the program row, the gaps, the words ===')
   ok(!/items-start/.test(program) && /className=\{waiting \? "flex md:col-span-2" : "flex"\}/.test(program)
        && /function HeroCard[\s\S]{0,300}flex: "1 1 auto", display: "flex", flexDirection: "column"/.test(view),
      'the grid stretches both slots to the row\'s height, and each card fills its slot: as tall as each other')
-  ok(/<SourceLine foot>Students on the monthly plan since Mon 25 May who joined on the bounty site\.<\/SourceLine>/.test(view) && (view.match(/<SourceLine foot>/g) ?? []).length === 3,
-     'the hero cards\' source lines sit at their feet')
+  // The owner's review (2026-10-21) took the source lines away (the (i) buttons keep the definitions); the charts sit
+  // at the cards' feet instead (admin-owner-review.test.mjs holds that round's rules).
+  ok(!view.includes('SourceLine') && !view.includes('who joined on the bounty site') && (view.match(/marginTop: "auto", paddingTop: (16|32)/g) ?? []).length === 2,
+     'the hero cards\' charts sit at their feet, where their source lines sat until the owner\'s review')
   ok(/const SECTION_GAP = 40;/.test(view) && (view.match(/marginTop: SECTION_GAP/g) ?? []).length >= 2 && /minHeight: 20, marginBottom: 12/.test(view)
        && /margin: "-12px 0"/.test(view) && !/flush/.test(view),
      'the three sections the same distance apart: every title row 20px, the Insights link\'s 44px hanging over its row')
@@ -251,9 +256,10 @@ console.log('\n=== One name part on every page ===')
   const feedback = fromSrc('src/components/admin/feedback/LessonFeedbackView.tsx')
   ok(!feedback.includes('import Link from "next/link"') && /<StudentName id=\{who\?\.id\} name=\{name\} username=\{who\?\.discord_username\} size=\{13\} \/>/.test(feedback),
      'Lesson feedback: the writer as the name part (it was a small Airy Blue link)')
+  // Since the owner's review (2026-10-21) a journey card shows the name alone, so the board's read no longer takes the username.
   ok(fromSrc('src/lib/admin/lesson-feedback.ts').includes('.select("id, name, email, discord_username")') && fromSrc('src/lib/admin/survey-data.ts').includes('.select("id, name, email, discord_username")')
-       && fromSrc('src/lib/admin/journey-board.ts').includes('"id, name, email, discord_username, membership_status'),
-     'the reads behind them carry the username')
+       && fromSrc('src/lib/admin/journey-board.ts').includes('"id, name, email, membership_status'),
+     'the reads behind them carry the username (the journey\'s, whose cards show the name alone since the owner\'s review, does not)')
 }
 
 // ── The All students cell, the dialog, the Survey, the folds ────────────────
@@ -410,11 +416,14 @@ console.log('\n=== The 30%: the team\'s own code, the coupon\'s row ===')
 
   const page = fromSrc('src/components/admin/thirty/ThirtyView.tsx')
   const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/** The 30% code, and a button that copies it. */'))
-  // Since the render review's second round "Check Whop again" stands in Approve's place there, and the reason is the map's sentence.
-  ok(/\) : coupon \? \(\s*<button[\s\S]*?Check Whop again[\s\S]*?\) : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending) && /const canOverride = !verdict\.ok && !coupon;/.test(pending),
-     'Applied, the coupon\'s verdict: no Approve and no Approve anyway')
+  // Since the render review's second round "Check Whop again" stands there, and the reason is the map's sentence.
+  // Since the owner's review (2026-10-21) a founder's or an admin's Approve anyway stands there too, naming the
+  // coupon it skips (admin-owner-review.test.mjs holds that round's rules); a csm still has no way past it.
+  ok(/\{coupon && \(\s*<button[\s\S]*?Check Whop again[\s\S]*?<\/button>\s*\)\}/.test(pending) && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending)
+       && /const canOverride = canApproveAnyway && skip !== null;/.test(pending),
+     'Applied, the coupon\'s verdict: no Approve; Approve anyway for a founder or an admin alone')
   ok(/variant=\{coupon \? "raised" : "ghost"\}/.test(pending) && /if \(opening && coupon && !reason\.trim\(\)\) setReason\(COUPON_REJECT_REASON\);/.test(pending),
-     'Reject is that row\'s one decision, raised, its reason filled in when it opens')
+     'Reject is raised on that row, its reason filled in when it opens')
   ok(/row\.couponCheck === "not-checked" && verdict\.ok && \(/.test(pending) && !pending.includes('Approve asks Whop again first.'),
      '"Coupon not checked yet" only beside the rule\'s yes: never on a row refused for another reason')
   ok(/const coupon = couponWarns\(row\) \? row\.coupon : null;/.test(page), 'the Approved row warns through couponWarns: never about the team\'s own code')

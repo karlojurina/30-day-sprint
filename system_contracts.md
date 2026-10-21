@@ -55,7 +55,9 @@ When adding a new table, append it here. When deleting a field, scan
   the Student journey also read it, against `MONTHLY_97_PLAN_IDS`, the
   course's two $97 monthly plans (`src/lib/admin/students-list.ts`,
   `journey-board.ts`): a student on any other plan, or with none on
-  file, is on neither page.),
+  file, is on neither page. Since the owner's review of the same day All
+  students also reads `first_paid_at` from `DISCOUNT_ELIGIBLE_FROM`, 1
+  October, as the journey does from 9 October.),
   `first_paid_at` (the student's FIRST REAL WHOP PAYMENT since the
   first-paid fix, 2026-10-20: the earliest payment by that user with
   status paid, `paid_at` set, a total above 0 and not fully refunded
@@ -1050,13 +1052,64 @@ When adding a new table, append it here. When deleting a field, scan
   `POST /api/discounts/approve`, before the rule and with `override` too,
   call `checkMembershipDiscount` (`src/lib/membership-discount.ts`): Whop
   now, then the stored row in `student_membership_discounts` for the
-  student's current membership, then nothing. The request routes refuse
+  student's current membership, then nothing. Since T-122 (2026-10-21,
+  branch `night/admin3`, not on production) Whop now is
+  `judgeStudentDiscount`: the membership on file by the rule; when the id
+  on file is missing, a payment's, or one Whop does not know (404 or
+  another 4xx), the course membership found through `students.whop_user_id`
+  (v2 `GET /api/v2/memberships?user_id=`, the course's products from
+  `WHOP_PRODUCT_ID` less ETfB and Apex, active before past due, then the
+  newest) by the same rule; when a membership read gives no plan or no
+  renewal price, or no course membership grants access, the newest real
+  course payment (`GET /api/v1/payments?user_id=&status=paid`, pinned):
+  a total under 97.00 is a discount, 97.00 or more or no real payment is
+  none. It gives no answer only when Whop does not answer (no connection,
+  a 5xx, a 429 after two retries, the time limits), refuses the key, or
+  answers the payments in a way it cannot judge, or when the deployment
+  has no key or no course product. The request routes refuse
   with 400 `{ error: "You can't apply for this discount because you
   already have a discount applied to your account.", state:
   "not-eligible" }`; the approve route with 400 `{ error: "This student
   already has a discount on their membership (<code>).", code:
   "has-discount" }`, before any Whop code is made.
-- **No ads check on approve (2026-10-20, Lovro's decision):**
+- **Applying fails closed when the coupon check cannot run (the owner's
+  review, 2026-10-21; branch `night/admin3`, not on production):** with
+  neither Whop's answer nor a stored row for the current membership
+  (`checkMembershipDiscount`'s `source: "none"`: Whop down or refusing, no
+  Whop key or no course product, the student's row unread; until T-122
+  also no membership on file, a payment's id in its place, or no plan or
+  renewal price), both request routes write nothing and answer
+  503 `{ error: "We couldn't check your membership just now. Try again in
+  a minute.", state: "read-failed" }` (`membershipUncheckedRefusal`).
+  Until then the request went in and the approve route checked again. The
+  approve route still goes on with neither.
+- **Required questions are enforced on the server (the owner's review,
+  2026-10-21; branch `night/admin3`, not on production):** before
+  anything is written, `POST /api/discounts/request` and
+  `POST /api/discounts/submit-feedback` read the active
+  `discount_feedback_questions` marked `is_required` and refuse an
+  application that leaves one unanswered (`requiredAnswersRefusal`,
+  `src/lib/discount-feedback.ts`; a scale needs a number, a choice a
+  choice, an open question words that are not only spaces): 400
+  `{ error: "Answer every question that is not marked Optional, then send
+  it again." }`. A plain request carries no answers, so it is refused
+  while any required question is active. A failed read of the questions
+  is 503 `{ error: "We couldn't check your answers just now, so nothing
+  was sent. Try again in a minute." }`, never read as "no questions".
+- **Approve anyway (the owner's review, 2026-10-21; branch
+  `night/admin3`, not on production):** `POST /api/discounts/approve`
+  takes `overrideCoupon` beside `override`: it skips the coupon check
+  (Whop is not asked), as `override` skips the 30% rule. Either one from
+  a team member who is not a founder or an admin is refused with 403
+  `{ error: "Only a founder or an admin can approve past a check." }`
+  before anything is read or made (until then any team member could send
+  `override`). Every refusal of the rule, or of a read the rule needs,
+  carries `code: "rule"` (the switch date unread, the new course's
+  verdict, and the old rule's four refusals, the 409 "The course changed
+  and this check cannot run. Nothing was approved." among them), which
+  the 30% page reads to offer Approve anyway. The log line names what was
+  skipped.
+- **No ads check on approve (2026-10-20, the owner's decision):**
   `POST /api/discounts/approve` no longer reads
   `students.ad_submissions_verified`, on either course: the 30% already
   asks for 61 videos, so the rule alone decides, and Generate anyway
@@ -1068,7 +1121,11 @@ When adding a new table, append it here. When deleting a field, scan
 ### `student_membership_discounts` (v111, admin rebuild 2, D5; built, not on production)
 - **Depends on:** `students` (`student_id` primary key, on delete
   cascade); Whop's v1 memberships, plans and promo codes, read with
-  `Api-Version-Date: 2026-10-15-1`.
+  `Api-Version-Date: 2026-10-15-1`; since T-122 (branch `night/admin3`)
+  also v2's memberships by `user_id` and the pinned v1 payments by
+  `user_id`, for a student with no readable membership on file
+  (`judgeStudentDiscount`), and `WHOP_PRODUCT_ID` for the course's
+  products.
 - **Written by (the service role only; row level security has no write
   policy, and `anon` and `authenticated` hold no write privilege):** the
   cron `GET /api/cron/refresh-membership-discounts` (every 2 hours at
@@ -1079,7 +1136,8 @@ When adding a new table, append it here. When deleting a field, scan
   the read itself from `earliestOpenFirstPayment`), `membership_status`
   active or past_due, and no approved or applied request; it read every
   student from `DISCOUNT_ELIGIBLE_FROM`, a list that only grew; reads
-  `students.id, whop_membership_id, first_paid_at`; since its second
+  `students.id, whop_membership_id, whop_user_id, first_paid_at`
+  (`whop_user_id` since T-122); since its second
   round also every student holding a pending request, whatever their
   window or membership, read from `discount_requests` by status and then
   from `students` by id for those outside the window, so a stale answer
@@ -1100,10 +1158,19 @@ When adding a new table, append it here. When deleting a field, scan
   answer to the route's own live read, since the review's fix round).
 - **Stable contract:** `student_id`, `whop_membership_id` (the membership
   the row was read from: a row counts only while the student holds that
-  membership), `promo_code_id`, `promo_code` (the code's name, null when
-  Whop gave none), `renewal_price`, `plan_renewal_price` (numeric,
-  dollars), `discounted` (a promo code on the membership and a renewal
-  below the plan's renewal price), `checked_at`.
+  membership; since T-122, when the student's Whop id on file is not a
+  membership's, or none, their row counts whatever membership it names,
+  `storedRowApplies`), `promo_code_id`, `promo_code` (the code's name,
+  null when Whop gave none), `renewal_price`, `plan_renewal_price`
+  (numeric, dollars), `discounted` (a promo code on the membership and a
+  renewal below the plan's renewal price), `checked_at`. v113 (T-122,
+  branch `night/admin3`, not pasted) adds `source`: `membership`, `user`
+  (the course membership found through the Whop user, by the same rule)
+  or `payment` (the newest real course payment: `discounted` is its total
+  under 97.00, `renewal_price` holds that total and `plan_renewal_price`
+  97.00, both null with no real payment; the code is the payment's), or
+  null on rows written before. No reader selects `source`, and the writers
+  write the row without it while v113 is not pasted.
 - **Read by the team:** the policy "Team reads membership discounts",
   `current_user_is_team()`. A student reads nothing here, not even their
   own row; their flag reaches them through `/api/student/data`.
@@ -2150,9 +2217,12 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     stored row for that membership; on an Approved row, Whop gave no
     answer now), `not-checked` (no stored row applies: never checked, or
     a membership changed since; Approve asks Whop first),
-    `no-membership` (the stored Whop id is missing or is not a
-    membership's, a payment's id the webhook stored: neither the cron nor
-    Approve can ask Whop, so nothing blocks the 30%), `failed` (an
+    `no-membership` (a decided row whose stored Whop id is missing or is
+    not a membership's, a payment's id the webhook stored: the route's own
+    read of the Approved rows asks by membership id alone; since T-122 a
+    pending row never has it, as the cron and Approve find the membership
+    through the student's Whop user, and a stored row counts for such a
+    student whatever membership it names), `failed` (an
     Approved row: no answer now and nothing stored) or `unread` (the
     stored coupons could not be read). A pending row's verdict is the
     approve route's in its order: a stored discount on the next renewal
@@ -2189,9 +2259,11 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   a bad one, 403 for a login that is not a team member).
 - **Depends on:** `discount_requests` (`id, student_id, status` by `id`),
   then `checkMembershipDiscount` (`src/lib/membership-discount.ts`):
-  `students.whop_membership_id`, Whop's v1 membership, plan and promo
-  code pinned to `2026-10-15-1` (no request started after 6 s, none
-  waited on past 8 s), the stored row as its fallback.
+  `students.whop_membership_id` and, since T-122, `whop_user_id`; Whop's
+  v1 membership, plan and promo code pinned to `2026-10-15-1`, and since
+  T-122 v2's memberships by user and the pinned v1 payments by user (no
+  request started after 6 s, none waited on past 8 s); the stored row as
+  its fallback.
 - **Produces:**
   - 200 `{ discounted, code }`: Whop answered now and its answer is
     stored; `code` is the code's name, or its promo id, or null.
@@ -2199,16 +2271,21 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   - 404 "This request no longer exists."
   - 409 "This request was already decided." (the page reads its list
     again).
-  - 422 "The student's Whop membership is not on file, so Whop can't be
-    asked. Check the coupon in Whop." (no membership id, or a payment's);
-    422 "Whop doesn't know the membership on file, so nothing changed.
-    Check the student in Whop." (Whop's 404).
+  - 422 "The student's Whop account is not on file, so Whop can't be
+    asked. Check the coupon in Whop." (no `whop_user_id`, which is NOT
+    NULL, so never on production). Until T-122 (2026-10-21) a membership
+    id that was missing or a payment's, and one Whop did not know, were
+    422s; they are asked through the student's Whop user now and answer
+    200.
   - 500 "Couldn't read this request, so Whop was not asked. Try again.";
     "Couldn't read the student's Whop membership, so Whop was not asked.
     Try again."; "This deployment has no Whop key, so Whop can't be
-    asked."; "Whop answered, but its answer couldn't be saved, so the
-    list still shows the old one. Try again." (`saved` false on the
-    reader's answer: never a 200 the list would contradict).
+    asked."; "This deployment doesn't name the course's Whop product, so
+    Whop can't be asked." (`WHOP_PRODUCT_ID` names no course product, and
+    the student's membership had to be found); "Whop answered, but its
+    answer couldn't be saved, so the list still shows the old one. Try
+    again." (`saved` false on the reader's answer: never a 200 the list
+    would contradict).
   - 502 "Whop gave no answer, so nothing changed. Try again in a minute."
     (any other failure of the read; the reader logs its kind).
 - **Writes:** only through `checkMembershipDiscount`: the student's row of

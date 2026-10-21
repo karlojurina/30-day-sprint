@@ -2,14 +2,20 @@
 // (_admin/prds/admin-rebuild-2/admin_rebuild_2_prd.md, D7, D8, D9, D12).
 //
 //   All students   course members on one of the two $97 monthly plans
-//                  (MONTHLY_97_PLAN_IDS) with a first payment, any date, any
+//                  (MONTHLY_97_PLAN_IDS) with a first payment on or after 1
+//                  October in Croatia (DISCOUNT_ELIGIBLE_FROM), any
 //                  membership status, newest first payment first; a yearly
-//                  plan, an ETfB plan, no plan and no payment left out (the
-//                  owner's answer, 2026-10-21); a failed read says so
+//                  plan, an ETfB plan, no plan, no payment and a payment
+//                  before 1 October left out (the owner's answers,
+//                  2026-10-21); the progress read for the listed students
+//                  alone; the pills Active, Payment failed and Ended
+//                  (canceled and expired), Active first; a failed read says so
 //   The student    a failed read says so, block by block; the Whop sync says
 //                  when its numbers are from before the switch (whopPulled)
 //   The journey    the same two plans, with a first payment on or after the
-//                  launch (9 October); the six columns as before; the two
+//                  launch (9 October); the six columns as before; a card
+//                  holds the name, the day, the activity, the progress and
+//                  the last activity alone (the owner's review); the two
 //                  pages agree on one database; a failed read says so
 //   Tasks          the tabs (Archived once the reset ran), the tiers, the
 //                  closed lines; the insights count only tasks since the reset
@@ -92,7 +98,7 @@ const V = await import('./_gen/tasks-view.ts')
 const R = await import('./_gen/tasks-reset.ts')
 const O = await import('./_gen/outreach-insights.ts')
 const { METRICS } = await import('./_gen/csm-triggers.ts')
-const { DISCOUNT_LAUNCH_DATE } = await import('./_gen/discount.ts')
+const { DISCOUNT_LAUNCH_DATE, DISCOUNT_ELIGIBLE_FROM } = await import('./_gen/discount.ts')
 const insightsRoute = (await import('./_gen/admin-tasks-insights-route.ts')).GET
 
 let pass = 0
@@ -122,7 +128,7 @@ const BRANDS = 'plan_uSpqAhp2cSeyy'
 const PLANS_LINE = `whop_plan_id in (${MONTHLY},${HIDDEN_97})`
 
 // ── All students ────────────────────────────────────────────────────────────
-console.log('\n=== All students: course members on a $97 monthly plan with a first payment, newest first ===')
+console.log('\n=== All students: course members on a $97 monthly plan who first paid from 1 October, newest first ===')
 {
   ok(show([...C.MONTHLY_97_PLAN_IDS]) === show([MONTHLY, HIDDEN_97]),
      'MONTHLY_97_PLAN_IDS holds the course\'s two $97 monthly plans: the visible one and the hidden one', show(C.MONTHLY_97_PLAN_IDS))
@@ -144,8 +150,12 @@ const allStudentsDb = () => {
       student('s-noplan', { whop_plan_id: null, first_paid_at: '2026-10-17T10:00:00.000Z' }),
       student('s-unpaid', { whop_plan_id: HIDDEN_97, first_paid_at: null }),
       student('s-free', { whop_plan_id: 'plan_free', first_paid_at: null }),
+      // The owner's review (2026-10-21): the first payments from 1 October in Croatia, 30 September 22:00 UTC, on.
+      student('s-oct1', { whop_plan_id: MONTHLY, first_paid_at: '2026-09-30T22:00:00.000Z', membership_status: 'canceled' }),
+      student('s-sept30', { whop_plan_id: MONTHLY, first_paid_at: '2026-09-30T21:59:59.999Z' }),
+      student('s-expired-oct', { whop_plan_id: HIDDEN_97, first_paid_at: '2026-10-03T10:00:00.000Z', membership_status: 'expired' }),
     ],
-    student_progress_counts: [{ student_id: 's-hidden', completed_count: 14 }, { student_id: 's-yearly', completed_count: 30 }],
+    student_progress_counts: [{ student_id: 's-hidden', completed_count: 14 }, { student_id: 's-yearly', completed_count: 30 }, { student_id: 's-monthly', completed_count: 50 }],
     lessons: Array.from({ length: 140 }, (_, i) => ({ id: `l${i}`, counts_toward_progress: true })).concat([{ id: 'pond', counts_toward_progress: false }]),
   })
 }
@@ -153,39 +163,52 @@ const allStudentsDb = () => {
   const db = allStudentsDb()
   const reads = await L.readStudentsList(fakeClient(db))
   const ids = reads.students.ok ? reads.students.data.map((s) => s.id).sort() : null
-  ok(show(ids) === show(['s-early', 's-expired', 's-hidden', 's-monthly', 's-nomembership', 's-pastdue']),
-     'listed: a first payment on either $97 monthly plan, the hidden one too, at any date (before 25 May too), active, past due, canceled or expired, with or without a Whop membership on file; not listed: a yearly plan, an ETfB plan, no plan on file, or a $97 member with no first payment, nor a free seat', show(ids))
+  ok(show(ids) === show(['s-expired-oct', 's-hidden', 's-nomembership', 's-oct1', 's-pastdue']),
+     'listed: a first payment from midnight starting 1 October in Croatia on, on either $97 monthly plan (the hidden one too), active, past due, canceled or expired, with or without a Whop membership on file; not listed: a payment a millisecond before, or in March, June or September, a yearly plan, an ETfB plan, no plan on file, a $97 member with no first payment, nor a free seat', show(ids))
   const call = db.calls('students', 'select')[0]
-  ok(call.columns === L.LIST_COLUMNS && !/plan|\*/.test(call.columns) && call.filters.includes('first_paid_at not is null') && call.filters.includes(PLANS_LINE)
-       && !call.filters.some((f) => /membership_status|first_paid_at>=|whop_membership_id/.test(f)),
-     'the read asks for the list\'s columns only (no plan, no *) and draws both lines in the database: a first payment, and one of the two $97 plans; no status, date or membership filter', show({ columns: call.columns, filters: call.filters }))
+  ok(call.columns === L.LIST_COLUMNS && !/plan|\*/.test(call.columns) && call.filters.includes(`first_paid_at>=${DISCOUNT_ELIGIBLE_FROM}`) && DISCOUNT_ELIGIBLE_FROM === '2026-09-30T22:00:00.000Z'
+       && call.filters.includes(PLANS_LINE) && !call.filters.some((f) => /membership_status|whop_membership_id/.test(f)),
+     'the read asks for the list\'s columns only (no plan, no *) and draws both lines in the database: a first payment from DISCOUNT_ELIGIBLE_FROM, and one of the two $97 plans; no status or membership filter', show({ columns: call.columns, filters: call.filters }))
+  const progress = db.calls('student_progress_counts', 'select')
+  const asked = progress.flatMap((c) => c.filters.filter((f) => f.startsWith('student_id in (')))
+  ok(progress.length === 1 && asked.length === 1 && show(asked[0].slice('student_id in ('.length, -1).split(',').sort()) === show(ids)
+       && !progress[0].filters.some((f) => f.startsWith('student_id>')),
+     'the progress is read for the listed students alone, by id, where it read every student\'s row page by page (the owner\'s review)', show(progress.map((c) => c.filters)))
+  ok(reads.progress.ok && show(reads.progress.data.map((r) => r.student_id)) === show(['s-hidden']), 'so no progress row of an unlisted student (the yearly one, a June one) comes back', show(reads.progress))
   ok(reads.countingLessons.ok && reads.countingLessons.data === 140, 'the lessons that count: 140 (the one outside progress left out)')
   const before = fromBase('src/app/admin/(authenticated)/students/page.tsx')
   ok(before.includes('.in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])') && before.includes('.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)'),
      `control: at ${BASE} the page read the visible $97 plan only, from 25 May, so the hidden $97 plan and the students before 25 May were missing`)
   const was = await L0.readStudentsList(fakeClient(allStudentsDb()))
   const wasIds = was.students.ok ? was.students.data.map((s) => s.id).sort() : null
-  ok(show(wasIds) === show(['s-brands', 's-early', 's-expired', 's-hidden', 's-monthly', 's-nomembership', 's-noplan', 's-pastdue', 's-yearly']),
-     `control: the reader at ${BEFORE_97}, on the same database, listed every plan: the yearly, the ETfB and the no-plan students too`, show(wasIds))
+  ok(show(wasIds) === show(['s-brands', 's-early', 's-expired', 's-expired-oct', 's-hidden', 's-monthly', 's-nomembership', 's-noplan', 's-oct1', 's-pastdue', 's-sept30', 's-yearly']),
+     `control: the reader at ${BEFORE_97}, on the same database, listed every plan at any date: the yearly, the ETfB and the no-plan students, and March, June and September too`, show(wasIds))
 
   const list = L.buildStudentsList(reads, course({ 's-hidden': iso(NOW_MS - 2 * DAY), 's-pastdue': iso(NOW_MS - 5 * DAY) }), NOW)
-  ok(show(list.rows.map((r) => r.id)) === show(['s-nomembership', 's-hidden', 's-pastdue', 's-expired', 's-monthly', 's-early']),
+  ok(show(list.rows.map((r) => r.id)) === show(['s-nomembership', 's-hidden', 's-pastdue', 's-expired-oct', 's-oct1']),
      'newest first payment first', show(list.rows.map((r) => r.id)))
   const h = list.rows.find((r) => r.id === 's-hidden')
   const p = list.rows.find((r) => r.id === 's-pastdue')
   ok(h.day === 5 && h.progress === 10 && h.activity === 'moving' && p.progress === 0 && p.activity === 'slipping'
-       && list.rows.find((r) => r.id === 's-monthly').activity === 'not_started',
+       && list.rows.find((r) => r.id === 's-oct1').activity === 'not_started',
      'day since the first payment, progress over the 140 counting lessons (14 is 10%, no row is 0%), activity from the last counted lesson',
      show({ h: [h.day, h.progress, h.activity], p: [p.progress, p.activity] }))
   ok(list.progressKnown && list.courseIsNew === true && list.problems.length === 0 && list.generatedAt === NOW, 'nothing failed, nothing to say')
 }
 {
-  // 1,200 students: more than one answer of PostgREST holds. Read by key, all come back.
-  const students = Array.from({ length: 1200 }, (_, i) => ({ id: `s-${String(i).padStart(4, '0')}`, whop_plan_id: i % 2 ? HIDDEN_97 : MONTHLY, first_paid_at: iso(Date.parse('2026-06-01T00:00:00.000Z') + i * 3600_000) }))
-  const db = new FakeDb({ students, student_progress_counts: [], lessons: [{ id: 'l1', counts_toward_progress: true }] })
+  // 1,200 students: more than one answer of PostgREST holds. Read by key, all come back, and their progress in batches of 100 ids.
+  const students = Array.from({ length: 1200 }, (_, i) => ({ id: `s-${String(i).padStart(4, '0')}`, whop_plan_id: i % 2 ? HIDDEN_97 : MONTHLY, first_paid_at: iso(Date.parse('2026-10-01T00:00:00.000Z') + i * 600_000) }))
+  const db = new FakeDb({ students, student_progress_counts: [{ student_id: 's-1199', completed_count: 7 }], lessons: [{ id: 'l1', counts_toward_progress: true }] })
   const reads = await L.readStudentsList(fakeClient(db))
   const pages = db.calls('students', 'select').length
   ok(reads.students.ok && reads.students.data.length === 1200 && pages === 2, 'past 1000 students: all 1,200, in 2 pages read by key', `${reads.students.ok && reads.students.data.length} in ${pages}`)
+  const batches = db.calls('student_progress_counts', 'select').map((c) => c.filters.find((f) => f.startsWith('student_id in (')).split(',').length)
+  ok(batches.length === 12 && batches.every((n) => n === 100) && reads.progress.ok && show(reads.progress.data) === show([{ student_id: 's-1199', completed_count: 7 }]),
+     'their progress: 12 reads of 100 ids each, the last student\'s row among them', show(batches))
+  const failing = new FakeDb({ students, student_progress_counts: [], lessons: [{ id: 'l1', counts_toward_progress: true }] })
+  failing.failWhen = (call) => (call.table === 'student_progress_counts' && call.filters.some((f) => f.includes('s-0500')) ? { message: 'canceling statement due to statement timeout' } : null)
+  const one = await L.readStudentsList(fakeClient(failing))
+  ok(!one.progress.ok && one.progress.error === 'canceling statement due to statement timeout', 'one batch of the 12 fails: the progress read fails, never a list with students missing', show(one.progress))
 }
 {
   // Each read that fails says so; the list's own read is the page's error.
@@ -216,12 +239,27 @@ const allStudentsDb = () => {
     { id: 'b', name: 'Amy', email: 'amy@example.com', username: 'amy.b', status: 'past_due', firstPaidAt: '2026-10-19T00:00:00.000Z', day: 3, lastActiveAt: null, progress: 50, activity: null },
     { id: 'c', name: 'Bo', email: 'bo@example.com', username: null, status: 'canceled', firstPaidAt: '2026-10-18T00:00:00.000Z', day: 4, lastActiveAt: '2026-10-21T00:00:00.000Z', progress: null, activity: null },
   ]
-  ok(show(L.filterStudents(rows, '@AMY', 'all').map((r) => r.id)) === show(['b']) && show(L.filterStudents(rows, 'example', 'past_due').map((r) => r.id)) === show(['b'])
-       && show(L.filterStudents(rows, '', 'all').map((r) => r.id)) === show(['a', 'b', 'c']),
-     'the search reads name, email and username in any case, with or without "@", and the status narrows it')
+  ok(show(L.filterStudents(rows, '@AMY', 'past_due').map((r) => r.id)) === show(['b']) && show(L.filterStudents(rows, 'example', 'past_due').map((r) => r.id)) === show(['b'])
+       && show(L.filterStudents(rows, '@AMY', 'active').map((r) => r.id)) === show([]),
+     'the search reads name, email and username in any case, with or without "@", and the membership filter narrows it')
   ok(show(L.sortStudents(rows, 'name').map((r) => r.id)) === show(['b', 'c', 'a']) && show(L.sortStudents(rows, 'progress').map((r) => r.id)) === show(['b', 'a', 'c'])
        && show(L.sortStudents(rows, 'active').map((r) => r.id)) === show(['c', 'a', 'b']) && L.sortStudents(rows, 'paid') === rows,
      'sorting by name, progress (unknown last) and last activity (never last); by payment is the list\'s own order')
+  // The owner's review (2026-10-21): three pills, Active · Payment failed · Ended (canceled and expired together), Active first.
+  const more = [...rows, { ...rows[2], id: 'd', name: 'Di', email: 'di@example.com', status: 'expired' }]
+  ok(show(L.STATUS_FILTERS.map((f) => `${f.value}:${f.label}`)) === show(['active:Active', 'past_due:Payment failed', 'ended:Ended']) && L.DEFAULT_STATUS_FILTER === 'active',
+     'the pills: Active, Payment failed, Ended, no "All", Active the one the page opens on', show(L.STATUS_FILTERS))
+  ok(show(L.filterStudents(more, '', 'active').map((r) => r.id)) === show(['a']) && show(L.filterStudents(more, '', 'past_due').map((r) => r.id)) === show(['b'])
+       && show(L.filterStudents(more, '', 'ended').map((r) => r.id)) === show(['c', 'd']),
+     'Active holds the active, Payment failed the past due, Ended the canceled and the expired together')
+  ok(show(L.statusCounts(more)) === show({ active: 1, past_due: 1, ended: 2 }) && L.statusFilterOf('expired') === 'ended' && L.statusFilterOf('canceled') === 'ended'
+       && L.statusFilterOf('active') === 'active' && L.statusFilterOf('past_due') === 'past_due' && L.statusFilterOf('') === null,
+     'each pill\'s count, before any search; every one of the four statuses under exactly one pill', show(L.statusCounts(more)))
+  const view = fromSrc('src/components/admin/students/StudentsView.tsx')
+  ok(/useState<StatusFilter>\(DEFAULT_STATUS_FILTER\)/.test(view) && /\{counts\[f\.value\]\}/.test(view)
+       && view.includes('description={`Course members on a $97 monthly plan who first paid on or after ${FROM_DAY}, newest first payment first.`}')
+       && view.includes('const FROM_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);'),
+     'the page opens on Active, every pill with its count, and the header says who is listed in plain words ("who first paid on or after Thu 1 Oct")')
 }
 
 // ── One student ─────────────────────────────────────────────────────────────
@@ -355,6 +393,11 @@ const journeyDb = () => {
   const call = db.calls('students', 'select')[0]
   ok(call.columns === J.JOURNEY_COLUMNS && !/plan/.test(call.columns) && call.filters.includes(`first_paid_at>=${DISCOUNT_LAUNCH_DATE}`) && call.filters.includes(PLANS_LINE),
      'both lines are drawn in the database, the date at DISCOUNT_LAUNCH_DATE and the two $97 plans; the plan is a filter, never a column read', show(call.filters))
+  // The owner's review (2026-10-21): a card shows no area and no username, so neither is read; the progress is the board's students' alone.
+  const progress = db.calls('student_progress_counts', 'select')
+  ok(progress.length === 1 && show(progress[0].filters[0].slice('student_id in ('.length, -1).split(',').sort()) === show(ids)
+       && db.calls('student_current_region').length === 0 && db.calls('regions').length === 0 && !/discord_username|cancel_scheduled_at/.test(call.columns),
+     'the progress is read for the board\'s students alone; no area is read (where each student is, the course\'s areas), nor a username or a booked cancel', show({ progress: progress.map((c) => c.filters), columns: call.columns }))
   const before = fromBase('src/app/admin/(authenticated)/journey/page.tsx')
   ok(before.includes('.in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])') && before.includes('.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)'),
      `control: at ${BASE} the journey held the visible $97 plan only, from 25 May`)
@@ -389,8 +432,6 @@ const journeyDb = () => {
   const reads = {
     students: { ok: true, data: students },
     progress: { ok: true, data: [{ student_id: 'd8', completed_count: 2 }] },
-    currentArea: { ok: true, data: [{ student_id: 'd8', current_region: 'a2' }] },
-    areas: { ok: true, data: REGIONS },
     countingLessons: { ok: true, data: 4 },
   }
   const b = J.buildJourney(reads, course({ d8: iso(now - DAY), d7: iso(now - 10 * DAY), 'd3-canceled': iso(now - DAY) }), nowIso)
@@ -401,17 +442,24 @@ const journeyDb = () => {
      show(b.columns.map((c) => [c.id, c.cards.map((x) => x.id)])))
   const d8 = b.columns.find((c) => c.id === 'week-2').cards[0]
   const d7 = b.columns.find((c) => c.id === 'week-1').cards[0]
-  ok(d8.progress === 50 && d8.area?.numeral === 'II' && d8.area?.name === 'Research' && d8.activity === 'moving'
-       && d7.area?.name === 'Foundations' && d7.progress === 0 && d7.activity === 'stalled',
-     'a card: progress, its area (the first one when it has none) and its activity', show({ d8, d7 }))
-  ok(b.columns.find((c) => c.id === 'week-2').cards.find((c) => c.id === 'd12-canceling').canceling, 'a student who clicked cancel carries Canceling')
+  ok(d8.progress === 50 && d8.activity === 'moving' && d8.day === 8 && d8.lastActive === 'Never' && d7.progress === 0 && d7.activity === 'stalled',
+     'a card: the day, the progress and the activity', show({ d8, d7 }))
+  // The owner's review (2026-10-21): the name, the day, the activity word, the progress and the last activity, nothing else.
+  ok(b.columns.flatMap((c) => c.cards).every((c) => show(Object.keys(c).sort()) === show(['activity', 'day', 'id', 'lastActive', 'name', 'progress'])),
+     'every card holds exactly the name (with its id, for the link), the day, the activity, the progress and the last activity: no area, username, Canceling or Payment failed', show(Object.keys(d8)))
   ok(show(b.activity) === show({ not_started: 8, moving: 1, slipping: 0, stalled: 1 }) && b.total === 12,
      'the header counts every student who has not churned by activity (the canceled ones left out)', show(b.activity))
-  const failed = J.buildJourney({ ...reads, progress: { ok: false, error: 'timed out' }, currentArea: { ok: false, error: 'timed out' } }, courseFailed, nowIso)
+  const failed = J.buildJourney({ ...reads, progress: { ok: false, error: 'timed out' } }, courseFailed, nowIso)
   const any = failed.columns.flatMap((c) => c.cards)
-  ok(any.every((c) => c.progress === null && c.area === null && c.activity === null) && failed.activity === null && failed.problems.length === 3
+  ok(any.every((c) => c.progress === null && c.activity === null) && failed.activity === null && failed.problems.length === 2
        && failed.problems.every((p) => typeof p.text === 'string' && p.text.startsWith("Couldn't") && typeof p.error === 'string' && p.error.length > 0 && !p.text.includes(p.error)),
-     'the progress, the areas and the course fail: every card says it does not know, three sentences say why, never 0% or the first area', show(failed.problems))
+     'the progress and the course fail: every card says it does not know, two sentences say why, never 0%', show(failed.problems))
+  const view = fromSrc('src/components/admin/journey/JourneyView.tsx')
+  const card = view.slice(view.indexOf('function JourneyCardView('), view.indexOf('/** The drawer:'))
+  ok(/<StudentName id=\{c\.id\} name=\{c\.name\} size=\{14\} \/>/.test(card) && card.includes('Day {c.day}') && card.includes('<ActivityPill label={c.activity} />')
+       && card.includes('`${c.progress}% done`') && card.includes('Last active {') && !/AreaChip|Pill tone|<Meter|username|canceling|past_due/.test(card)
+       && (view.match(/<ListPage wide>/g) ?? []).length === 3,
+     'the card draws the name, the day, the activity word, the progress as a percentage and the last activity, nothing else; the page is wide (the window\'s width with the side margins)')
   ok(J.buildJourney(reads, course({}, null), nowIso).activity === null, 'before the switch: no activity counts')
 }
 
@@ -546,11 +594,12 @@ console.log('\n=== The words (D12), no plan on a row, and who the headers say is
      'All students\' and the journey\'s readers name the plan once, in their one filter on MONTHLY_97_PLAN_IDS: never PAYING_WHOP_PLAN_IDS, never a subscription', show(readers))
   const sv = fromSrc('src/components/admin/students/StudentsView.tsx')
   const jv = fromSrc('src/components/admin/journey/JourneyView.tsx')
-  ok(sv.includes('description="Course members on a $97 monthly plan who have paid at least once, newest first payment first."')
-       && sv.includes('"No course member on a $97 monthly plan has paid yet."')
+  // Since the owner's review (2026-10-21) All students says its first day too: "who first paid on or after Thu 1 Oct".
+  ok(sv.includes('description={`Course members on a $97 monthly plan who first paid on or after ${FROM_DAY}, newest first payment first.`}')
+       && sv.includes('`No course member on a $97 monthly plan has paid since ${FROM_DAY}.`')
        && jv.includes("description={`The new program's students: course members on a $97 monthly plan with a first payment on or after ${dayLabel(")
        && !/any plan/i.test([sv, jv, ...READERS.map(fromSrc)].join('\n')),
-     'the headers say who is listed in plain words, course members on a $97 monthly plan, and so does All students\' empty list; "any plan" is gone from both pages and their readers')
+     'the headers say who is listed in plain words, course members on a $97 monthly plan from their first day, and so does All students\' empty list; "any plan" is gone from both pages and their readers')
   const oldInsights = fromBase('src/app/admin/(authenticated)/tasks/insights/page.tsx')
   ok(oldInsights.includes('save DMs — still subscribed'), `control: at ${BASE} the insights said "still subscribed"`)
 }

@@ -77,6 +77,41 @@ export function agoText(iso: string | null | undefined, nowMs: number): string {
   return d === 1 ? "1 day ago" : `${d} days ago`;
 }
 
+/** Ids per `.in()`, short enough for the address, as the 30% page's and the Survey's reads batch them. */
+export const ID_BATCH = 100;
+
+/**
+ * The rows of a per-student view (student_progress_counts,
+ * student_last_counted_completion) for these students only: `.in()` in
+ * batches of ID_BATCH, side by side, each answering at most one row per
+ * student, well under PostgREST's 1000. All students and the journey list
+ * the students who first paid from October; reading the whole view for them
+ * carried every student there is, page by page (the owner's review of
+ * 2026-10-21). One batch that fails fails the read: never a list with
+ * students missing. No ids: no read, no rows.
+ */
+export async function readForStudents<T>(
+  supabase: SupabaseClient,
+  view: string,
+  columns: string,
+  ids: readonly string[],
+): Promise<Read<T[]>> {
+  const batches: string[][] = [];
+  for (let i = 0; i < ids.length; i += ID_BATCH) batches.push(ids.slice(i, i + ID_BATCH));
+  try {
+    const answers = await Promise.all(batches.map((batch) => supabase.from(view).select(columns).in("student_id", batch)));
+    const rows: T[] = [];
+    for (const r of answers) {
+      if (r.error) return failed(r.error);
+      if (!Array.isArray(r.data)) return failed(`${view}: no rows came back`);
+      rows.push(...(r.data as T[]));
+    }
+    return ok(rows);
+  } catch (e) {
+    return failed(e instanceof Error ? e.message : e);
+  }
+}
+
 /** How many lessons count toward progress (the new course's 140), or a failed read. Never a made-up number: 0 is a failure too. */
 export async function readCountingLessons(supabase: SupabaseClient): Promise<Read<number>> {
   const res = await supabase

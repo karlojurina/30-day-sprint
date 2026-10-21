@@ -22,10 +22,15 @@ Exit code 0 = every assertion passed. Failures print first and last.
 `npm test` runs `run.mjs`, then `v111.test.mjs` (v111 and its undo, admin
 rebuild 2, D5, in a file of its own so the lanes that added v109 and v110
 to `run.mjs` merged without touching it), then `v112.test.mjs` (below), with
-`--experimental-strip-types` because it imports `src/lib/achievement-rules.ts`.
-On `night/admin2` with the 5 lanes merged: `PASS 702   FAIL 0`, then
-`PASS 22   FAIL 0`. On `night/achievements`: the same two, then
-`PASS 65   FAIL 0`.
+`--experimental-strip-types` because it imports
+`src/lib/achievement-rules.ts`, then `v113.test.mjs` (v113 and its undo,
+T-122: `student_membership_discounts.source`, the step of the coupon check
+that answered; a row carrying it refused before v113, pasted twice, only the
+three words or empty, the undo keeping every row, and v113 on a database
+without v111). On `night/admin2` with the 5 lanes merged: `PASS 702 FAIL 0`,
+then `PASS 22 FAIL 0`. On `night/achievements`: the same two, then `PASS 65
+FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`, `PASS 22 FAIL 0`,
+then `PASS 23 FAIL 0`.
 
 `v112.test.mjs` (2026-10-21, the badges for the new course) builds its own
 database: `base.sql`, Supabase's default privileges, the badge tables made

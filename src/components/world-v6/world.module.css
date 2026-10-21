@@ -1679,7 +1679,7 @@
    poster's, made the same way from public/world-v6/posters/k0-morning.webp
    (world-tests/v6-posters.mjs --tod=morning prints it). */
 :global(html[data-world-tod="morning"]) .poster::before {
-  background-image: url("data:image/webp;base64,UklGRlgBAABXRUJQVlA4IEwBAACwBwCdASowABsAPm0skUWkIqGYDVVUQAbEsgBOma0iJAFwsy8REPSp2s27XNTwSA0gKD3BrVGdvoAzwaP0eUDZWTRRFXUgAP7tWYwG9oKQa6rLG4wda2CjhkaJBJLwzAu8+5AnqlTg/hLWxp+uQZsdEqzVOkfx6j2v4gJnOq3/vokIpVYsdfu4Fidw35xQ4cqFyVCnUUxEnDfbKzkorZ5OaNG5pfz3okddw2aUMo/K1qUB8hsoQZTaWgtqvCTsHca72rOx6RWfnOFG/4T1iuv01z9ZlrV3sD8LHn5ZHY4J3PTfaO0ZY6+EvhOFLUnaO2kBeZccrajoN3+TvHCQ4AWzw+IZqhgpzowAEWCFduAWQIFJfkMEZWzxYG31illGlzd+ZUzgmyqj3jLaJgNohyWLdI6pRMMrnh0RGD76UvN21lGw1hrbv0CBdgAAAA==");
+  background-image: url("data:image/webp;base64,UklGRmQBAABXRUJQVlA4IFgBAAAQCACdASowABsAPm0sk0WkIqGYDVVUQAbEsgBOmaOjPBEwui75WGB9/39XjidrfF9UiOk+ozhkzU02lRS6UH/sSSZa+frMvvIAAP7tWYd+SuM4y8Ow3a5zdL1GqDWnKE55KKBkf1YMMt6uToogxYHb0HdU9UzrclgzFG0W4bYxD/Uv+OoTCiQf0wN2xFzjRvfG0wEi4uaJugHIXbo/8ur5R+LwPRQSBGe9ac165hI5nGICiRXpDoOWLo4Yu1HLq5eLjvd8vPIHkK+Wsk1/tBHw5f+FBYrm9HY/WZa1d7I/CwvG08HiI6m+W08dtd1+7VHPp+mg5ckv8gEX3A8gjysGJbMjCqE/P0Gk+feV4Ctslagn2oe1WZbnT7HM4z/1f51jIrKjW4we8EQSBC8bcYuV/tT/2BD1m/jJlvUjoydYkGMXgGKIWXgEZYo0ZbvAk6LiHB+btbOAAA==");
 }
 
 /* The landing poster, the opening's, from the first paint: drawn by the

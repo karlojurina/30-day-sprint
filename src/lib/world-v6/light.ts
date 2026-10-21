@@ -963,21 +963,50 @@ export const MORNING_LOOK = {
 
 /** One row per light key the opening and the first six places use (the keys between them included), as NIGHT_ROWS. */
 export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
-  "opening-gold": { dial: 1 },
-  "afternoon-gold": { dial: 1 },
+  // The opening (tune pass): the base's mist lay on the tree band across the
+  // water (900 to 1100 units out) as a milky lilac veil, and the frame had no
+  // dark anchor. A thinner mist: the band 80 luma (it was 89, 67 by day). The
+  // near shade halfway back toward the day's dark one; on the 07:30 frame it
+  // measures as no change (the ramp starts at 800 units here).
+  "opening-gold": { dial: 1, look: { mist: 0.15, nearShade: 0x404a6c } },
+  // The Landing (tune pass): the mid forest went grey and the massif's lower
+  // slopes pale. A thinner mist, and less of the day's additive fog (0.3, set
+  // for a gold haze, it added pale lilac on the massif under the morning's):
+  // the massif's lower slopes 176 luma (186), the mid forest 145 (155).
+  "afternoon-gold": { dial: 1, look: { mist: 0.15, fogAdd: 0.2 } },
   afternoon: { dial: 1 },
-  "late-afternoon": { dial: 1 },
+  // The Falls (tune pass): the cliff in shade right of the falls read as a
+  // moonlit navy (the base's mossy bounce is half the fill on a vertical face,
+  // then the blue lift). A warm bounce as by day (the meadows face up and keep
+  // the sky's half, so the dew greens stay), less blue in the lift and the
+  // gain, and half the day's additive fog, which veiled the lit cliff in mauve.
+  // The shade's core now a dark violet (hue 268, sat 0.30, luma 38; it was
+  // 238 / 0.39 / 43); a lift of 0.045 blue left it indigo (258 / 0.34).
+  "late-afternoon": { dial: 1, light: { hemiGround: 0x5c4c40 }, look: { lift: [0.025, 0.02, 0.035], gain: [1.04, 1.0, 0.95], fogAdd: 0.2 } },
   // The gorge: a warmer sun and a pink haze, so the far range keeps the
   // morning's first light (with the base's lilac haze it went grey).
-  "gorge-sunset": { dial: 1, light: { sunColor: 0xffcf96, skyHorizon: 0xf6cac4, haze: 0xe0c6cc } },
+  // Tune pass: the far range was still a grey-white sheet (170 luma, sat
+  // 0.08), under the day's additive fog of 0.5 (set for a coral haze); half
+  // of it, a haze a step darker in the same rose, and the warm bounce, so the
+  // right wall's shade turns mauve brown: the range 143 luma. The blue sky and
+  // white clouds stay: they are what make this view a morning.
+  "gorge-sunset": { dial: 1, light: { sunColor: 0xffcf96, skyHorizon: 0xf6cac4, haze: 0xd6b8c2, hemiGround: 0x5c4c40 }, look: { fogAdd: 0.25 } },
   "sunset-cliff": { dial: 1 },
   // The lake: its low sun kept, cooler; a pink horizon over the water; the
   // mist a thin pink white layer on the water (the day's additive haze, 0.55,
   // greyed the far shore out under the morning's pale haze).
+  // Tune pass: the Mirror Lake had lost its mirror (a pale lilac sheet, 157
+  // luma at sat 0.08, under a white band on the far shore). The mist only
+  // from 400 units out and thinner, a thin band over the far shore and a
+  // clear mirror nearer; the lake's own colour darker in the same blue (the
+  // base's is 132 luma, the day's 57); and a rose violet haze (keep it
+  // between hue 320 and 340: toward coral it is the day's sunset again). The
+  // lake 135 luma with the forest and the hill clear in it, the far shore's
+  // band 140 (164).
   sunset: {
     dial: 1,
-    light: { skyMid: 0xd0c8ec, skyHorizon: 0xf6c8c0, skyGlow: 0xffd8b0, haze: 0xd8cce0 },
-    look: { fogAdd: 0.15, mist: 0.3, mistDepth: 18, mistNear: 150, mistFar: 700, mistColor: 0xf2e4ea },
+    light: { skyMid: 0xd0c8ec, skyHorizon: 0xf6c8c0, skyGlow: 0xffd8b0, haze: 0xd6bccb, water: 0x4c6684 },
+    look: { fogAdd: 0.15, mist: 0.16, mistDepth: 10, mistNear: 400, mistFar: 1100, mistColor: 0xf2e4ea },
   },
   // The forest: its dusk keeps the sun under the horizon and the floor dark
   // (FOREST_DIM), so its morning is the dawn's pink and blue over the trees,

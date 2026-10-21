@@ -208,6 +208,14 @@ const LOOK = {
   haloNight: 1.4,
   haloAlphaDay: 1.35,
   haloAlphaNight: 1.0,
+  /**
+   * The share of the halo's alpha the morning takes off (light.ts
+   * state.morning; the morning's tune pass): at 1 the day's halo comes down
+   * to the night's alpha. The morning's lamps are low, so the day's halo is
+   * the one drawn, and over the morning's pale sky the floating steps' halos
+   * bloomed into white suns, brighter at 07:30 than at dusk or at night.
+   */
+  haloMorningCut: 0.26,
   /** The pools of light on the ground (final pass): strength in daylight and once the light is down. */
   poolDay: 0.32,
   poolNight: 0.62,
@@ -2316,7 +2324,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   let lastLevel = -1;
   let lastMagic = -1;
   let lastNight = -1;
-  const lightState = () => (scene.userData.light as { state?: { lampGlow: number; magicGlow?: number; night?: number } } | undefined)?.state;
+  let lastMorning = -1;
+  const lightState = () => (scene.userData.light as { state?: { lampGlow: number; magicGlow?: number; night?: number; morning?: number } } | undefined)?.state;
   const update = (time: number): boolean => {
     clock = time;
     let changed = dirty;
@@ -2332,12 +2341,17 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     const lg = lightState()?.lampGlow ?? 0.7;
     const night = Math.min(1, Math.max(0, (lg - 0.45) / 0.55));
     const level = Math.max(LOOK.glassFloor, lg);
-    if (Math.abs(level - lastLevel) > 1e-3) {
+    // The morning's share of the light (0 by day and at night). The glass
+    // sits at its floor both by day and in the morning, so the level alone
+    // would not notice the morning coming or going.
+    const mk = Math.min(1, Math.max(0, lightState()?.morning ?? 0));
+    if (Math.abs(level - lastLevel) > 1e-3 || Math.abs(mk - lastMorning) > 1e-3) {
       lastLevel = level;
+      lastMorning = mk;
       glassMat.uniforms.uLevel.value = level;
       if (runeMat) runeMat.uniforms.uLevel.value = level;
       haloMat.uniforms.uSize.value = LOOK.haloDay + (LOOK.haloNight - LOOK.haloDay) * night;
-      haloMat.uniforms.uAlpha.value = LOOK.haloAlphaDay + (LOOK.haloAlphaNight - LOOK.haloAlphaDay) * night;
+      haloMat.uniforms.uAlpha.value = (LOOK.haloAlphaDay + (LOOK.haloAlphaNight - LOOK.haloAlphaDay) * night) * (1 - LOOK.haloMorningCut * mk);
       poolMat.uniforms.uAlpha.value = LOOK.poolDay + (LOOK.poolNight - LOOK.poolDay) * night;
       // The next lesson's pool is boosted most in daylight, where the plain pools barely show.
       poolMat.uniforms.uNext.value = 1.6 - 0.8 * night;

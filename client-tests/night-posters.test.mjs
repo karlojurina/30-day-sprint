@@ -137,8 +137,9 @@ for (const [href, name] of PAGES) {
   ok(off.length === 0, `${name} (${href}): 1,440 minutes, ${count.night} at night, ${count.morning} in the morning`, off.slice(0, 4).join(', '))
 }
 const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
-ok(crossing.dusk === 20 * 60 + 24 && crossing.dawn === 5 * 60 + 34, `on /world the night posters from the minute ${hm(crossing.dusk)} to ${hm(crossing.dawn)}`)
-ok(crossing.mornFrom === 5 * 60 + 35 && crossing.mornTo === 9 * 60 + 31, `and the morning posters from the minute ${hm(crossing.mornFrom)} to ${hm(crossing.mornTo)}`)
+// The dawn's line (0.36 since the morning's tune pass; 0.38 before) puts the switch at 05:35:41.
+ok(crossing.dusk === 20 * 60 + 24 && crossing.dawn === 5 * 60 + 35, `on /world the night posters from the minute ${hm(crossing.dusk)} to ${hm(crossing.dawn)}`)
+ok(crossing.mornFrom === 5 * 60 + 36 && crossing.mornTo === 9 * 60 + 31, `and the morning posters from the minute ${hm(crossing.mornFrom)} to ${hm(crossing.mornTo)}`)
 {
   // Around each crossing, second by second (the clock reads seconds too).
   let off = []

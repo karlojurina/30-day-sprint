@@ -1,15 +1,21 @@
 // admin-people.test.mjs: the rules of admin rebuild 2's lane WI-5 and WI-6
 // (_admin/prds/admin-rebuild-2/admin_rebuild_2_prd.md, D7, D8, D9, D12).
 //
-//   All students   every student with a first payment, any plan, any date,
-//                  newest first payment first; a failed read says so
+//   All students   course members on one of the two $97 monthly plans
+//                  (MONTHLY_97_PLAN_IDS) with a first payment, any date, any
+//                  membership status, newest first payment first; a yearly
+//                  plan, an ETfB plan, no plan and no payment left out (the
+//                  owner's answer, 2026-10-21); a failed read says so
 //   The student    a failed read says so, block by block; the Whop sync says
 //                  when its numbers are from before the switch (whopPulled)
-//   The journey    a first payment on or after the launch (9 October), any
-//                  plan; the six columns as before; a failed read says so
+//   The journey    the same two plans, with a first payment on or after the
+//                  launch (9 October); the six columns as before; the two
+//                  pages agree on one database; a failed read says so
 //   Tasks          the tabs (Archived once the reset ran), the tiers, the
 //                  closed lines; the insights count only tasks since the reset
-//   The words      "Membership status" and "still a member", no plan read
+//   The words      "Membership status" and "still a member"; no plan read as
+//                  a column or shown on a row, the headers saying who is
+//                  listed
 //
 // The readers and builders are the real modules, copied by build.mjs with
 // only their import lines rewritten (run it first; `npm run test:client`
@@ -18,16 +24,19 @@
 // answer, a column that does not exist is an error, .maybeSingle() on no row
 // is null). The outreach insights and their route are copied here, as
 // outreach-cutover.test.mjs copies the module. Where the old page held the
-// rule inline, the page at BASE is read as a control.
+// rule inline, the page at BASE is read as a control. The two readers as
+// they were before the $97 plans came back (BEFORE_97) are copied here too,
+// and run on the same database as a control.
 import fs from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const BASE = 'ca9b5ef' // night/admin2 after WI-1, where this lane started
+const BEFORE_97 = '35d44d2' // night/admin2 before the owner's answer brought the $97 plans back
 
 const here = (p) => fileURLToPath(new URL(p, import.meta.url))
 const fromSrc = (rel) => fs.readFileSync(here(`../${rel}`), 'utf8')
-const fromBase = (rel) => execFileSync('git', ['show', `${BASE}:${rel}`], { cwd: here('..'), encoding: 'utf8' })
+const fromBase = (rel, ref = BASE) => execFileSync('git', ['show', `${ref}:${rel}`], { cwd: here('..'), encoding: 'utf8' })
 
 function write(text, label, outRel, rewrites) {
   let s = text
@@ -54,11 +63,31 @@ write(fromSrc(INSIGHTS_ROUTE), INSIGHTS_ROUTE, './_gen/admin-tasks-insights-rout
   ['from "@/lib/admin/tasks-reset"', 'from "./tasks-reset.ts"'],
 ])
 
+// The two readers as they were before the $97 plans came back (BEFORE_97),
+// with build.mjs's rewrites: run on the same database as the real ones, they
+// are the control that every plan used to be listed.
+const PEOPLE_REWRITES = [
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/useJourneyPaceCounts"', 'from "./types-erased.ts"'],
+  ['from "./people-common"', 'from "./people-common.ts"'],
+]
+write(fromBase('src/lib/admin/students-list.ts', BEFORE_97), `src/lib/admin/students-list.ts at ${BEFORE_97}`, './_gen/students-list.before-97.ts', PEOPLE_REWRITES)
+write(fromBase('src/lib/admin/journey-board.ts', BEFORE_97), `src/lib/admin/journey-board.ts at ${BEFORE_97}`, './_gen/journey-board.before-97.ts', [
+  ...PEOPLE_REWRITES,
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  ['from "@/lib/admin/metrics-definitions"', 'from "./metrics-definitions.ts"'],
+])
+
 const { FakeDb, fakeClient } = await import('./_gen/stub-server.ts')
 const { setTeam } = await import('./_gen/stub-admin.ts')
+const C = await import('./_gen/constants.ts')
 const L = await import('./_gen/students-list.ts')
+const L0 = await import('./_gen/students-list.before-97.ts')
 const D = await import('./_gen/student-detail.ts')
 const J = await import('./_gen/journey-board.ts')
+const J0 = await import('./_gen/journey-board.before-97.ts')
 const V = await import('./_gen/tasks-view.ts')
 const R = await import('./_gen/tasks-reset.ts')
 const O = await import('./_gen/outreach-insights.ts')
@@ -83,53 +112,76 @@ const paidOnDay = (d, now = NOW_MS) => iso(now - (d - 0.5) * DAY)
 const SWITCH = '2026-10-19T14:33:33.972Z'
 const course = (last = {}, resetAt = SWITCH) => ({ ok: true, resetAt, lastByStudent: new Map(Object.entries(last)) })
 const courseFailed = { ok: false, error: 'admin_config.curriculum_reset_at could not be read: timeout' }
+/** The course's two $97 monthly plans: the visible one and the hidden one (system-docs/whop_plan_inventory_2026-09-03.md). */
 const MONTHLY = 'plan_4ZrwR4PmBsVsx'
+const HIDDEN_97 = 'plan_UoKS5Tjqvp0Cj'
+/** Two plans that are not: the course's $700 yearly plan, and the ETfB product's visible $997 a month plan (the same inventory). */
 const YEARLY = 'plan_VFDntXQf9cYMo'
+const BRANDS = 'plan_uSpqAhp2cSeyy'
+/** The read's plans line, as the stand-in logs it. */
+const PLANS_LINE = `whop_plan_id in (${MONTHLY},${HIDDEN_97})`
 
 // ── All students ────────────────────────────────────────────────────────────
-console.log('\n=== All students: every student with a first payment, any plan, newest first ===')
+console.log('\n=== All students: course members on a $97 monthly plan with a first payment, newest first ===')
 {
+  ok(show([...C.MONTHLY_97_PLAN_IDS]) === show([MONTHLY, HIDDEN_97]),
+     'MONTHLY_97_PLAN_IDS holds the course\'s two $97 monthly plans: the visible one and the hidden one', show(C.MONTHLY_97_PLAN_IDS))
+  ok(show([...C.PAYING_WHOP_PLAN_IDS]) === show([MONTHLY]),
+     'PAYING_WHOP_PLAN_IDS, which the CSM crons, the snapshots and the Dashboard read, is left as it was: the visible plan alone (its missing hidden plan is a separate task)')
+}
+const allStudentsDb = () => {
   const student = (id, extra) => ({ id, name: `Student ${id}`, email: `${id}@example.com`, whop_membership_id: `mem_${id}`, membership_status: 'active', ...extra })
-  const db = new FakeDb({
+  return new FakeDb({
     students: [
       student('s-monthly', { whop_plan_id: MONTHLY, first_paid_at: '2026-06-01T10:00:00.000Z' }),
-      student('s-yearly', { whop_plan_id: YEARLY, first_paid_at: '2026-10-12T10:00:00.000Z' }),
-      student('s-other', { whop_plan_id: 'plan_someother', first_paid_at: '2026-10-14T10:00:00.000Z', membership_status: 'past_due' }),
-      student('s-early', { whop_plan_id: null, first_paid_at: '2026-03-01T10:00:00.000Z', membership_status: 'canceled' }),
+      student('s-hidden', { whop_plan_id: HIDDEN_97, first_paid_at: '2026-10-16T10:00:00.000Z' }),
+      student('s-pastdue', { whop_plan_id: HIDDEN_97, first_paid_at: '2026-10-14T10:00:00.000Z', membership_status: 'past_due' }),
+      student('s-early', { whop_plan_id: MONTHLY, first_paid_at: '2026-03-01T10:00:00.000Z', membership_status: 'canceled' }),
       student('s-expired', { whop_plan_id: MONTHLY, first_paid_at: '2026-09-01T10:00:00.000Z', membership_status: 'expired' }),
-      student('s-nomembership', { whop_plan_id: null, whop_membership_id: null, first_paid_at: '2026-10-18T10:00:00.000Z' }),
+      student('s-nomembership', { whop_plan_id: MONTHLY, whop_membership_id: null, first_paid_at: '2026-10-18T10:00:00.000Z' }),
+      student('s-yearly', { whop_plan_id: YEARLY, first_paid_at: '2026-10-12T10:00:00.000Z' }),
+      student('s-brands', { whop_plan_id: BRANDS, first_paid_at: '2026-10-13T10:00:00.000Z' }),
+      student('s-noplan', { whop_plan_id: null, first_paid_at: '2026-10-17T10:00:00.000Z' }),
+      student('s-unpaid', { whop_plan_id: HIDDEN_97, first_paid_at: null }),
       student('s-free', { whop_plan_id: 'plan_free', first_paid_at: null }),
     ],
-    student_progress_counts: [{ student_id: 's-yearly', completed_count: 14 }],
+    student_progress_counts: [{ student_id: 's-hidden', completed_count: 14 }, { student_id: 's-yearly', completed_count: 30 }],
     lessons: Array.from({ length: 140 }, (_, i) => ({ id: `l${i}`, counts_toward_progress: true })).concat([{ id: 'pond', counts_toward_progress: false }]),
   })
+}
+{
+  const db = allStudentsDb()
   const reads = await L.readStudentsList(fakeClient(db))
   const ids = reads.students.ok ? reads.students.data.map((s) => s.id).sort() : null
-  ok(show(ids) === show(['s-early', 's-expired', 's-monthly', 's-nomembership', 's-other', 's-yearly']),
-     'every student with a first payment is listed: monthly, yearly, another plan, no plan, before 25 May, past due, canceled, expired, no Whop membership; a free seat (no first payment) is not', show(ids))
+  ok(show(ids) === show(['s-early', 's-expired', 's-hidden', 's-monthly', 's-nomembership', 's-pastdue']),
+     'listed: a first payment on either $97 monthly plan, the hidden one too, at any date (before 25 May too), active, past due, canceled or expired, with or without a Whop membership on file; not listed: a yearly plan, an ETfB plan, no plan on file, or a $97 member with no first payment, nor a free seat', show(ids))
   const call = db.calls('students', 'select')[0]
-  ok(call.columns === L.LIST_COLUMNS && !/plan|\*/.test(call.columns) && call.filters.includes('first_paid_at not is null')
-       && !call.filters.some((f) => /whop_plan_id|membership_status|first_paid_at>=/.test(f)),
-     'the read asks for the list\'s columns only (no plan, no *) and filters on a first payment alone', show({ columns: call.columns, filters: call.filters }))
+  ok(call.columns === L.LIST_COLUMNS && !/plan|\*/.test(call.columns) && call.filters.includes('first_paid_at not is null') && call.filters.includes(PLANS_LINE)
+       && !call.filters.some((f) => /membership_status|first_paid_at>=|whop_membership_id/.test(f)),
+     'the read asks for the list\'s columns only (no plan, no *) and draws both lines in the database: a first payment, and one of the two $97 plans; no status, date or membership filter', show({ columns: call.columns, filters: call.filters }))
   ok(reads.countingLessons.ok && reads.countingLessons.data === 140, 'the lessons that count: 140 (the one outside progress left out)')
   const before = fromBase('src/app/admin/(authenticated)/students/page.tsx')
   ok(before.includes('.in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])') && before.includes('.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)'),
-     `control: at ${BASE} the page read the $97 monthly plan only, from 25 May, so the yearly, other-plan and early students were missing`)
+     `control: at ${BASE} the page read the visible $97 plan only, from 25 May, so the hidden $97 plan and the students before 25 May were missing`)
+  const was = await L0.readStudentsList(fakeClient(allStudentsDb()))
+  const wasIds = was.students.ok ? was.students.data.map((s) => s.id).sort() : null
+  ok(show(wasIds) === show(['s-brands', 's-early', 's-expired', 's-hidden', 's-monthly', 's-nomembership', 's-noplan', 's-pastdue', 's-yearly']),
+     `control: the reader at ${BEFORE_97}, on the same database, listed every plan: the yearly, the ETfB and the no-plan students too`, show(wasIds))
 
-  const list = L.buildStudentsList(reads, course({ 's-yearly': iso(NOW_MS - 2 * DAY), 's-other': iso(NOW_MS - 5 * DAY) }), NOW)
-  ok(show(list.rows.map((r) => r.id)) === show(['s-nomembership', 's-other', 's-yearly', 's-expired', 's-monthly', 's-early']),
+  const list = L.buildStudentsList(reads, course({ 's-hidden': iso(NOW_MS - 2 * DAY), 's-pastdue': iso(NOW_MS - 5 * DAY) }), NOW)
+  ok(show(list.rows.map((r) => r.id)) === show(['s-nomembership', 's-hidden', 's-pastdue', 's-expired', 's-monthly', 's-early']),
      'newest first payment first', show(list.rows.map((r) => r.id)))
-  const y = list.rows.find((r) => r.id === 's-yearly')
-  const o = list.rows.find((r) => r.id === 's-other')
-  ok(y.day === 9 && y.progress === 10 && y.activity === 'moving' && o.progress === 0 && o.activity === 'slipping'
+  const h = list.rows.find((r) => r.id === 's-hidden')
+  const p = list.rows.find((r) => r.id === 's-pastdue')
+  ok(h.day === 5 && h.progress === 10 && h.activity === 'moving' && p.progress === 0 && p.activity === 'slipping'
        && list.rows.find((r) => r.id === 's-monthly').activity === 'not_started',
      'day since the first payment, progress over the 140 counting lessons (14 is 10%, no row is 0%), activity from the last counted lesson',
-     show({ y: [y.day, y.progress, y.activity], o: [o.progress, o.activity] }))
+     show({ h: [h.day, h.progress, h.activity], p: [p.progress, p.activity] }))
   ok(list.progressKnown && list.courseIsNew === true && list.problems.length === 0 && list.generatedAt === NOW, 'nothing failed, nothing to say')
 }
 {
   // 1,200 students: more than one answer of PostgREST holds. Read by key, all come back.
-  const students = Array.from({ length: 1200 }, (_, i) => ({ id: `s-${String(i).padStart(4, '0')}`, first_paid_at: iso(Date.parse('2026-06-01T00:00:00.000Z') + i * 3600_000) }))
+  const students = Array.from({ length: 1200 }, (_, i) => ({ id: `s-${String(i).padStart(4, '0')}`, whop_plan_id: i % 2 ? HIDDEN_97 : MONTHLY, first_paid_at: iso(Date.parse('2026-06-01T00:00:00.000Z') + i * 3600_000) }))
   const db = new FakeDb({ students, student_progress_counts: [], lessons: [{ id: 'l1', counts_toward_progress: true }] })
   const reads = await L.readStudentsList(fakeClient(db))
   const pages = db.calls('students', 'select').length
@@ -137,7 +189,7 @@ console.log('\n=== All students: every student with a first payment, any plan, n
 }
 {
   // Each read that fails says so; the list's own read is the page's error.
-  const base = { students: [{ id: 's1', name: 'Ana', email: 'ana@example.com', first_paid_at: '2026-10-10T10:00:00.000Z', discord_username: '@ana.k' }],
+  const base = { students: [{ id: 's1', name: 'Ana', email: 'ana@example.com', whop_plan_id: MONTHLY, first_paid_at: '2026-10-10T10:00:00.000Z', discord_username: '@ana.k' }],
     student_progress_counts: [{ student_id: 's1', completed_count: 3 }], lessons: [{ id: 'l1', counts_toward_progress: true }] }
   const failing = (table) => { const db = new FakeDb(base); db.fail[`${table}.select`] = { message: 'canceling statement due to statement timeout' }; return db }
   const r1 = await L.readStudentsList(fakeClient(failing('students')))
@@ -270,38 +322,63 @@ function detailDb(extra = {}) {
 }
 
 // ── The journey ─────────────────────────────────────────────────────────────
-console.log('\n=== The journey: the new program\'s students, any plan, in the same six columns ===')
-{
+console.log('\n=== The journey: the new program\'s students on a $97 monthly plan, in the same six columns ===')
+const journeyDb = () => {
   const s = (id, first_paid_at, extra = {}) => ({ id, name: id, email: `${id}@example.com`, first_paid_at, whop_membership_id: `mem_${id}`, membership_status: 'active', whop_plan_id: MONTHLY, ...extra })
   const launchMs = Date.parse(DISCOUNT_LAUNCH_DATE)
-  const db = new FakeDb({
+  return new FakeDb({
     students: [
       s('at-launch', DISCOUNT_LAUNCH_DATE),
       s('just-before', iso(launchMs - 1)),
+      s('hidden', '2026-10-15T10:00:00.000Z', { whop_plan_id: HIDDEN_97 }),
       s('yearly', '2026-10-15T10:00:00.000Z', { whop_plan_id: YEARLY }),
-      s('other-plan', '2026-10-16T10:00:00.000Z', { whop_plan_id: 'plan_other' }),
+      s('brands', '2026-10-16T10:00:00.000Z', { whop_plan_id: BRANDS }),
       s('no-plan', '2026-10-17T10:00:00.000Z', { whop_plan_id: null }),
-      s('canceled', '2026-10-12T10:00:00.000Z', { membership_status: 'canceled' }),
+      s('canceled', '2026-10-12T10:00:00.000Z', { membership_status: 'canceled', whop_plan_id: HIDDEN_97 }),
       s('past-due', '2026-10-13T10:00:00.000Z', { membership_status: 'past_due' }),
       s('expired', '2026-10-14T10:00:00.000Z', { membership_status: 'expired' }),
       s('no-membership', '2026-10-18T10:00:00.000Z', { whop_membership_id: null }),
       s('may', '2026-05-30T10:00:00.000Z'),
+      s('hidden-may', '2026-05-31T10:00:00.000Z', { whop_plan_id: HIDDEN_97 }),
       s('free', null, { whop_plan_id: 'plan_free' }),
     ],
     student_progress_counts: [], student_current_region: [], regions: REGIONS, lessons: LESSONS,
   })
+}
+{
+  const db = journeyDb()
   const reads = await J.readJourney(fakeClient(db))
   const ids = reads.students.ok ? reads.students.data.map((x) => x.id).sort() : null
-  ok(show(ids) === show(['at-launch', 'canceled', 'no-plan', 'other-plan', 'past-due', 'yearly']),
-     'on the board: a first payment from midnight starting 9 October (Croatia) on, any plan, active, past due or canceled; not a millisecond before, not expired, not without a membership, not May, not free',
+  ok(show(ids) === show(['at-launch', 'canceled', 'hidden', 'past-due']),
+     'on the board: either $97 monthly plan, the hidden one too, with a first payment from midnight starting 9 October (Croatia) on, active, past due or canceled; not a yearly plan, an ETfB plan or no plan on file; not a millisecond before, not expired, not without a membership, not May on either plan, not free',
      show(ids))
   const call = db.calls('students', 'select')[0]
-  ok(call.columns === J.JOURNEY_COLUMNS && !/plan/.test(call.columns) && call.filters.includes(`first_paid_at>=${DISCOUNT_LAUNCH_DATE}`)
-       && !call.filters.some((f) => /whop_plan_id/.test(f)),
-     'the line is drawn in the database at DISCOUNT_LAUNCH_DATE, and no plan is read or filtered', show(call.filters))
+  ok(call.columns === J.JOURNEY_COLUMNS && !/plan/.test(call.columns) && call.filters.includes(`first_paid_at>=${DISCOUNT_LAUNCH_DATE}`) && call.filters.includes(PLANS_LINE),
+     'both lines are drawn in the database, the date at DISCOUNT_LAUNCH_DATE and the two $97 plans; the plan is a filter, never a column read', show(call.filters))
   const before = fromBase('src/app/admin/(authenticated)/journey/page.tsx')
   ok(before.includes('.in("whop_plan_id", PAYING_WHOP_PLAN_IDS_ARRAY as string[])') && before.includes('.gte("first_paid_at", ADMIN_STUDENT_JOIN_CUTOFF)'),
-     `control: at ${BASE} the journey held the $97 monthly plan only, from 25 May`)
+     `control: at ${BASE} the journey held the visible $97 plan only, from 25 May`)
+  const was = await J0.readJourney(fakeClient(journeyDb()))
+  const wasIds = was.students.ok ? was.students.data.map((x) => x.id).sort() : null
+  ok(show(wasIds) === show(['at-launch', 'brands', 'canceled', 'hidden', 'no-plan', 'past-due', 'yearly']),
+     `control: the reader at ${BEFORE_97}, on the same database, put every plan on the board: the yearly, the ETfB and the no-plan students too`, show(wasIds))
+}
+{
+  // The two pages agree: on one database, the journey is exactly the students All students lists who paid from the launch on and hold a
+  // membership that is active, past due or canceled. Nobody is on the board who is not on the list.
+  const rows = [...allStudentsDb().rows('students'), ...journeyDb().rows('students').map((r) => ({ ...r, id: `j-${r.id}` }))]
+  const db = new FakeDb({ students: rows, student_progress_counts: [], student_current_region: [], regions: REGIONS, lessons: [{ id: 'l1', counts_toward_progress: true }] })
+  const listed = await L.readStudentsList(fakeClient(db))
+  const board = await J.readJourney(fakeClient(db))
+  const byId = new Map(rows.map((r) => [r.id, r]))
+  const listIds = listed.students.ok ? listed.students.data.map((x) => x.id) : []
+  const boardIds = board.students.ok ? board.students.data.map((x) => x.id).sort() : null
+  const fromList = listIds
+    .filter((id) => { const r = byId.get(id); return r.first_paid_at >= DISCOUNT_LAUNCH_DATE && J.JOURNEY_STATUSES.includes(r.membership_status) && r.whop_membership_id })
+    .sort()
+  ok(listed.students.ok && board.students.ok && boardIds.length > 0 && show(boardIds) === show(fromList) && boardIds.every((id) => listIds.includes(id))
+       && boardIds.every((id) => C.MONTHLY_97_PLAN_IDS.includes(byId.get(id).whop_plan_id)),
+     'the two pages agree: the board is the list\'s students paid from the launch with a live or churned membership, every one on a $97 monthly plan', show({ board: boardIds, fromList }))
 }
 {
   const now = Date.parse('2026-11-20T10:00:00.000Z')
@@ -448,7 +525,7 @@ console.log('\n=== Tasks insights: only the tasks made since the reset ===')
      'the floor cannot be read: 500 with the reason, never every task as if there were no reset', show(badBody))
 }
 
-console.log('\n=== The words (D12) and no plan ===')
+console.log('\n=== The words (D12), no plan on a row, and who the headers say is listed ===')
 {
   ok(METRICS.membership_status.label === 'Membership status' && METRICS.membership_status.describe({ metric: 'membership_status', op: 'is_not', value: 'canceled' }) === 'Membership status is not canceled',
      'the TriggerBuilder\'s metric and the task summaries read "Membership status"')
@@ -456,9 +533,24 @@ console.log('\n=== The words (D12) and no plan ===')
   ok(builder.includes(': METRICS[m].label}') && !/Subscription/i.test(builder), 'TriggerBuilder shows the metric\'s own label, and never says Subscription')
   const LANE = ['src/components/admin/tasks/TasksView.tsx', 'src/components/admin/tasks/InsightsView.tsx', 'src/components/admin/students/StudentsView.tsx',
     'src/components/admin/students/StudentDetailView.tsx', 'src/components/admin/journey/JourneyView.tsx', 'src/components/admin/people-parts.tsx',
-    'src/lib/admin/students-list.ts', 'src/lib/admin/student-detail.ts', 'src/lib/admin/journey-board.ts', 'src/lib/admin/tasks-view.ts']
+    'src/lib/admin/student-detail.ts', 'src/lib/admin/tasks-view.ts']
   const said = LANE.filter((f) => /subscri|whop_plan_id|planLabel|PAYING_WHOP_PLAN/i.test(fromSrc(f)))
-  ok(said.length === 0, 'no page of this lane, nor its readers, reads or names a plan or a subscription', said.join(', '))
+  ok(said.length === 0, 'no page of this lane, nor the student page\'s or Tasks\' reader, reads a plan column or names a subscription', said.join(', '))
+  // Since the owner's answer of 2026-10-21 the two list readers filter on the $97 plans, in the database, and that is all they do with a plan.
+  const READERS = ['src/lib/admin/students-list.ts', 'src/lib/admin/journey-board.ts']
+  const readers = READERS.map((f) => {
+    const s = fromSrc(f)
+    return { f, quoted: (s.match(/"whop_plan_id"/g) ?? []).length, filter: (s.match(/\.in\("whop_plan_id", MONTHLY_97_PLAN_IDS\)/g) ?? []).length, other: /subscri|planLabel|PAYING_WHOP_PLAN/i.test(s) }
+  })
+  ok(readers.every((r) => r.quoted === 1 && r.filter === 1 && !r.other),
+     'All students\' and the journey\'s readers name the plan once, in their one filter on MONTHLY_97_PLAN_IDS: never PAYING_WHOP_PLAN_IDS, never a subscription', show(readers))
+  const sv = fromSrc('src/components/admin/students/StudentsView.tsx')
+  const jv = fromSrc('src/components/admin/journey/JourneyView.tsx')
+  ok(sv.includes('description="Course members on a $97 monthly plan who have paid at least once, newest first payment first."')
+       && sv.includes('"No course member on a $97 monthly plan has paid yet."')
+       && jv.includes("description={`The new program's students: course members on a $97 monthly plan with a first payment on or after ${dayLabel(")
+       && !/any plan/i.test([sv, jv, ...READERS.map(fromSrc)].join('\n')),
+     'the headers say who is listed in plain words, course members on a $97 monthly plan, and so does All students\' empty list; "any plan" is gone from both pages and their readers')
   const oldInsights = fromBase('src/app/admin/(authenticated)/tasks/insights/page.tsx')
   ok(oldInsights.includes('save DMs — still subscribed'), `control: at ${BASE} the insights said "still subscribed"`)
 }

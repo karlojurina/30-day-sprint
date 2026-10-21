@@ -2,11 +2,19 @@
  * The Student journey, /admin/journey (admin rebuild 2, D8): what the board
  * reads and the columns it shows.
  *
- * WHO IS ON IT. The new program's students: a first real payment on or
- * after the launch, DISCOUNT_LAUNCH_DATE (2026-10-08T22:00Z, midnight
- * starting 9 October in Croatia), any plan, with a Whop membership that is
- * active, past due or canceled. Free seats hold no first payment and are
- * never on it. It used to hold the $97 monthly plan only, from 25 May.
+ * WHO IS ON IT. The new program's students: course members on a $97 monthly
+ * plan (students.whop_plan_id is one of MONTHLY_97_PLAN_IDS, the visible
+ * plan and the hidden one, src/lib/constants.ts) with a first real payment
+ * on or after the launch, DISCOUNT_LAUNCH_DATE (2026-10-08T22:00Z, midnight
+ * starting 9 October in Croatia), and a Whop membership that is active, past
+ * due or canceled. The plans are All students' (students-list.ts), the
+ * owner's answer of 2026-10-21, so the two pages agree: a yearly plan, an
+ * ETfB owner, an Apex seat or a free seat is on neither, nor is a student
+ * with no plan on file. Free seats hold no first payment either.
+ *
+ * Before admin rebuild 2 it held the visible $97 plan only, from 25 May; the
+ * rebuild opened it to every plan from the launch; the owner's answer brings
+ * the $97 plans back, both of them, from the launch as before.
  *
  * THE COLUMNS, as before: Week 1 (days 1 to 7), Week 2 (8 to 14), Week 3
  * (15 to 21), Week 4 (22 to 30), Churned (canceled, any day) and Month 2+
@@ -25,14 +33,14 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRowsByKey } from "./supabase-pagination.ts";
-import { progressPercent } from "./constants.ts";
+import { MONTHLY_97_PLAN_IDS, progressPercent } from "./constants.ts";
 import { DISCOUNT_LAUNCH_DATE } from "./discount.ts";
 import { activityLabel, type ActivityLabel } from "./curriculum-reset.ts";
 import { isCanceling } from "./metrics-definitions.ts";
 import type { CourseActivity } from "./types-erased.ts";
 import { agoText, bareUsername, dayNumber, failed, ok, readCountingLessons, readOf, type Read, type Problem } from "./people-common.ts";
 
-/** The columns a card needs. Never `*`, and never a plan. */
+/** The columns a card needs. Never `*`, and never a plan: the plan is the read's filter, never a column. */
 export const JOURNEY_COLUMNS = "id, name, email, discord_username, membership_status, first_paid_at, last_active_at, cancel_scheduled_at";
 
 /** The memberships the board shows: on the program, or churned from it. */
@@ -67,6 +75,7 @@ export async function readJourney(supabase: SupabaseClient): Promise<JourneyRead
           .select(JOURNEY_COLUMNS)
           .not("whop_membership_id", "is", null)
           .in("membership_status", [...JOURNEY_STATUSES])
+          .in("whop_plan_id", MONTHLY_97_PLAN_IDS)
           .gte("first_paid_at", DISCOUNT_LAUNCH_DATE)
           .order("id"),
       "id",

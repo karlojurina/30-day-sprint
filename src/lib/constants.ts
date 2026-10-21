@@ -54,6 +54,26 @@ export const PAYING_WHOP_PLAN_IDS = new Set<string>([
 ]);
 
 /**
+ * The course's two $97 monthly plans, as Whop listed them live on
+ * 2026-09-03 (system-docs/whop_plan_inventory_2026-09-03.md, product
+ * prod_eE7r6SXa3H0MX): plan_4ZrwR4PmBsVsx is the visible one, and
+ * plan_UoKS5Tjqvp0Cj a hidden one that still holds paying members.
+ *
+ * All students (/admin/students, src/lib/admin/students-list.ts) and the
+ * Student journey (/admin/journey, src/lib/admin/journey-board.ts) list a
+ * student on one of these two plans and nobody else, the owner's answer of
+ * 2026-10-21: course members only, and only the $97 ones. A yearly plan, an
+ * ETfB owner's plan, an Apex seat or a free plan keeps a student off both
+ * pages, never out of the app: no access check reads this list.
+ *
+ * Not PAYING_WHOP_PLAN_IDS above, on purpose. That set holds the visible
+ * plan alone, and the CSM crons, the snapshots and the Dashboard read it;
+ * that it misses the hidden plan is a separate task, which this list does
+ * not settle.
+ */
+export const MONTHLY_97_PLAN_IDS: readonly string[] = ["plan_4ZrwR4PmBsVsx", "plan_UoKS5Tjqvp0Cj"];
+
+/**
  * CSM tasks (pace / stalled / no-ship / not-activated / engagement
  * alerts) only fire for students currently inside their 30-day sprint
  * window. Students past day 30 are graduates or deeply lapsed —

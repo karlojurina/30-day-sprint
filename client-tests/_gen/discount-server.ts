@@ -348,8 +348,8 @@ export const MEMBERSHIP_UNCHECKED = "We couldn't check your membership just now.
  * to try again. It used to let the request through and leave the coupon to
  * the approve route. Since T-122 a Whop id on file that is missing, a
  * payment's, or one Whop does not know is no reason any more: the check
- * finds the membership through the student's Whop user, or judges the
- * latest real payment.
+ * finds the membership through the student's Whop user, and judges the
+ * student's real course payments (every one since T-122's second fix round).
  */
 export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: false }> {
   return { grant: false, status: 503, state: "read-failed", error: MEMBERSHIP_UNCHECKED };

@@ -10,7 +10,8 @@
  * (checkMembershipDiscount in src/lib/membership-discount.ts: Whop now, no
  * request started after 6 s and none waited on past 8 s; since T-122 the
  * membership on file, else every course membership found through the
- * student's Whop user, else the latest real payment), and Whop's answer
+ * student's Whop user, and since its second fix round every real course
+ * payment whenever those show no discount), and Whop's answer
  * is written to student_membership_discounts, so the list read after it
  * shows the row as Whop has it now: with the coupon gone, the 30% rule
  * decides the row again and Approve is back. No Whop code is made and the

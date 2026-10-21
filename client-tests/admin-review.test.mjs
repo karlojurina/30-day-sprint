@@ -492,6 +492,8 @@ console.log('\n=== The coupon rule: a stored id that is not a membership, and a 
     if (u.pathname === '/api/v2/memberships') return json({ data: [{ id: 'mem_devPay', user: 'user_devPay', product: 'prod_devCourse', status: 'active', valid: true }], pagination: { current_page: 1, total_page: 1 } })
     if (u.pathname === '/api/v1/memberships/mem_devPay') return json({ id: 'mem_devPay', promo_code_id: null, plan_id: 'plan_m', renewal_price: '97.00' })
     if (u.pathname === '/api/v1/plans/plan_m') return json({ id: 'plan_m', renewal_price: '97.00' })
+    // Since T-122's second fix round a membership with no discount is followed by the user's real payments: none here.
+    if (u.pathname === '/api/v1/payments') return json({ data: [], page_info: { has_next_page: false, end_cursor: null } })
     return new Response('{}', { status: 404 })
   }
   const warned = []

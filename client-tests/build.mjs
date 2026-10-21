@@ -98,11 +98,15 @@ gen('../src/components/world-v6/checkpointView.ts', './_gen/checkpointView.ts', 
 // curriculum-reset.ts imports only a TYPE from supabase-js, which --experimental-strip-types erases.
 gen('../src/lib/curriculum-reset.ts', './_gen/curriculum-reset.ts')
 
-// achievements.ts imports curriculum-reset.ts (above) and only a TYPE from
-// supabase-js. titles.ts imports only a TYPE, but from an @/ path, which this
-// file refuses: the line goes and the type (a union of strings) reads as string.
+// achievements.ts imports curriculum-reset.ts (above), achievement-rules.ts
+// (v112: Triple Threat's and Habit Builder's rules and the share's, no
+// imports, so it copies across untouched) and only a TYPE from supabase-js.
+// titles.ts imports only a TYPE, but from an @/ path, which this file
+// refuses: the line goes and the type (a union of strings) reads as string.
 // achievements-cutover.test.mjs takes the old copies of both from git itself.
+gen('../src/lib/achievement-rules.ts', './_gen/achievement-rules.ts')
 gen('../src/lib/achievements.ts', './_gen/achievements.ts', [
+  ['from "./achievement-rules"', 'from "./achievement-rules.ts"'],
   ['from "./curriculum-reset"', 'from "./curriculum-reset.ts"'],
   // Discount Earned reads the launch cutoff from the map's own module (above).
   ['from "./world/discount"', 'from "./discount.ts"'],

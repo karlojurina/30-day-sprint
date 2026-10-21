@@ -10,7 +10,7 @@ import type {
   WhopLessonInteractionWebhookData,
 } from "@/types/whop";
 import { createHmac } from "crypto";
-import { afterCompletionWrite } from "@/lib/complete-lesson";
+import { afterCompletionWrite, markCompletedAtReal } from "@/lib/complete-lesson";
 
 /**
  * Verify a Whop webhook using the Standard Webhooks / Svix signature
@@ -437,8 +437,11 @@ export async function POST(request: NextRequest) {
       // The steps the app runs after a lesson (lesson-watched): the streak,
       // the "came back" check, the badges, the CSM tasks. Once, on the
       // delivery that finished the lesson, never on a retry. Each step is
-      // best-effort and none can throw past it.
+      // best-effort and none can throw past it. First the row is marked as
+      // finished at this event's moment (v112, completed_at_real), so the
+      // badges count it on that day; best-effort too, never a 500.
       if (finished) {
+        await markCompletedAtReal(supabase, student.id, [lesson.id]);
         await afterCompletionWrite(supabase, student.id);
       }
       break;

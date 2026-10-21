@@ -513,7 +513,7 @@ export async function GET(request: NextRequest) {
           // Streak FIRST, then achievements — the same order the other three
           // write paths use (toggle-lesson:56, mark-action-shipped:133,
           // refresh-watch-sync:54). Without it the streak is whatever it was
-          // before this sync, so streak_7 / streak_14 / unbroken get judged
+          // before this sync, so streak_7 / unbroken get judged
           // against a stale value and silently under-award.
           // Only when the sync added something, as refresh-watch-sync does: a
           // login alone is no lesson work (backend_readiness.md, item 3).

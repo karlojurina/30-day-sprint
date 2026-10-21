@@ -54,11 +54,11 @@ export async function POST(request: NextRequest) {
 
   const startedAt = Date.now();
 
-  // The candidate set is the same population the achievement_unlock_stats
-  // view counts (v90): joined since launch, not csm_exempt, and has actually
-  // used the app. Evaluating someone who never opened the app would award
-  // nothing anyway — we have no lesson rows for them — so this just avoids
-  // the wasted round-trips.
+  // The candidate set is the population the achievement_unlock_stats view
+  // counted from v90 until v112: joined since launch, not csm_exempt, and has
+  // actually used the app (v112's view counts every active member). Evaluating
+  // someone with no lesson rows would award no lesson badge anyway, so this
+  // just avoids the wasted round-trips.
   // Deliberately TWO paginated reads rather than one embedded join. Joining
   // student_lesson_completions returns a row PER COMPLETION, not per student,
   // so a few hundred students would blow past PostgREST's ~1000-row cap and

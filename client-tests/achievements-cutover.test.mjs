@@ -7,6 +7,12 @@
 // entry points, buildAchievementSnapshot and evaluateAchievements, against the
 // same stand-in Supabase client, and must agree on every rule's verdict and on
 // every row they insert. Then the new course: 8 areas, the reset key set.
+//
+// Since v112 (the badges for the new course) the parity holds for the rules
+// v112 left as they were: it took out eight (the six old-course ones, Region
+// Sweep and Two Weeks Strong) and changed Triple Threat (lessons really
+// finished on one day), whose own suite is achievements-v112.test.mjs. Habit
+// Builder is in the parity: with no switch it is the old rule.
 import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -149,6 +155,7 @@ function tablesFor(lessons, students, resetAt = null) {
   const needsAction = new Map(lessons.map((l) => [l.id, l.requires_action]))
   return {
     students: students.filter((s) => !s.noRow).map((s) => ({ id: s.id, joined_at: s.joined_at, first_paid_at: s.first_paid_at })),
+    // streak: [current, longest, last counted day]; the day is null unless a fixture names it.
     student_lesson_completions: students.flatMap((s) => (s.done ?? []).map(([lessonId, at, kind = 'done']) => ({
       student_id: s.id, lesson_id: lessonId,
       // 'done': watched, and shipped when the lesson has an action item;
@@ -158,7 +165,7 @@ function tablesFor(lessons, students, resetAt = null) {
       skipped_at: kind === 'skip' ? at : null,
     }))),
     lessons: lessons.map((l) => ({ ...l })),
-    student_streaks: students.filter((s) => s.streak).map((s) => ({ student_id: s.id, current_streak: s.streak[0], longest_streak: s.streak[1] })),
+    student_streaks: students.filter((s) => s.streak).map((s) => ({ student_id: s.id, current_streak: s.streak[0], longest_streak: s.streak[1], last_streak_date: s.streak[2] ?? null })),
     student_milestones: students.filter((s) => s.bounty).map((s) => ({ student_id: s.id, bounty_access_claimed_at: s.bounty })),
     discount_requests: students.flatMap((s) => (s.discounts ?? []).map(([status, at], i) => ({ id: `${s.id}-d${i}`, student_id: s.id, status, created_at: at }))),
     admin_config: resetAt ? [{ key: 'curriculum_reset_at', value: resetAt }] : [],
@@ -166,15 +173,27 @@ function tablesFor(lessons, students, resetAt = null) {
   }
 }
 
-/** A snapshot with its Sets as sorted arrays and its empty regions dropped. */
+// v112: the rules taken out, and the ones the parity holds for (every
+// current rule but Triple Threat, whose rule v112 changed).
+const REMOVED = ['r1_clear', 'r2_clear', 'r3_clear', 'r4_clear', 'region_sweep', 'early_finisher', 'speedrun', 'streak_14']
+const SAME = NEW.ACHIEVEMENT_RULES.map((r) => r.id).filter((id) => id !== 'triple_play')
+// The snapshot's fields the SAME rules read, which both builders make.
+const SHARED = ['completedLessonIds', 'shippedActionLessonIds', 'skippedLessonIds', 'lessonsByRegion', 'currentStreak',
+  'longestStreak', 'bountyAccessClaimedAt', 'discountEarnedAt', 'dayNumber']
+
+/** A snapshot's shared fields, with its Sets as sorted arrays and its empty regions dropped. */
 const norm = (snap) => snap && {
-  ...snap,
+  ...Object.fromEntries(SHARED.map((k) => [k, snap[k]])),
   completedLessonIds: [...snap.completedLessonIds].sort(),
   shippedActionLessonIds: [...snap.shippedActionLessonIds].sort(),
   skippedLessonIds: [...snap.skippedLessonIds].sort(),
   lessonsByRegion: Object.fromEntries(Object.entries(snap.lessonsByRegion).filter(([, v]) => v.length).sort(([a], [b]) => (a < b ? -1 : 1))),
 }
-const verdicts = (rules, snap) => rules.map((r) => [r.id, r.evaluate(snap)])
+/** The SAME rules' verdicts. An old builder's snapshot has no streakDaysSinceSwitch: on the old course it is null. */
+const verdicts = (rules, snap) => {
+  const s = snap && 'streakDaysSinceSwitch' in snap ? snap : { ...snap, streakDaysSinceSwitch: null }
+  return SAME.map((id) => [id, rules.find((r) => r.id === id).evaluate(s)])
+}
 const earned = (rules, snap) => rules.filter((r) => r.evaluate(snap)).map((r) => r.id)
 
 /** Runs `fn` with console.error captured; returns [result, lines]. */
@@ -192,8 +211,9 @@ console.log('\n=== The copies under test ===')
   ok(oldSrc.includes('SPRINT_EXCLUDED_LESSON_IDS') && oldSrc.includes('const REGION_IDS'), `achievements.old.ts is the module at ${BASE} (fixed r1..r4, the l057 list)`)
   ok(newSrc.includes('getCurriculumResetAt') && !newSrc.includes('REGION_IDS'), 'achievements.ts is the current module (reads the switch, no fixed region list)')
   ok(fs.readFileSync(gen('titles.old.ts'), 'utf8') !== fs.readFileSync(gen('titles.ts'), 'utf8'), `titles.old.ts (${BASE}) and titles.ts differ, so the parity below compares two modules`)
-  ok(same(OLD.ACHIEVEMENT_RULES.map((r) => r.id), NEW.ACHIEVEMENT_RULES.map((r) => r.id)),
-     `the same ${NEW.ACHIEVEMENT_RULES.length} rules in the same order`, NEW.ACHIEVEMENT_RULES.map((r) => r.id).join(' '))
+  ok(same(OLD.ACHIEVEMENT_RULES.map((r) => r.id).filter((id) => !REMOVED.includes(id)), NEW.ACHIEVEMENT_RULES.map((r) => r.id)) &&
+     REMOVED.every((id) => OLD.ACHIEVEMENT_RULES.some((r) => r.id === id)),
+     `the rules at ${BASE} less the eight v112 took out, in the same order: ${NEW.ACHIEVEMENT_RULES.length}`, NEW.ACHIEVEMENT_RULES.map((r) => r.id).join(' '))
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -234,7 +254,7 @@ Date.now = () => NOW_OLD
     { id: 'no-student-row', noRow: true, done: [['l001', at(0)]] },
   ]
   const T = tablesFor(OLD_LESSONS, STUDENTS)
-  const truths = new Map(NEW.ACHIEVEMENT_RULES.map((r) => [r.id, { yes: 0, no: 0 }]))
+  const truths = new Map(SAME.map((id) => [id, { yes: 0, no: 0 }]))
 
   for (const s of STUDENTS) {
     const dbO = db(structuredClone(T)), dbN = db(structuredClone(T))
@@ -244,7 +264,7 @@ Date.now = () => NOW_OLD
       ok(snapO === null && snapN === null, `${s.id}: both builders answer null`)
       continue
     }
-    ok(same(snapO, snapN) || same(norm(snapO), norm(snapN)), `${s.id}: snapshot identical`,
+    ok(same(norm(snapO), norm(snapN)) && snapN.streakDaysSinceSwitch === null, `${s.id}: snapshot identical (the fields both builders make; no switch, so no streak days since one)`,
        `day ${snapN.dayNumber}, ${snapN.completedLessonIds.size} done, regions ${Object.keys(snapN.lessonsByRegion).join('')}`)
     ok(same(Object.entries(snapO.lessonsByRegion), Object.entries(snapN.lessonsByRegion)),
        `${s.id}: region lists identical as built, key order included`)
@@ -262,14 +282,16 @@ Date.now = () => NOW_OLD
   ok(oneSided.length === 0, `every one of the ${truths.size} rules is true for some fixture and false for another`,
      oneSided.length ? `one-sided: ${oneSided.join(', ')}` : `${STUDENTS.length - 1} students`)
 
-  // The same students through evaluateAchievements: what gets inserted.
+  // The same students through evaluateAchievements: what gets inserted, of
+  // the SAME rules; and never one of the eight v112 took out.
   for (const s of STUDENTS) {
     const dbO = db(structuredClone(T)), dbN = db(structuredClone(T))
-    const gotO = await OLD.evaluateAchievements(dbO, s.id)
+    const gotO = (await OLD.evaluateAchievements(dbO, s.id)).filter((id) => SAME.includes(id))
     const gotN = await NEW.evaluateAchievements(dbN, s.id)
-    const rowsO = dbO.inserted.map((r) => [r.table, r.student_id, r.achievement_id])
-    const rowsN = dbN.inserted.map((r) => [r.table, r.student_id, r.achievement_id])
-    ok(same(gotO, gotN) && same(rowsO, rowsN), `${s.id}: evaluateAchievements inserts the same rows`, `${gotN.length} new`)
+    const rowsO = dbO.inserted.filter((r) => SAME.includes(r.achievement_id)).map((r) => [r.table, r.student_id, r.achievement_id])
+    const rowsN = dbN.inserted.filter((r) => SAME.includes(r.achievement_id)).map((r) => [r.table, r.student_id, r.achievement_id])
+    ok(same(gotO, gotN.filter((id) => SAME.includes(id))) && same(rowsO, rowsN) && !gotN.some((id) => REMOVED.includes(id)),
+       `${s.id}: evaluateAchievements inserts the same rows, and none v112 took out`, `${gotN.length} new`)
   }
 
   // The lessons in a different row order: same verdicts (no rule reads the
@@ -303,16 +325,19 @@ Date.now = () => NOW_OLD
     const lessonsRead = dbN.reads.find((q) => q.table === 'lessons')
     ok(lessonsRead.cols.split(',').map((c) => c.trim()).includes('counts_toward_progress'), 'the lessons read selects counts_toward_progress', lessonsRead.cols)
     ok(dbN.reads.some((q) => q.table === 'admin_config'), 'the builder reads the switch from admin_config')
+    const streakRead = dbN.reads.find((q) => q.table === 'student_streaks')
+    ok(streakRead.cols.split(',').map((c) => c.trim()).includes('last_streak_date'), 'v112: the streak read selects last_streak_date (Habit Builder counts from the switch)', streakRead.cols)
   }
 }
 
 console.log('\n=== Old course: the rules alone on hand-built snapshots ===')
 {
+  // The old course: no switch, so no streak days since one (v112's field, null).
   const base = {
     completedLessonIds: new Set(), shippedActionLessonIds: new Set(), skippedLessonIds: new Set(),
     lessonsByRegion: { r1: ['l001', 'l002'], r2: ['l017'], r3: ['l033'], r4: ['l049'] },
-    currentStreak: 0, longestStreak: 0, bountyAccessClaimedAt: null, discountEarnedAt: null,
-    dayNumber: 1, uniqueActiveDaysSinceJoin: 0, maxLessonsInOneDay: 0, maxRegionLessonsInOneDay: 0,
+    currentStreak: 0, longestStreak: 0, streakDaysSinceSwitch: null, bountyAccessClaimedAt: null, discountEarnedAt: null,
+    dayNumber: 1, maxLessonsInOneDay: 0,
   }
   const all = new Set(['l001', 'l002', 'l017', 'l033', 'l049'])
   const cases = [
@@ -324,9 +349,8 @@ console.log('\n=== Old course: the rules alone on hand-built snapshots ===')
     ['everything, Day 14, a skip', { completedLessonIds: all, dayNumber: 14, skippedLessonIds: new Set(['l002']) }],
     ['everything, Day 21', { completedLessonIds: all, dayNumber: 21 }],
     ['all but one of r1', { completedLessonIds: new Set(['l001', 'l017', 'l033', 'l049']), dayNumber: 3, currentStreak: 9 }],
-    ['region sweep edges', { maxRegionLessonsInOneDay: 3, maxLessonsInOneDay: 5 }],
-    ['region sweep edges, one short', { maxRegionLessonsInOneDay: 3, maxLessonsInOneDay: 4 }],
     ['streak edges', { currentStreak: 6, longestStreak: 14 }],
+    ['streak edges, best 6', { currentStreak: 6, longestStreak: 6 }],
     ['discount and bounty', { discountEarnedAt: '2026-10-01T00:00:00Z', bountyAccessClaimedAt: '2026-10-02T00:00:00Z' }],
   ]
   for (const [label, o] of cases) {
@@ -389,17 +413,24 @@ Date.now = () => NOW_NEW
   ok(!has('all-8-one-skip', 'perfect_run') && has('all-8-one-skip', 'unbroken'), 'all 8 with one skip: unbroken, not perfect_run')
   ok(has('paid-after-the-switch', 'unbroken'), 'paid after the switch, all 8 in 7 days, streak 7 on Day 7: unbroken')
   {
-    const oldSix = ['r1_clear', 'r2_clear', 'r3_clear', 'r4_clear', 'early_finisher', 'speedrun']
+    // The six were false on the new course; since v112 they, Region Sweep and
+    // Two Weeks Strong are no rules at all.
     const S = snaps['everything-incl-pond']
-    const got = oldSix.map((r) => has('everything-incl-pond', r))
-    ok(got.every((v) => v === false), 'r1_clear..r4_clear, early_finisher, speedrun with everything done: all false', show(got))
+    const left = REMOVED.filter((r) => NEW.ACHIEVEMENT_RULES.some((x) => x.id === r))
+    ok(left.length === 0, 'r1_clear..r4_clear, early_finisher, speedrun, region_sweep, streak_14: none is a rule any more', show(left))
     ok(has('everything-incl-pond', 'unbroken') && has('everything-incl-pond', 'perfect_run') && S.completedLessonIds.size === 41,
-       'the same student holds unbroken and perfect_run, so the six are false for the course, not for the student')
+       'the same student holds unbroken and perfect_run: the course can still be finished')
   }
-  ok(has('five-of-a3-in-a-day', 'region_sweep') && snaps['five-of-a3-in-a-day'].maxRegionLessonsInOneDay === 5,
-     'region_sweep: 5 lessons of a3 on one day', `max in one area ${snaps['five-of-a3-in-a-day'].maxRegionLessonsInOneDay}`)
-  ok(has('four-of-a7-and-the-pond-in-a-day', 'region_sweep'),
-     'region_sweep: 4 of a7 and the pond row on one day, as l057 counts toward it on the old course')
+  {
+    // Region Sweep's old cases: 5 lessons of a3 on one day, 4 of a7 and the pond row. Nothing named
+    // region_sweep is inserted (its catalog row is gone, and an insert of it would fail the whole insert).
+    for (const id of ['five-of-a3-in-a-day', 'four-of-a7-and-the-pond-in-a-day']) {
+      const d = db(structuredClone(T))
+      const got = await NEW.evaluateAchievements(d, id)
+      ok(!got.includes('region_sweep') && !d.inserted.some((r) => r.achievement_id === 'region_sweep'),
+         `${id}: no Region Sweep inserted`, show(got))
+    }
+  }
 
   // Control: the module at BASE on the same new-course data. It knows r1..r4
   // only, so nobody could earn the two finishing badges. This is why WI-4 exists.

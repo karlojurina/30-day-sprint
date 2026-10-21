@@ -13,16 +13,17 @@ import type { Achievement } from "@/types/database";
  *   no ?hud      a new student: no streak, no achievements
  *   ?hud=cold    the streak broke: 0 days, best 12; 3 achievements
  *   ?hud=some    a 4-day streak, best 9; 4 achievements
- *   ?hud=long    a 128-day streak; 8 achievements
+ *   ?hud=long    a 128-day streak; 6 achievements
  *   ?hud=all     a 30-day streak; every achievement
  *   ?hud=fresh   a 7-day streak and 2 achievements; Habit Builder unlocks
  *                1.5 s after the map is ready, and the corner toasts it
  *
- * The catalog is the ten achievements the course switch keeps (cutover PRD,
- * C3: the six tied to the old four regions or the 30-day clock are deleted),
- * with the names, words, tiers and order the database has after v91, and the
- * shares of students measured on 2026-09-18 (v91's header). Pretend numbers
- * for a review page; the real ones are read from achievement_unlock_stats.
+ * The catalog is the eight achievements v112 keeps (Region Sweep and Two
+ * Weeks Strong went), with the names, words, tiers and order the database
+ * has after it. The shares are pretend numbers for a review page, the ones
+ * measured on 2026-09-18 (v91's header) for these eight; the real ones are
+ * read from achievement_unlock_stats, which since v112 divides by every
+ * active member.
  *
  * Sign out is counted and does nothing else: no request leaves the page.
  *
@@ -37,33 +38,29 @@ const PRESETS: readonly HudPreset[] = ["cold", "some", "long", "all", "fresh"];
 const CATALOG: readonly Achievement[] = [
   { id: "first_lesson", name: "First Steps", description: "Complete your first lesson.", icon: "", rarity: "common", sort_order: 1 },
   { id: "triple_play", name: "Triple Threat", description: "Complete 3 lessons in a day.", icon: "", rarity: "common", sort_order: 2 },
-  { id: "region_sweep", name: "Region Sweep", description: "Complete 5 lessons from the same region in a single day.", icon: "", rarity: "common", sort_order: 3 },
-  { id: "first_action_shipped", name: "Took the Shot", description: "Ship your first action item.", icon: "", rarity: "common", sort_order: 4 },
+  { id: "first_action_shipped", name: "Took the Shot", description: "Complete your first action item.", icon: "", rarity: "common", sort_order: 4 },
   { id: "bounty_access_claimed", name: "Through the Gate", description: "Get approved for Bounties.", icon: "", rarity: "uncommon", sort_order: 5 },
   { id: "streak_7", name: "Habit Builder", description: "Reach a 7-day streak.", icon: "", rarity: "uncommon", sort_order: 8 },
-  { id: "discount_earned", name: "Discount Earned", description: "Earn the 30% off month two.", icon: "", rarity: "rare", sort_order: 11 },
-  { id: "streak_14", name: "Two Weeks Strong", description: "Reach a 14-day streak.", icon: "", rarity: "rare", sort_order: 12 },
-  { id: "perfect_run", name: "Perfectionist", description: "Finish with zero skipped lessons.", icon: "", rarity: "legendary", sort_order: 13 },
-  { id: "unbroken", name: "Unbroken", description: "Finish the whole sprint without ever breaking your streak.", icon: "", rarity: "legendary", sort_order: 16 },
+  { id: "discount_earned", name: "Discount Earned", description: "Get the 30% off your next month approved.", icon: "", rarity: "rare", sort_order: 11 },
+  { id: "perfect_run", name: "Perfectionist", description: "Finish every lesson in the course.", icon: "", rarity: "legendary", sort_order: 13 },
+  { id: "unbroken", name: "Unbroken", description: "Finish the whole course without breaking your streak.", icon: "", rarity: "legendary", sort_order: 16 },
 ];
 
 const STATS: ReadonlyMap<string, number> = new Map([
   ["first_lesson", 98.1],
   ["triple_play", 91.6],
-  ["region_sweep", 82.7],
   ["first_action_shipped", 24.7],
   ["bounty_access_claimed", 21.7],
   ["streak_7", 13.1],
   ["discount_earned", 5.7],
-  ["streak_14", 3.9],
   ["perfect_run", 4.2],
   ["unbroken", 0],
 ]);
 
 const HELD: Record<HudPreset, readonly string[]> = {
   cold: ["first_lesson", "triple_play", "streak_7"],
-  some: ["first_lesson", "triple_play", "region_sweep", "first_action_shipped"],
-  long: ["first_lesson", "triple_play", "region_sweep", "first_action_shipped", "bounty_access_claimed", "streak_7", "streak_14", "discount_earned"],
+  some: ["first_lesson", "triple_play", "first_action_shipped", "bounty_access_claimed"],
+  long: ["first_lesson", "triple_play", "first_action_shipped", "bounty_access_claimed", "streak_7", "discount_earned"],
   all: CATALOG.map((a) => a.id),
   fresh: ["first_lesson", "triple_play"],
 };

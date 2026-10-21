@@ -16,10 +16,11 @@ import { ACTIVITY_ORDER, ACTIVITY_TEXT } from "@/lib/useJourneyPaceCounts";
 
 /**
  * The Student journey, /admin/journey (admin rebuild 2, D8), in the brand
- * kit's dark look: the new program's students (a first payment on or after
- * the launch, 9 October, any plan) in six columns by days since that
- * payment: Week 1 to 4, Churned and Month 2+. The reads and the rules are in
- * src/lib/admin/journey-board.ts; this file shows them.
+ * kit's dark look: the new program's students (course members on a $97
+ * monthly plan, as on All students, with a first payment on or after the
+ * launch, 9 October; the header's line says so) in six columns by days
+ * since that payment: Week 1 to 4, Churned and Month 2+. The reads and the
+ * rules are in src/lib/admin/journey-board.ts; this file shows them.
  *
  * A read that failed says so: the students read is the page's error, with
  * Retry, never an empty board; a failed progress, area or course read shows
@@ -97,7 +98,7 @@ export function JourneyView({
   const header = (data: Journey | null) => (
     <ListHeader
       title="Student journey"
-      description={`The new program's students: a first payment on or after ${dayLabel(data?.launchedAt ?? "2026-10-08T22:00:00.000Z")}, on any plan, by days since that payment. Open a card for the student.`}
+      description={`The new program's students: course members on a $97 monthly plan with a first payment on or after ${dayLabel(data?.launchedAt ?? "2026-10-08T22:00:00.000Z")}, by days since that payment. Open a card for the student.`}
       meta={
         data ? (
           `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${data.total} ${data.total === 1 ? "student" : "students"}`

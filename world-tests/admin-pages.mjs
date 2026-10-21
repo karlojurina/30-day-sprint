@@ -69,7 +69,10 @@
  *           says when a read failed; then by clicks: the insights' ranges, the
  *           students' filters and search, the student's ticks and areas, the
  *           journey's drawer (opened by a card, closed by Escape); every tap
- *           44px, and no bold word glued to the next one
+ *           44px, and no bold word glued to the next one. Since the owner's
+ *           answer of 2026-10-21 All students and the journey hold course
+ *           members on a $97 monthly plan alone (the hidden one too, never a
+ *           yearly or an ETfB owner's plan), and their headers say so
  *   feedback  /dev/admin/feedback/lessons (admin rebuild 2, WI-7): full,
  *           empty, loading, error, unplaced and stray; the areas in route
  *           order with their counts, a lesson's average and count, its 3
@@ -1626,8 +1629,16 @@ if (wanted('people')) {
     expect(header.some((t) => t.includes('Username') && t.includes('First paid') && !t.includes('Discord')), 'the column reads Username, not Discord', JSON.stringify(header))
     const names = await page.$$eval('main a.list-row', (as) => as.map((a) => a.querySelector('p')?.textContent))
     expect(names[0] === 'Nora Brandt' && names[names.length - 1] === 'Felix Moreau' && names.length === 13,
-      'every student with a first payment, newest first payment first (Nora, 20 Oct) to the oldest (Felix, 28 May)', names.join(', '))
-    expect(!/\bplan\b/i.test(await bodyText()) || (await bodyText()).includes('any plan'), 'no plan shown on any row (the page says "any plan" once)')
+      'every course member on a $97 monthly plan with a first payment, newest first payment first (Nora, 20 Oct) to the oldest (Felix, 28 May)', names.join(', '))
+    // The owner's answer of 2026-10-21: course members only, and only the $97 ones.
+    expect(names.includes('Omar Haddad') && !names.includes('Yusuf Demir') && !names.includes('Clara Vance'),
+      'Omar, on the hidden $97 plan, is listed; Yusuf (a yearly plan) and Clara (an ETfB owner\'s plan), both paid since the launch, are not', names.join(', '))
+    const words = await page.evaluate(() => ({
+      description: [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))?.querySelector('p')?.textContent ?? null,
+      rows: [...document.querySelectorAll('main a.list-row')].map((a) => a.innerText).join(' '),
+    }))
+    expect(words.description === 'Course members on a $97 monthly plan who have paid at least once, newest first payment first.' && !/\bplan\b/i.test(words.rows),
+      'the header\'s line says who is listed in plain words, and no row shows a plan', JSON.stringify(words.description))
     await press(await button('Payment failed1'))
     await sleep(150)
     expect((await page.$$eval('main a.list-row', (as) => as.length)) === 1 && (await bodyText()).includes('Priya Raman'), 'Payment failed: Priya alone')
@@ -1763,10 +1774,14 @@ if (wanted('people')) {
     await settledPage()
     const cols = await page.$$eval('main section[aria-label]', (ss) => ss.map((s) => `${s.getAttribute('aria-label')}:${s.querySelectorAll('button').length}`))
     expect(JSON.stringify(cols) === JSON.stringify(['Week 1:4', 'Week 2:3', 'Week 3:0', 'Week 4:0', 'Churned:1', 'Month 2+:0']),
-      'the six columns: on 21 October everyone is in weeks 1 and 2, the canceled one in Churned', JSON.stringify(cols))
+      'the six columns: on 21 October everyone is in weeks 1 and 2, the canceled one in Churned (Clara and Yusuf, off the $97 plans, would make them 5 and 4)', JSON.stringify(cols))
     const text = await bodyText()
-    expect(text.includes('a first payment on or after Fri 9 Oct, on any plan') && !text.includes('Leo Hartmann') && !text.includes('Theo Marsh'),
-      'the new program\'s students only: Leo (paid in September) and Theo (no Whop membership) are not on it')
+    const description = await page.evaluate(() => [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))?.querySelector('p')?.textContent ?? null)
+    expect(description === 'The new program\'s students: course members on a $97 monthly plan with a first payment on or after Fri 9 Oct, by days since that payment. Open a card for the student.'
+        && !text.includes('Leo Hartmann') && !text.includes('Theo Marsh'),
+      'the header\'s line says who is on it in plain words; the new program\'s students only: Leo (paid in September) and Theo (no Whop membership) are not on it', JSON.stringify(description))
+    expect(text.includes('Omar Haddad') && !text.includes('Yusuf Demir') && !text.includes('Clara Vance'),
+      'the same plans as All students: Omar, on the hidden $97 plan, is on it; Yusuf (a yearly plan) and Clara (an ETfB owner\'s plan), both paid since the launch, are not')
     await press(await page.evaluateHandle(() => [...document.querySelectorAll('main section button')].find((b) => b.textContent.includes('Maya Lindqvist'))))
     await page.waitForSelector('aside[role="dialog"]')
     // textContent: the block's title is drawn in capitals, which innerText reports.

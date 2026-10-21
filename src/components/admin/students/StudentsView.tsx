@@ -23,8 +23,9 @@ import {
 
 /**
  * All students, /admin/students (admin rebuild 2, D9), in the brand kit's
- * dark look: every student with a real first payment, any plan, newest
- * first payment first. The rules and the reads are in
+ * dark look: the course's members on a $97 monthly plan who have paid at
+ * least once (the owner's answer of 2026-10-21), newest first payment first,
+ * and the header's line says so. The rules and the reads are in
  * src/lib/admin/students-list.ts; this file shows them.
  *
  * Username is students.discord_username, which holds a Whop or a Discord
@@ -32,7 +33,8 @@ import {
  * failed says so: the list's own read is the page's error, with Retry; a
  * failed progress or course read shows "Couldn't load" in its column and a
  * line above the list, why in plain words with the database's own behind
- * Details (review-parts.tsx). No plan anywhere.
+ * Details (review-parts.tsx). No plan on any row: the header names the $97
+ * plan once, as who is listed.
  *
  * The rows come 100 at a time ("Show 100 more"), so a phone is not handed
  * every student at once; the search and the filters work on all of them.
@@ -104,7 +106,7 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
   const header = (data: StudentsList | null, count: number | null) => (
     <ListHeader
       title="All students"
-      description="Everyone with a first payment, on any plan, newest first payment first."
+      description="Course members on a $97 monthly plan who have paid at least once, newest first payment first."
       meta={
         data ? (
           `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${count} ${count === 1 ? "student" : "students"}`
@@ -196,7 +198,7 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
       {filtered.length === 0 ? (
         <Card>
           <EmptyState
-            title={data.rows.length === 0 ? "No student has a first payment yet." : "No student matches."}
+            title={data.rows.length === 0 ? "No course member on a $97 monthly plan has paid yet." : "No student matches."}
             description={data.rows.length === 0 ? undefined : "Clear the search or pick another membership."}
           />
         </Card>

@@ -2,12 +2,22 @@
  * All students, /admin/students (admin rebuild 2, D9): what the page reads
  * and the list it shows.
  *
- * WHO IS ON IT. Every student with a real first payment
- * (students.first_paid_at is not null), whatever their plan, membership
- * status or date. Since the first-paid fix (2026-10-20) first_paid_at is the
- * first real Whop payment, so free seats, which hold null, are left out. The
- * list used to hold the $97 monthly plan only, from 25 May, without saying
- * so; no plan is read or shown any more.
+ * WHO IS ON IT. The course's members on a $97 monthly plan who have paid at
+ * least once: students.whop_plan_id is one of MONTHLY_97_PLAN_IDS (the
+ * visible plan and the hidden one, src/lib/constants.ts) and
+ * students.first_paid_at is not null, whatever their membership status or
+ * date. The owner's answer of 2026-10-21: course members only, and only the
+ * $97 ones, so a yearly plan, an ETfB owner who paid, an Apex seat or a free
+ * plan is never on it, nor is a student with no plan on file. Since the
+ * first-paid fix (2026-10-20) first_paid_at is the first real Whop payment,
+ * so a member who never paid, who holds null, is left out too. Both lines are
+ * drawn in the database; the plan is never read as a column or shown on a
+ * row, and the page's header says who is listed.
+ *
+ * Before admin rebuild 2 the list held the visible $97 plan only, from 25
+ * May, without saying so; the rebuild opened it to every plan; the owner's
+ * answer brings the $97 plans back, both of them, at any date. The Student
+ * journey (journey-board.ts) reads the same two plans, so the pages agree.
  *
  * THE ORDER. By first payment, newest first; the page can sort by name,
  * progress or last activity instead.
@@ -27,12 +37,12 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRowsByKey } from "@/lib/supabase-pagination";
-import { progressPercent } from "@/lib/constants";
+import { MONTHLY_97_PLAN_IDS, progressPercent } from "@/lib/constants";
 import { activityLabel, type ActivityLabel } from "@/lib/curriculum-reset";
 import type { CourseActivity } from "@/lib/useJourneyPaceCounts";
 import { bareUsername, dayNumber, failed, ok, readCountingLessons, type Problem, type Read } from "./people-common";
 
-/** The columns the list needs, and no more: `*` would carry every column of every student to the browser. */
+/** The columns the list needs, and no more: `*` would carry every column of every student to the browser. No plan: the plan is the read's filter, never a column. */
 export const LIST_COLUMNS = "id, name, email, discord_username, membership_status, first_paid_at, last_active_at";
 
 export interface ListStudent {
@@ -51,13 +61,19 @@ export interface StudentsListReads {
   countingLessons: Read<number>;
 }
 
-/** Every student with a first payment, any plan, and the two things their progress needs. */
+/** Every student on a $97 monthly plan with a first payment, and the two things their progress needs. */
 export async function readStudentsList(supabase: SupabaseClient): Promise<StudentsListReads> {
   const [students, progress, countingLessons] = await Promise.all([
     // By key, not by offset: a student whose row changes while the pages
     // are read never makes another one drop off (supabase-pagination.ts).
     fetchAllRowsByKey<ListStudent>(
-      () => supabase.from("students").select(LIST_COLUMNS).not("first_paid_at", "is", null).order("id"),
+      () =>
+        supabase
+          .from("students")
+          .select(LIST_COLUMNS)
+          .not("first_paid_at", "is", null)
+          .in("whop_plan_id", MONTHLY_97_PLAN_IDS)
+          .order("id"),
       "id",
     ),
     fetchAllRowsByKey<{ student_id: string; completed_count: number }>(

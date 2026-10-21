@@ -5,7 +5,8 @@
  * layout of /dev/admin calls notFound() anywhere else.
  *
  * MADE-UP PEOPLE ONLY. This repository is public: every student, team
- * member, username, link and code below is invented.
+ * member, username, link and code below is invented. So is every plan id but
+ * the course's two $97 monthly ones, which come from src/lib/constants.ts.
  *
  * The student pages run the REAL builders (buildStudentsList,
  * buildStudentDetail, buildJourney) over made-up reads, so what the dev pages
@@ -27,6 +28,7 @@
  */
 
 import type { Answer } from "@/lib/admin/admin-transport";
+import { MONTHLY_97_PLAN_IDS } from "@/lib/constants";
 import type { InsightsTransport, PeopleTransport, TasksTransport } from "@/lib/admin/people-transport";
 import type { CourseActivity } from "@/lib/useJourneyPaceCounts";
 import type { OutreachInsights } from "@/lib/outreach-insights";
@@ -98,12 +100,21 @@ const LESSONS: DetailLesson[] = [
 const COUNTING = LESSONS.filter((l) => l.counts_toward_progress !== false).length;
 
 // ── The made-up students ────────────────────────────────────────────────────
+
+/** The course's two $97 monthly plans (MONTHLY_97_PLAN_IDS): the visible one, which is everyone's below unless a plan is named, and the hidden one. */
+const [VISIBLE_97, HIDDEN_97] = MONTHLY_97_PLAN_IDS;
+/** Made-up ids of two plans that keep a student off All students and the journey: a yearly plan, and an ETfB owner's. */
+const YEARLY_PLAN = "plan_devYearly0700";
+const BRANDS_PLAN = "plan_devBrands0997";
+
 interface Person {
   id: string;
   name: string | null;
   email: string;
   username?: string;
   status: "active" | "past_due" | "canceled" | "expired";
+  /** students.whop_plan_id; the visible $97 plan when not given. */
+  plan?: string;
   paid: string;
   lastActive?: string | null;
   canceling?: string;
@@ -154,7 +165,8 @@ const PEOPLE: Person[] = [
     paid: "2026-10-20T12:00:00.000Z", lastActive: null, done: 0,
   },
   {
-    id: "p-omar", name: "Omar Haddad", email: "omar@example.com", status: "active",
+    // On the hidden $97 plan: on All students and the journey like everyone on the visible one.
+    id: "p-omar", name: "Omar Haddad", email: "omar@example.com", status: "active", plan: HIDDEN_97,
     paid: "2026-10-16T12:00:00.000Z", lastActive: "2026-10-19T20:00:00.000Z", done: 4, lastLesson: "2026-10-16T20:00:00.000Z",
     request: { status: "applied", code: "ECOM30-A1D9E0", at: "2026-10-18T08:00:00.000Z" },
   },
@@ -187,7 +199,19 @@ const PEOPLE: Person[] = [
     id: "p-theo", name: "Theo Marsh", email: "theo@example.com", status: "active",
     paid: "2026-10-18T09:00:00.000Z", lastActive: "2026-10-19T09:00:00.000Z", done: 0, noWhopMembership: true,
   },
+  // Paid since the launch on a plan that is not one of the course's $97 monthly plans: on neither All students nor the journey.
+  {
+    id: "p-yusuf", name: "Yusuf Demir", email: "yusuf@example.com", username: "yusuf.d", status: "active", plan: YEARLY_PLAN,
+    paid: "2026-10-13T09:00:00.000Z", lastActive: "2026-10-20T09:00:00.000Z", done: 6, lastLesson: "2026-10-20T08:00:00.000Z",
+  },
+  {
+    id: "p-clara", name: "Clara Vance", email: "clara@example.com", status: "active", plan: BRANDS_PLAN,
+    paid: "2026-10-15T09:00:00.000Z", lastActive: "2026-10-16T09:00:00.000Z", done: 0,
+  },
 ];
+
+/** The plans line of All students and the journey, as the database draws it for their reads (`whop_plan_id in MONTHLY_97_PLAN_IDS`). */
+const onA97Plan = (p: Person) => MONTHLY_97_PLAN_IDS.includes(p.plan ?? VISIBLE_97);
 
 /** The journey's ?at=later: more students, paid in September and October, read on 12 November. */
 const LATER_PEOPLE: Person[] = [
@@ -264,8 +288,9 @@ export function fixturePeopleTransport(opts: { state: PeopleState; reloadFails?:
       if (opts.state === "loading") return never();
       if (failNow()) return later(errAnswer(`Couldn't load the students (${READ_FAILED}).`));
       served++;
+      // The reader's own filters, applied here as the database applies them: a $97 plan and a first payment (every person here has one).
       const reads: StudentsListReads & { students: { ok: true; data: ListStudent[] } } = {
-        students: { ok: true, data: people.map(listStudent) },
+        students: { ok: true, data: people.filter(onA97Plan).map(listStudent) },
         progress: partial ? bad() : ok(people.filter((p) => p.done > 0).map((p) => ({ student_id: p.id, completed_count: p.done }))),
         countingLessons: ok(COUNTING),
       };
@@ -329,7 +354,7 @@ export function fixturePeopleTransport(opts: { state: PeopleState; reloadFails?:
       served++;
       // The reader's own filters, applied here as the database applies them.
       const onBoard = people.filter(
-        (p) => !p.noWhopMembership && ["active", "past_due", "canceled"].includes(p.status) && p.paid >= "2026-10-08T22:00:00.000Z",
+        (p) => !p.noWhopMembership && ["active", "past_due", "canceled"].includes(p.status) && onA97Plan(p) && p.paid >= "2026-10-08T22:00:00.000Z",
       );
       const students: JourneyStudent[] = onBoard.map((p) => ({
         id: p.id,

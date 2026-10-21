@@ -566,6 +566,47 @@ probes the check ran (`step3-probe.mjs`, `step2-probe.mjs`, outside the
 repository) print a discount for each of its four coupon cases now; their
 $1 plan with no code read as one before and still does (a known limit).
 
+T-122's second fix round (2026-10-21, `night/admin3`): a re-check on a
+stand-in Whop found a code used on the first payment alone passing, a code on
+a second course membership never read beside a full-price one on file, and a
+membership naming a code whose price or plan does not read dropping the code.
+`membership-discount` (365, +56) runs its own section, with its own fixtures
+so it runs unchanged against the commit before: each case through
+`judgeStudentDiscount`, both request routes (400 and the student's line,
+nothing written) and the cron. welcome50 on file, paid 48.50, renewing at
+97.00; a first-year 10% on the $970 yearly (873.00, renewing at 970.00);
+evolve10 on an older membership beside a newer full-price one on file (the
+row naming the payment's membership); a membership naming evolve10 with no
+renewal price, one whose plan Whop does not know, and one found through the
+Whop user with no renewal price, each beside a 97.00 payment naming no code.
+The controls go in through all three: 97.00, 116.40 with 19.40 added on top
+("exclusive"), 97.00 with the tax inside ("inclusive"), 97.00 holding a tax
+whose behaviour is null, `unspecified` or `unable_to_collect` (read as 80.83
+or 77.60 until then), 116.40 with a null behaviour, EUR 89.90 with a
+`usd_total` of 97.00 (read as 89.90 dollars until then) and with none, and a
+full-price membership on file followed by its payments. In euros a code that
+took money off and 86.30 in dollars are coupons. A payments read that hangs
+after a full-price membership is the routes' 503 within 8 s. The team's own
+30% (ECOM30) is never a coupon: used, it leaves its 67.90 payment out; named
+on a membership with no renewal price it is not one by itself; still on the
+renewal, an Approved row marks it the team's and does not warn; beside
+welcome50, the page warns about welcome50. Against 73c9d83 in a scratch copy,
+37 of the section's 50 checks fail and 13 pass (controls and team cases the
+old code already let through). The earlier checks follow the new rule where it
+changed their answer: `taxOnTopOf` reads only `exclusive` as on top;
+`readMembershipDiscount` hands back `unpriced` with bad_shape and
+no_plan_price; `fetchLatestRealPayment` is `fetchRealCoursePayments` (every
+payment, newest first, with `currency` and `usdTotal`); the memberships with
+no renewal price the first rounds used name no code, so the payments still
+decide there; an 87.30 on evolve10 before a newest 97.00 is now a coupon (the
+judge, the request routes, Approve, Check Whop again and the cron's
+s-no-plan, its `discounted` 9); the row names the coupon payment's membership;
+Check Whop again and the cron read the payments after a membership with no
+discount (4 reads, 6 payment reads); and the fixture students hold a Whop
+user, as every student does on production. `admin-review` (100) gives its
+stand-in fetch the payments list (empty), which a full-price membership is
+now followed by.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

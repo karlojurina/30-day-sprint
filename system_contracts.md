@@ -1042,15 +1042,27 @@ When adding a new table, append it here. When deleting a field, scan
   from `WHOP_PRODUCT_ID` less ETfB and Apex; a plan that renews above 0
   first, then active before past due, then the newest) by the same rule,
   a discount on any one of them being a discount (until the fix round the
-  first in that order alone); when a membership read gives no plan or no
-  renewal price, or no course membership grants access, the newest real
-  course payment (`GET /api/v1/payments?user_id=&status=paid`, pinned),
-  by `paymentCoupon`: a promo code on it that took money off (its `total`
-  less any tax added on top, below its `subtotal`), a code whose subtotal
-  or tax does not read, or that price under 97.00 is a discount, and
-  anything else or no real payment is none (until the fix round a total
-  under 97.00 alone was a discount, so a yearly payment on a code and one
-  with tax added on top passed). It gives no answer only when Whop does
+  first in that order alone); in either step a membership naming a promo
+  code whose renewal price or plan does not read is a discount by itself,
+  unless the code is the team's own 30% (an ECOM30 code, `isTeamThirtyCode`;
+  since T-122's second fix round, the same day). Whenever those show no
+  discount (since the second fix round; until then only when a membership
+  read gave no plan or no renewal price, or no course membership granted
+  access, and then the newest payment alone), every real course payment
+  (`GET /api/v1/payments?user_id=&status=paid`, pinned,
+  `fetchRealCoursePayments`), each by `paymentCoupon`: a promo code on it
+  that took money off (its `total` less a tax added on top, below its
+  `subtotal`), a code whose subtotal or tax is not known, or that price
+  under 97.00 is a coupon; a tax is taken off only when `tax_behavior` is
+  `exclusive`, and a payment whose `currency` is not `usd` is held against
+  97.00 at its `usd_total`'s rate, or by its code alone without one. Any
+  one payment on a coupon is a discount, except one on the team's own 30%
+  code (the 30% itself, after an approved request); with none, the
+  membership the steps settled on answers, and no real payment at all is
+  none (until the fix round a total under 97.00 alone was a discount, so a
+  yearly payment on a code and one with tax added on top passed; until the
+  second fix round a code used on the first payment alone passed). It
+  gives no answer only when Whop does
   not answer (no connection, a 5xx, a 429 after two retries, the time
   limits, which more reads in one check do not stretch), refuses the
   key, or answers the payments in a way it cannot judge, or when the deployment
@@ -1112,9 +1124,12 @@ When adding a new table, append it here. When deleting a field, scan
   `Api-Version-Date: 2026-10-15-1`; since T-122 (branch `night/admin3`)
   also v2's memberships by `user_id` and the pinned v1 payments by
   `user_id` (their `subtotal`, `tax_amount` and `tax_behavior` since its
-  fix round), for a student with no readable membership on file or, since
-  that round, one on a free plan (`judgeStudentDiscount`), and
-  `WHOP_PRODUCT_ID` for the course's products.
+  fix round, `currency` and `usd_total` since its second), for a student
+  with no readable membership on file or, since that round, one on a free
+  plan (`judgeStudentDiscount`), and since its second fix round the
+  payments of every student whose memberships show no discount, and
+  `WHOP_PRODUCT_ID` for the course's products. v2 stops working on 13
+  November 2026 (Whop's `Sunset` header).
 - **Written by (the service role only; row level security has no write
   policy, and `anon` and `authenticated` hold no write privilege):** the
   cron `GET /api/cron/refresh-membership-discounts` (every 2 hours at
@@ -1156,13 +1171,21 @@ When adding a new table, append it here. When deleting a field, scan
   branch `night/admin3`, not pasted) adds `source`: `membership`, `user`
   (a course membership found through the Whop user, by the same rule: the
   one that carried the code, or with none the first in the order, a paid
-  plan before a free one) or `payment` (the newest real course payment,
-  by `paymentCoupon`: `renewal_price` holds its price after discounts,
-  the total less any tax added on top, and `plan_renewal_price` what that
-  was held against, its subtotal when it names a code that took money
-  off, else 97.00, both null with no real payment; until T-122's fix
-  round `discounted` was its total under 97.00 and `renewal_price` that
-  total; the code is the payment's), or null on rows written before. No
+  plan before a free one) or `payment` (a real course payment, by
+  `paymentCoupon`: the one on a coupon, its membership named, or when it
+  names none the membership the steps settled on; with no coupon and no
+  membership that answered, the newest. `renewal_price` holds its price
+  after discounts, the total less a tax added on top, and
+  `plan_renewal_price` what that was held against, its subtotal when it
+  names a code that took money off, else 97.00, both null with no real
+  payment; for a payment in another currency both in dollars at its
+  `usd_total`'s rate, and without one in its own currency with
+  `plan_renewal_price` null unless its code took money off; until T-122's
+  fix round `discounted` was its total under 97.00 and `renewal_price`
+  that total; the code is the payment's), or null on rows written before.
+  A `membership` or `user` row for a membership naming a code whose
+  renewal price or plan does not read holds `discounted` true, its
+  renewal price when that read and a null `plan_renewal_price`. No
   reader selects `source`, and the writers write the row without it while
   v113 is not pasted.
 - **Read by the team:** the policy "Team reads membership discounts",

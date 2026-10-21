@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { GATE, PLACES, STREAM, TRAIL, WORLD, magicAt } from "./layout";
-import { NO_REFLECT_LAYER } from "./light";
+import { NIGHT_PALE_GLSL, NO_REFLECT_LAYER } from "./light";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import type { QualityTier } from "./quality";
 import { groundY, gridSlope, isWater, rnd, rockAnchors, rockRings, smooth, trailDistFast as trailDist, type RockPlace } from "./rocks";
@@ -1376,9 +1376,11 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
           shader.vertexShader = shader.vertexShader
             .replace("#include <common>", "#include <common>\n" + CARD_VERT_PARS)
             .replace("#include <begin_vertex>", "#include <begin_vertex>\n" + CARD_VERT_BODY);
+          // The night layer's pale rule (light.ts NIGHT_PALE; nothing by day):
+          // the Landing's dry grass read as frost under the moon.
           shader.fragmentShader = shader.fragmentShader
-            .replace("#include <common>", "#include <common>\n" + CARD_FRAG_PARS)
-            .replace("#include <color_fragment>", "#include <color_fragment>\n" + CARD_FRAG_COLOR)
+            .replace("#include <common>", "#include <common>\n" + CARD_FRAG_PARS + "\n" + NIGHT_PALE_GLSL.pars)
+            .replace("#include <color_fragment>", "#include <color_fragment>\n" + CARD_FRAG_COLOR + "\n" + NIGHT_PALE_GLSL.fragment)
             .replace("#include <normal_fragment_begin>", "#include <normal_fragment_begin>\nnormal = normalize( vNormal );");
         },
         "v6cover|cards",

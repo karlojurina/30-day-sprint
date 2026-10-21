@@ -3,7 +3,7 @@ import { BRIDGE, GATE_CAUSEWAY, ISLAND_PATH, PATH, PLACES, TRAIL, TRAIL_FOV, TRA
 import { CHECKPOINT } from "./checkpoint";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { blocked } from "./footprints";
-import { NO_REFLECT_LAYER } from "./light";
+import { NIGHT_LAMP_TINT, NO_REFLECT_LAYER } from "./light";
 import { groundY } from "./rocks";
 import { waterAt } from "./water";
 import { areaShare, type WorldProgress } from "./progress";
@@ -212,6 +212,10 @@ const LOOK = {
   poolDay: 0.32,
   poolNight: 0.62,
 };
+
+/** The glass's night tint (light.ts NIGHT_LAMP_TINT), and a scratch colour for the blend. */
+const _glassNight = new THREE.Color(...NIGHT_LAMP_TINT);
+const _glassTint = new THREE.Color();
 
 type V3 = [number, number, number];
 /** What a lantern stands on: the terrain, the Sky Island's flat top, the Gate isle's, or the rope bridge's deck (it sways). */
@@ -2311,7 +2315,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   let animating = false;
   let lastLevel = -1;
   let lastMagic = -1;
-  const lightState = () => (scene.userData.light as { state?: { lampGlow: number; magicGlow?: number } } | undefined)?.state;
+  let lastNight = -1;
+  const lightState = () => (scene.userData.light as { state?: { lampGlow: number; magicGlow?: number; night?: number } } | undefined)?.state;
   const update = (time: number): boolean => {
     clock = time;
     let changed = dirty;
@@ -2336,6 +2341,18 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       poolMat.uniforms.uAlpha.value = LOOK.poolDay + (LOOK.poolNight - LOOK.poolDay) * night;
       // The next lesson's pool is boosted most in daylight, where the plain pools barely show.
       poolMat.uniforms.uNext.value = 1.6 - 0.8 * night;
+      changed = true;
+    }
+    // The night layer (light.ts state.night): the glass warms by light.ts's
+    // NIGHT_LAMP_TINT, as the windows and the campfire do. At the night's lamp
+    // level and exposure it read white (sat 0.02 at a1) beside its warm halo,
+    // like an LED; tinted, its core is sand and its frame deep amber.
+    const nk = Math.min(1, Math.max(0, lightState()?.night ?? 0));
+    if (Math.abs(nk - lastNight) > 1e-3) {
+      lastNight = nk;
+      const lit = glassMat.uniforms.uLit.value as THREE.Color;
+      lit.setRGB(...LOOK.lamp);
+      if (nk > 0) lit.multiply(_glassTint.setRGB(1, 1, 1).lerp(_glassNight, nk));
       changed = true;
     }
     // The carved runes' magic level (dress-lakeforest.ts uMagic), for the next step's pulse.
@@ -2473,6 +2490,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       (glassMat.uniforms.uLit.value as THREE.Color).setRGB(...LOOK.lamp);
       if (runeMat) (runeMat.uniforms.uLit.value as THREE.Color).setRGB(...LOOK.lamp);
       lastLevel = -1;
+      lastNight = -1;
       dirty = true;
     },
     setQuality(tier: QualityTier) {

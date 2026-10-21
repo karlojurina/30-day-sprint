@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import { addFootprint, addPathLine } from "./footprints";
 import { PATH, PLACES } from "./layout";
+import { NO_REFLECT_LAYER, nightPale } from "./light";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { groundY, rnd } from "./rocks";
 
@@ -127,6 +128,21 @@ const P = {
   bell: lin(0x8a6a3a),
   kettle: lin(0x3c3a38),
 };
+/**
+ * The night layer (light.ts state.night): the campfire's glow, as the lesson
+ * lanterns have their pools (progress-world.ts LOOK.poolNight). The fire lit
+ * nothing round it at night (the ground at #42404d beside it). An additive
+ * sprite at the fire's foot: `size` world units across (the ring of stones is
+ * 9.2), `flat` its height against its width, `lift` above the ground,
+ * `alpha` at night 1. It is depth tested `near` world units nearer than the
+ * fire's foot (at most half the way to the camera): a point sprite is tested
+ * at its centre's depth, and at Introduction the camera looks along the
+ * ground through the tall grass round the fire, which hid all but a trace
+ * of it. The grass that near now takes the glow; hills and buildings further
+ * in front still hide it.
+ */
+const FIRE_GLOW = { size: 36, flat: 0.45, lift: 2.5, alpha: 0.85, color: [1.0, 0.5, 0.18] as RGB, near: 8 } as const;
+
 /** Unlit glow colours, above 1 so they read as light after tone mapping (blocks.ts G). */
 const GL = {
   fire: [2.6, 0.95, 0.25] as RGB,
@@ -1224,6 +1240,11 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   timber.name = "V5Timber";
   const cloth = track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }));
   cloth.name = "V5Cloth";
+  // The night layer's pale rule (light.ts NIGHT_PALE): the cream cab, the
+  // tent canvas and the signpost's painted arms read lit from inside under
+  // the moon. By day it draws nothing different.
+  nightPale(timber);
+  nightPale(cloth);
   const glowMat = track(new THREE.MeshBasicMaterial({ vertexColors: true }));
   glowMat.name = "V5ShoreGlow";
   glowMat.userData.lightGlow = "lamp";
@@ -1388,10 +1409,79 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     haloMat.uniforms.uScale.value = vp.y / (2 * Math.tan((fov * DEG) / 2));
     // Additive sprites: at most 64 CSS px across (bible 3.1 overdraw rules).
     haloMat.uniforms.uMaxPx.value = 64 * renderer.getPixelRatio();
-    // light.ts sets the glow material's colour to white x the lamp level.
-    haloMat.uniforms.uLevel.value = Math.min(1.2, glowMat.color.r);
+    // light.ts sets the glow material's colour to white x the lamp level; at
+    // night it also tints it (NIGHT_LAMP_TINT, red at half), so the level is
+    // read from the light's state where it has one (the same value by day).
+    const lit = (scene.userData.light as { state?: { lampGlow?: number } } | undefined)?.state?.lampGlow;
+    haloMat.uniforms.uLevel.value = Math.min(1.2, lit ?? glowMat.color.r);
   };
   root.add(halos);
+
+  // ── The night layer: the campfire's glow (FIRE_GLOW) ──
+  // One additive sprite at the fire's foot, wider than tall, so the fire
+  // lights the ground and the stones round it. A pool flat on the ground was
+  // tried first: from the stops the camera looks along the ground (1.6
+  // degrees down at the opening), so it drew about a pixel tall.
+  const fireGlowMat = track(
+    new THREE.ShaderMaterial({
+      name: "V5ShoreFireGlow",
+      uniforms: THREE.UniformsUtils.merge([
+        THREE.UniformsLib.fog,
+        { uAlpha: { value: 0 }, uSize: { value: FIRE_GLOW.size }, uScale: { value: 600 }, uMaxPx: { value: 160 }, uColor: { value: new THREE.Color(...FIRE_GLOW.color) }, uNear: { value: FIRE_GLOW.near } },
+      ]),
+      vertexShader: /* glsl */ `
+        uniform float uSize; uniform float uScale; uniform float uMaxPx; uniform float uNear;
+        #include <fog_pars_vertex>
+        void main() {
+          vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = clamp(uSize * uScale / max(-mvPosition.z, 1.0), 0.0, uMaxPx);
+          #include <fog_vertex>
+          // Depth tested a little nearer than the fire's foot (FIRE_GLOW.near):
+          // pulled along the ray to the camera, so it stays where it was on screen.
+          float dist = length(mvPosition.xyz);
+          mvPosition.xyz *= 1.0 - min(uNear, dist * 0.5) / max(dist, 1e-3);
+          gl_Position = projectionMatrix * mvPosition;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor; uniform float uAlpha;
+        #include <fog_pars_fragment>
+        void main() {
+          vec2 q = gl_PointCoord * 2.0 - 1.0;
+          q.y *= ${(1 / FIRE_GLOW.flat).toFixed(3)};
+          float r = dot(q, q);
+          float a = (exp(-r * 3.2) * 0.75 + exp(-r * 14.0) * 0.35) * (1.0 - smoothstep(0.7, 1.0, r)) * uAlpha;
+          if (a < 0.003) discard;
+          gl_FragColor = vec4(uColor * a, a);
+          #ifdef USE_FOG
+            #ifdef FOG_EXP2
+              float fogFactor = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+            #else
+              float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+            #endif
+            gl_FragColor *= 1.0 - fogFactor * 0.6;
+          #endif
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: true,
+    }),
+  );
+  const fireGlowGeo = track(new THREE.BufferGeometry());
+  fireGlowGeo.setAttribute("position", new THREE.Float32BufferAttribute([fire[0], fire[1] + FIRE_GLOW.lift, fire[2]], 3));
+  fireGlowGeo.computeBoundingSphere();
+  const fireGlow = new THREE.Points(fireGlowGeo, fireGlowMat);
+  fireGlow.name = "Shore:fireGlow";
+  fireGlow.renderOrder = 4;
+  fireGlow.layers.set(NO_REFLECT_LAYER);
+  fireGlow.visible = false;
+  fireGlow.onBeforeRender = (renderer, _s, camera) => {
+    renderer.getDrawingBufferSize(vp);
+    const fov = (camera as THREE.PerspectiveCamera).fov ?? 31;
+    fireGlowMat.uniforms.uScale.value = vp.y / (2 * Math.tan((fov * DEG) / 2));
+    fireGlowMat.uniforms.uMaxPx.value = 160 * renderer.getPixelRatio();
+  };
+  root.add(fireGlow);
 
   // ── Progress: the signpost's lamp lights when Introduction is done ──
   let progress = 0;
@@ -1453,6 +1543,14 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       let changed = false;
       if (zone && root.visible !== zone.visible) {
         root.visible = zone.visible;
+        changed = true;
+      }
+      // The night layer: the fire's glow shows with the fire, by the night's share (none by day).
+      const nk = Math.min(1, Math.max(0, (scene.userData.light as { state?: { night?: number } } | undefined)?.state?.night ?? 0));
+      const glowOn = nk > 0.001 && (!flameObj || flameObj.visible);
+      if (glowOn) fireGlowMat.uniforms.uAlpha.value = FIRE_GLOW.alpha * nk;
+      if (fireGlow.visible !== glowOn) {
+        fireGlow.visible = glowOn;
         changed = true;
       }
       animating = false;

@@ -73,7 +73,7 @@
 import * as THREE from "three";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { BROOK, GREAT_TREE, PATH, PLACES, STEPS, STEPS_TOP, TRAIL, WORLD } from "./layout";
-import { NO_REFLECT_LAYER } from "./light";
+import { NIGHT_LAMP_TINT, NO_REFLECT_LAYER } from "./light";
 import { stopRay } from "./rocks";
 import { foliageCell, foliageCellKeep, foliageCellRects, getFoliageAtlas } from "./foliage-atlas";
 import { giantSpots } from "./forest";
@@ -428,6 +428,8 @@ interface LfUniforms {
   uTime: { value: number };
   uMagic: { value: number };
   uLamp: { value: number };
+  /** The lamps' night tint (light.ts NIGHT_LAMP_TINT by state.night; white by day). */
+  uLampTint: { value: THREE.Color };
 }
 
 const VERT_PARS = /* glsl */ `
@@ -435,6 +437,7 @@ attribute vec4 aGlow;
 uniform float uTime;
 uniform float uMagic;
 uniform float uLamp;
+uniform vec3 uLampTint;
 varying vec3 vLfGlow;
 `;
 const VERT_GLOW = /* glsl */ `
@@ -454,7 +457,7 @@ const VERT_GLOW = /* glsl */ `
     float amp = mix( 0.3, 0.5, fract( lfH * 7.13 ) );
     lfG *= uMagic * ( 1.0 - amp + amp * ( 0.5 + 0.5 * sin( uTime * 6.2832 / per + lfH * 40.0 ) ) );
   } else if ( lfK < 1.5 ) {
-    lfG *= uLamp * ( 0.95 + 0.05 * sin( uTime * 6.0 + lfH * 30.0 ) );
+    lfG *= uLamp * uLampTint * ( 0.95 + 0.05 * sin( uTime * 6.0 + lfH * 30.0 ) );
   } else {
     float s = lfK - 2.0;
     float wave = smoothstep( 0.72, 1.0, 0.5 + 0.5 * sin( s * 9.0 - uTime * 1.7 + lfH * 6.0 ) );
@@ -485,9 +488,17 @@ function makeMaterial(u: LfUniforms): THREE.MeshLambertMaterial {
 }
 
 /** Additive points: lamp halos (kind 0, steady) and spores (kind 1, rising). No fog: they fade by distance themselves. */
-function pointsMaterial(u: LfUniforms, scale: { value: number }, spores: boolean): THREE.ShaderMaterial {
+/**
+ * The lamp halos in the Mirror Lake's reflection at night (the critique of
+ * 2026-10-20 night): `size` is the reflected halo's height against the
+ * direct one's (it was 2 at the default reflection scale, 0.5, and more on a
+ * wide window, whose reflection is capped at 1024 wide).
+ */
+const HALO_REFL = { size: 1.2 } as const;
+
+function pointsMaterial(u: LfUniforms, scale: { value: number }, spores: boolean, refl?: { value: THREE.Vector2 }): THREE.ShaderMaterial {
   return new THREE.ShaderMaterial({
-    uniforms: { ...u, uScale: scale },
+    uniforms: { ...u, uScale: scale, ...(refl ? { uRefl: refl } : {}) },
     transparent: true,
     depthWrite: false,
     blending: THREE.AdditiveBlending,
@@ -501,6 +512,9 @@ function pointsMaterial(u: LfUniforms, scale: { value: number }, spores: boolean
       uniform float uMagic;
       uniform float uLamp;
       uniform float uScale;
+      #ifndef SPORES
+        uniform vec2 uRefl;
+      #endif
       varying vec3 vCol;
       void main() {
         vec3 p = position;
@@ -519,11 +533,24 @@ function pointsMaterial(u: LfUniforms, scale: { value: number }, spores: boolean
         float worldSize = ${spores ? "2.6" : "aSeed.x"};
         gl_PointSize = max( 1.5, worldSize * uScale / max( d, 1.0 ) );
         vCol = aCol * lvl * ( 1.0 - smoothstep( ${spores ? "900.0, 1600.0" : "1800.0, 3200.0"}, d ) );
+        #ifndef SPORES
+          // HALO_REFL: in the lake's reflection at night, smaller and warmer.
+          gl_PointSize *= uRefl.x;
+          // Smaller, so brighter at its core (the reflection is linear and the lake gives back 0.8 of it): sand, not brown.
+          vCol *= mix( vec3( 1.0 ), vec3( 1.6, 1.28, 0.8 ), uRefl.y );
+        #endif
       }`,
     fragmentShader: /* glsl */ `
       varying vec3 vCol;
+      #ifndef SPORES
+        uniform vec2 uRefl;
+      #endif
       void main() {
         vec2 q = gl_PointCoord * 2.0 - 1.0;
+        #ifndef SPORES
+          // A lamp on still water is a streak: at night the reflected halo is 1 wide to 2 tall.
+          q.x *= 1.0 + uRefl.y;
+        #endif
         float r = dot( q, q );
         float a = exp( -r * ${spores ? "4.5" : "3.2"} ) * ( 1.0 - smoothstep( 0.7, 1.0, r ) );
         gl_FragColor = vec4( vCol * a, 1.0 );
@@ -1429,7 +1456,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     restores.push(() => parent.add(o));
   };
 
-  const u: LfUniforms = { uTime: { value: 0 }, uMagic: { value: 0.9 }, uLamp: { value: 1 } };
+  const u: LfUniforms = { uTime: { value: 0 }, uMagic: { value: 0.9 }, uLamp: { value: 1 }, uLampTint: { value: new THREE.Color(1, 1, 1) } };
   const mat = track(makeMaterial(u));
   // Final pass C (a6 overdraw): the giant elders are closed, outward wound
   // solids (their open pieces two faced, doubleFrom), so they draw FrontSide:
@@ -1437,7 +1464,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const matFront = track(makeMaterial(u));
   matFront.side = THREE.FrontSide;
   const pxScale = { value: 600 };
-  const haloMat = track(pointsMaterial(u, pxScale, false));
+  /** The lake halos' reflection look (HALO_REFL): their size factor, and the night's streak and warmth (0 by day). */
+  const haloRefl = { value: new THREE.Vector2(1, 0) };
+  const haloMat = track(pointsMaterial(u, pxScale, false, haloRefl));
   // Fix 3: the crown cards (the atlas is painted by forest.ts's install, cached per renderer).
   const atlas = getFoliageAtlas(ctx.renderer);
   const lobeCell = foliageCell("elder-lobe")?.index ?? 15;
@@ -1766,6 +1795,25 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       const pts = new THREE.Points(hs, haloMat);
       pts.name = "LakeHalos";
       pts.renderOrder = 6;
+      // The night layer (light.ts state.night): in the lake's reflection pass
+      // (the mirrored camera stands under the water) the halos drew at the
+      // main view's pixel size into a target a fraction of its size, so they
+      // came out as round brown discs about 140 px across, bokeh under the
+      // surface. At night they shrink to HALO_REFL.size of the direct halo
+      // (the target's own scale taken out), stretch 1 to 2 and warm. By day,
+      // and in the main view, they draw as before.
+      const rtSize = new THREE.Vector2();
+      pts.onBeforeRender = (renderer, _s, camera) => {
+        const rt = renderer.getRenderTarget();
+        const nk = Math.min(1, Math.max(0, (scene.userData.light as { state?: { night?: number } } | undefined)?.state?.night ?? 0));
+        if (!rt || nk <= 0 || camera.position.y >= WORLD.lake.y) {
+          haloRefl.value.set(1, 0);
+          return;
+        }
+        renderer.getDrawingBufferSize(rtSize);
+        const ratio = rt.height / Math.max(1, rtSize.y);
+        haloRefl.value.set(1 + (HALO_REFL.size * ratio - 1) * nk, nk);
+      };
       setA5.add(pts);
     }
   }
@@ -2202,7 +2250,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   }
 
   // ── Frame loop ──
-  const light = () => (scene.userData.light as { state?: { magicGlow: number; lampGlow: number } } | undefined)?.state;
+  const light = () => (scene.userData.light as { state?: { magicGlow: number; lampGlow: number; night?: number } } | undefined)?.state;
+  const lampNight = new THREE.Color(...NIGHT_LAMP_TINT);
   const camPos = V3();
   const lastPos = V3(1e9, 0, 0);
   const lastQuat = new THREE.Quaternion();
@@ -2311,6 +2360,11 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       if (st) {
         u.uMagic.value = Math.min(st.magicGlow, 0.95);
         u.uLamp.value = st.lampGlow;
+        // The night layer: the boathouse's and the jetty's lamps warm as the
+        // other lamps do (light.ts NIGHT_LAMP_TINT); white by day.
+        const nk = Math.min(1, Math.max(0, st.night ?? 0));
+        u.uLampTint.value.setRGB(1, 1, 1);
+        if (nk > 0) u.uLampTint.value.lerp(lampNight, nk);
       }
       ctx.renderer.getDrawingBufferSize(drawSize);
       pxScale.value = drawSize.y / (2 * Math.tan((ctx.camera.fov * DEG) / 2));

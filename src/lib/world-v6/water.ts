@@ -182,8 +182,23 @@ const PLUME_SUN_TINT = 0.03;
  * surface gives up at night 1. The spray and mist at the falls' foot
  * (puffs), the opening's plume and the Upper Falls kept their day brightness
  * at night and read white; the curtain itself stays the brightest water.
+ *
+ * Tune pass (the critique of 2026-10-20 night):
+ *   plume      0.75 -> 0.6: it keeps 40% of its light, so it is the
+ *              opening's first look again once the moon is calmer;
+ *   sea        0.62 -> 0.42 and seaSky 0.5 -> 0.15: the near water was luma
+ *              24, one slab with the treeline (now about 31);
+ *   pathPow    the moon path: the glints' lobe times pow(cos, pathPow) at
+ *              night (by day the factor is exactly 1). With the sun's broad
+ *              lobe the glints covered the whole sea in even white flecks;
+ *              now they gather into a column under the moon's bearing (full
+ *              within about 5 degrees, gone past 13), at moonGlint (0.4 over
+ *              the whole sea before) and in moonPath of the moon's colour;
+ *   stripes    the curtain's dark stripes go this far toward its lit colour,
+ *              so the falls read as water and not a striped denim curtain
+ *              (dark stripes p10 64 against highlights 155 -> 91 and 155).
  */
-const NIGHT_WATER = { falls: 0.52, puffs: 0.2, plume: 0.75, upper: 0.5, sea: 0.62, seaSky: 0.5, foam: 0.78, moonPath: 0.3, moonGlint: 0.4 } as const;
+const NIGHT_WATER = { falls: 0.52, puffs: 0.2, plume: 0.6, upper: 0.5, sea: 0.42, seaSky: 0.15, foam: 0.78, moonPath: 0.35, moonGlint: 0.9, pathPow: 200, stripes: 0.45 } as const;
 
 // ── Small helpers ────────────────────────────────────────────────────────────
 
@@ -237,6 +252,7 @@ const SEA_FRAG = /* glsl */ `
 #include <common>
 #include <fog_pars_fragment>
 uniform float uTime, uSwash, uLevel, uSkyK, uGlintK;
+uniform vec2 uPath; // the night layer's moon path: its share (0 by day) and the narrowing power
 uniform vec3 uSunDir, uSunCol, uSkyLo, uSkyHi, uDeep, uShallow, uFoam;
 uniform sampler2D uHeight, uNoise;
 uniform vec4 uHB;
@@ -325,9 +341,11 @@ void main() {
   // Glints: bright, near white, inside the sun's lobe.
   vec2 dirH = normalize( -V.xz + 1e-5 );
   vec2 sunH = normalize( uSunDir.xz + 1e-5 );
+  // The night layer's moon path (uPath.x 0 by day: the factor is exactly 1).
+  float pathK = mix( 1.0, pow( max( dot( dirH, sunH ), 0.0 ), uPath.y ), uPath.x );
   // A low sun spreads its path wide across rippled water: a broad lobe, so the
   // glint path reaches in from the sun's side of the frame (the far mirror's: the brightest cells).
-  float lobe = pow( max( dot( dirH, sunH ), 0.0 ), 1.6 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y );
+  float lobe = pow( max( dot( dirH, sunH ), 0.0 ), 1.6 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y ) * pathK;
   float glint = pStep( 0.9 - 0.42 * lobe, 1.0 - min( ca, cb * 1.15 ) ) * pStep( 0.12, lobe ) * max( detail, 0.5 );
   // On the near and middle water (detail) the glints are where both layers'
   // cell borders cross: small and many toward the sun, fewer and smaller out of
@@ -335,8 +353,8 @@ void main() {
   // broken dashes stretched 520 by 55 across the sun's line here, cut at a hard
   // edge of the path; Lovro's "weird streaks", map review 2026-10-15, item 15a.)
   // The far mirror keeps the old glints.
-  float lobeN = pow( max( dot( dirH, sunH ), 0.0 ), 3.0 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y );
-  float spark = pStep( 0.66 - 0.04 * lobeN, min( ca, cb ) ) * smoothstep( 0.02, 0.3, lobeN );
+  float lobeN = pow( max( dot( dirH, sunH ), 0.0 ), 3.0 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y ) * pathK;
+  float spark = pStep( 0.66 - ( 0.04 + 0.12 * uPath.x ) * lobeN, min( ca, cb ) ) * smoothstep( 0.02, 0.3, lobeN );
   glint = mix( glint, spark, detail ) * uGlintK;
   col = mix( col, uSunCol * 1.25 + vec3( 0.25 ), glint );
 
@@ -1770,6 +1788,8 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   const seaSunDir = sunDir.clone();
   /** How much the sea's glints show: 1 by day, NIGHT_WATER.moonGlint at night 1. */
   const seaGlint = { value: 1 };
+  /** The night layer's moon path: its share (0 by day) and NIGHT_WATER.pathPow. */
+  const seaPath = { value: new THREE.Vector2(0, NIGHT_WATER.pathPow) };
 
   // ── Sea (and the tarn, the same program) ───────────────────────────────────
   const seaMatFor = (name: string, level: number): THREE.ShaderMaterial => {
@@ -1802,6 +1822,7 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       uSkyLo: { value: skyLo },
       uSkyHi: { value: skyHi },
       uGlintK: seaGlint,
+      uPath: seaPath,
     });
     mats.push(m);
     return m;
@@ -2513,10 +2534,12 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
     seaSunDir.copy(sunDir);
     seaSunCol.copy(sunCol);
     seaGlint.value = 1;
+    seaPath.value.x = 0;
     if (md) {
       seaSunDir.lerp(md, moonK).normalize();
       seaSunCol.lerp(tmpC.copy(s!.moonColor!).multiplyScalar(NIGHT_WATER.moonPath), moonK);
       seaGlint.value = 1 - (1 - NIGHT_WATER.moonGlint) * moonK;
+      seaPath.value.x = moonK;
     }
     if (s) {
       skyLo.copy(s.skyHorizon).lerp(s.haze, 0.35);
@@ -2539,6 +2562,10 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
     curtainU.uDay.value = (0.3 + 0.7 * (s ? clamp01(0.35 * s.hemiIntensity + 0.75 * dayK) : 1)) * nd(NIGHT_WATER.falls);
     curtainU.uLit.value.copy(lin(WATER_C.curtainLit)).lerp(tmpC.copy(sc).multiplyScalar(0.95), 0.2);
     curtainU.uShade.value.copy(lin(WATER_C.curtainShade)).lerp(skyLo, 0.25);
+    // The night layer: the curtain's dark stripes toward its lit colour
+    // (NIGHT_WATER.stripes), or under the night's navy sky the falls read as a
+    // striped curtain (dark stripes 64 against highlights 155; by day 1.4 to 1).
+    if (nk > 0) curtainU.uShade.value.lerp(curtainU.uLit.value, NIGHT_WATER.stripes * nk);
     // Puffs: lit by the sun's colour, shaded in the sky's; dimmer at night.
     puffU.uLitC.value.copy(lin(WATER_C.foam)).lerp(tmpC.copy(sc), 0.35).multiplyScalar((0.25 + 0.75 * curtainU.uDay.value) * nd(NIGHT_WATER.puffs));
     puffU.uShadeC.value.copy(skyHi).lerp(skyLo, 0.5).multiplyScalar(0.72 * curtainU.uDay.value * nd(NIGHT_WATER.puffs));

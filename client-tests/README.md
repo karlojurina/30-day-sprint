@@ -351,6 +351,32 @@ always sent, every template counted for the warning, batches of 300, the
 answers paged on `created_at`, the route deleting any template): each
 break fails it.
 
+`admin-review.test.mjs` (admin rebuild 2, the review's fix round,
+2026-10-21; 98 checks) holds every rule that round added, run as the source
+has it: a failed read in plain words with the raw text behind Details
+(`read-failure.ts`, copied by `build.mjs`, and `review-parts.tsx`, which the
+suite compiles with `ui.tsx` and `list-parts.tsx` into `_gen/ar-*.mjs` and
+renders with React's server renderer); Insights' Avg progress from the course
+switch and its gridlines at their own values; Lesson feedback's rated lessons
+first and the rest one line per area; one name and colour per 30% status
+(`discount-status.ts`) on the 30% page, the Survey and a student's page; the
+Survey from 1 October with its summary; the 30% page's coupon check on every
+row, with the Approved rows asked of Whop by `GET /api/admin/thirty` on a
+stand-in `fetch` (live, stored, could not ask), and a stored Whop id that is
+missing or a payment's said on the row as no membership to ask about; the
+coupon rule's log of a stored id that is not a membership's and the cron run
+Whop never answered;
+the quick DMs' words; the buttons named for what they do and kept, with the
+tabs, while a page loads or failed; the student side's one filled button
+while a rating is open; and the removals (no file imports `plans.ts` or names
+a removed helper). Where a rule is about words in a file, a control reads the
+file at `ff411f6` and shows the old behaviour. `dashboard` (86: also the
+expired students Month 2 alone reads, and the Bounty Program without them),
+`templates-page` (73), `csm-cutover` (48: `is_canceling`'s select took its
+sentence's words, so only the label comparison puts the old one back) and
+`thirty-view` (98: the first rebuild's helpers went with their tests) changed
+with it.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

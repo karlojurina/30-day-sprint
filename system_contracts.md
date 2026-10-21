@@ -711,7 +711,11 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** —
 - **Depended on by:** `src/lib/templates.ts` (variable substitution),
   the crons through `src/lib/dm-toggles.ts` (the 4 Discord switches),
-  day-28 DM, `GET`/`PUT /api/admin/config`
+  day-28 DM, `GET`/`PUT /api/admin/config`, and a student's admin page
+  (`readStudentDetail` in `src/lib/admin/student-detail.ts` reads
+  `program_login_link` with the member's session for the Welcome quick
+  DM; a failed read or an empty value gives the Welcome without the link;
+  admin rebuild 2, the review's fix round)
 - **Stable contract:** keys `program_login_link`, `discord_invite_link`
   (v51 dropped `astrid_booking_link` + `karlo_walkthrough_video_link`
   when D1.A/D1.B were merged into a single D1)
@@ -739,10 +743,13 @@ When adding a new table, append it here. When deleting a field, scan
   (`readDashboard` in `src/app/admin/(authenticated)/page.tsx`, with
   `curriculum_reset_at` in one read, checked by `configReads` of
   `src/lib/admin/dashboard-metrics.ts`; see "The Dashboard's reads").
-  Both checks accept what v109 writes. `configReads` also accepts
-  Postgres's own text for a timestamptz (`2026-10-21 03:12:45+00`),
-  which `tasks-reset.ts` refuses: a row written by hand that way counts
-  on the Dashboard while the Tasks page answers 500 with its reason.
+  Since the review's fix round (2026-10-21) `configReads` runs the value
+  through `checkTasksResetAt` of `tasks-reset.ts`, so the Dashboard, the
+  Tasks page and its insights accept and refuse the same values: what
+  v109 writes counts; Postgres's own text for a timestamptz
+  (`2026-10-21 03:12:45+00`), written by hand, fails the Dashboard's Open
+  tasks tile with the reason the Tasks page answers 500 with (until then
+  the Dashboard counted it).
 - **A key with no reader (v95):** `discount_window_days`, seeded `14`.
   No code reads it; the discount routes use `DISCOUNT_WINDOW_DAYS` in
   `src/lib/constants.ts`. `/admin/settings` listed every row of this
@@ -1047,7 +1054,8 @@ When adding a new table, append it here. When deleting a field, scan
   prices, and a failed read is `false`, never a 500), the request and
   approve routes (their fallback when Whop does not answer), and
   `GET /api/admin/thirty` (every column, for the coupon on a row and the
-  verdict on a pending one).
+  verdict on a pending one; on an Approved row only when Whop gives no
+  answer to the route's own live read, since the review's fix round).
 - **Stable contract:** `student_id`, `whop_membership_id` (the membership
   the row was read from: a row counts only while the student holds that
   membership), `promo_code_id`, `promo_code` (the code's name, null when
@@ -1142,7 +1150,7 @@ When adding a new table, append it here. When deleting a field, scan
   `archive_v1.csm_changes`. The undo reopens a task only where no open
   task now exists for the same student and scenario.
 - **The tasks reset (v109, admin rebuild 2, D7, branch `night/a2-tasks`,
-  not on production; Lovro pastes it):** in one transaction, holding
+  not on production; the owner pastes it):** in one transaction, holding
   `tasks` in SHARE ROW EXCLUSIVE (5 s at most), every task open at the
   run is copied into `archive_tasks.reset_2026_10` (every column, plus
   `reset_at`, the run's moment) and set `status = 'dismissed'`,
@@ -1238,16 +1246,22 @@ When adding a new table, append it here. When deleting a field, scan
 `/admin` reads with the signed-in team member's browser client (the
 tables' team policies apply), in `readDashboard` in
 `src/app/admin/(authenticated)/page.tsx`; what the numbers mean is
-`src/lib/admin/dashboard-metrics.ts`. It writes nothing; Refresh calls
-`POST /api/admin/refresh-everything`, unchanged. A read that fails is
-shown as "Couldn't load" on every tile it feeds, never as 0.
+`src/lib/admin/dashboard-metrics.ts`. It writes nothing. Refresh reads
+again; "Sync Whop and rebuild" (founders and admins) calls
+`POST /api/admin/refresh-everything`, unchanged, then reads again
+(since the review's fix round; that button was "Refresh"). A read that
+fails is shown as "Couldn't load" on every tile it feeds, never as 0.
 
 - `students`: `id, membership_status, whop_plan_id, first_paid_at,
   canceled_at, cancel_scheduled_at`, where `whop_membership_id` is set,
-  the status is active, past_due or canceled, the plan is in
+  the status is one of `DASH_STUDENT_STATUSES` (active, past_due,
+  canceled, and since the review's fix round expired), the plan is in
   `PAYING_WHOP_PLAN_IDS` and `first_paid_at >= ADMIN_STUDENT_JOIN_CUTOFF`,
   paged by `id`. Month 2 keeps those who first paid on or after
-  `DISCOUNT_LAUNCH_DATE`; Active, Canceling and Bounty use them all.
+  `DISCOUNT_LAUNCH_DATE`, expired ones included (the sync keeps an
+  expired membership's `canceled_at`, and Month 2 judges by the dates);
+  Active, Canceling and Bounty get every row but the expired ones
+  (`sharedPopulation`), the population they always had.
 - `student_milestones`: `student_id, bounty_access_claimed_at` where the
   stamp is set, paged by `student_id` (Bounty Program · joined).
 - `tasks`: a head count of the open tasks with a template whose student
@@ -1418,6 +1432,11 @@ from Whop at request time and are deliberately not cached here.
 
 ### `etfb_seat_decisions` (v87)
 
+**No reader or writer since admin rebuild 2 (2026-10-20, branch
+`night/admin2`) removed Brand Owners, its 5 routes and `src/lib/etfb.ts`;
+this table stays, with no migration, beside `etfb_team_links`. What follows
+is the contract as it was.**
+
 **Owner:** the `/admin/etfb` Brand Owners surface.
 
 **What it is for:** a human override on ONE seat — "leave this person alone"
@@ -1446,6 +1465,11 @@ migration.
 ---
 
 ### Whop Stats API (external, read-only) (v86)
+
+**No reader since admin rebuild 2 (2026-10-20, branch `night/admin2`)
+removed Stats, its routes and `src/lib/whop-stats*.ts`: nothing in the app
+calls this API now. What follows is the contract as it was, for whoever
+builds on it again.**
 
 **Owner:** Whop. **Interface:** `GET https://api.whop.com/api/v1/stats/{key}`.
 
@@ -2040,10 +2064,18 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   the lessons the 30% asks for (each read holds as many students as fit in
   one page, so it is one query), all their requests, `student_whop_sync`
   (`student_id, last_sync_at`), `student_membership_discounts` (v111) and
-  `team_members`. Then `buildThirtyView` (`src/lib/admin/thirty-view.ts`,
-  pure), which calls the student app's rule (`discount.ts`,
-  `discount-server.ts`) unchanged. It reads no survey and no `tasks`
-  since D4.
+  `team_members`. Then, since the review's fix round (2026-10-21),
+  `readApprovedCoupons` (`thirty-data.ts`): for each student holding an
+  Approved request, Whop now, through `readMembershipDiscount` of
+  `src/lib/membership-discount.ts` (`Api-Version-Date: 2026-10-15-1`,
+  paced as the cron reads), no request started after 6 s and none waited
+  on past 8 s, never throwing and writing nothing (the cron leaves those
+  students out and no route reads them again after the approval, so a
+  request approved before the coupon rule had no stored row). Whop's
+  failures are logged by kind (`[admin thirty] Whop gave no answer for N approved student(s)' coupon (...)`), never with Whop's words.
+  Then `buildThirtyView` (`src/lib/admin/thirty-view.ts`, pure), which
+  calls the student app's rule (`discount.ts`, `discount-server.ts`)
+  unchanged. It reads no survey and no `tasks` since D4.
 - **Produces:**
   - 200 `{ generatedAt, sharedDeadline, listedFrom, requiredCount,
     couponsUnread, requests }`, `requests` oldest first, each a
@@ -2051,9 +2083,18 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     reviewedAt, reviewedBy, appliedAt, appliedBy, promoCode,
     rejectionReason`, `student` (`id, name, email, username, status,
     whopPulled`; no plan, no ads tick), `facts` and `verdict` on a pending
-    row (null on the others), and `coupon` (`code, discounted,
+    row (null on the others), `coupon` (`code, discounted,
     renewalPrice, planRenewalPrice, checkedAt`, or null) for the
-    membership the student holds now. A pending row's verdict is the
+    membership the student holds now, and `couponCheck`, where it comes
+    from: `live` (Whop answered now; an Approved row), `stored` (the
+    stored row for that membership; on an Approved row, Whop gave no
+    answer now), `not-checked` (no stored row applies: never checked, or
+    a membership changed since; Approve asks Whop first),
+    `no-membership` (the stored Whop id is missing or is not a
+    membership's, a payment's id the webhook stored: neither the cron nor
+    Approve can ask Whop, so nothing blocks the 30%), `failed` (an
+    Approved row: no answer now and nothing stored) or `unread` (the
+    stored coupons could not be read). A pending row's verdict is the
     approve route's in its order: a stored discount on the next renewal
     first (`reason: "has-discount"`, the text
     `couponApprovalRefusal(code)`), then `approvalVerdict` and

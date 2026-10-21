@@ -20,9 +20,10 @@ import c from "./corner.module.css";
  * timeline, the next lesson on the card, the discount at its checkpoint.
  *
  * ONE PILL. The streak (a flame, lit from day 1 of a streak) and the
- * achievements held (a hexagon, "4/10") in one button that opens the list,
- * then the map's discount segment (the offer and its days left, opening the
- * checkpoint), then the Playbook, then Sign out, each behind a hairline.
+ * achievements held (a hexagon, "4/8": the catalog's rows, eight since v112)
+ * in one button that opens the list, then the map's discount segment (the
+ * offer and its days left, opening the checkpoint), then the Playbook, then
+ * Sign out, each behind a hairline.
  * Mono numbers, no glow, nothing pulses. On phones the pill keeps the
  * stats in the header's row, the discount and the Playbook drop to the row
  * under it, and Sign out moves into the list.
@@ -30,7 +31,8 @@ import c from "./corner.module.css";
  * THE LIST opens under the pill on the right, the place panel's size and
  * surface, so it never covers a place's or the checkpoint's panel (they open
  * on the left): the streak and the best, then every achievement by tier,
- * with the share of students who hold it. While a place or the checkpoint is
+ * with the share of students who hold it (achievement_unlock_stats: since
+ * v112, of every active member). While a place or the checkpoint is
  * open it is solid, so where the two meet on a narrow screen neither shows
  * through the other. Esc, Back to map or a click outside close it and leave
  * the place open; opening a place or the checkpoint closes it (the discount's

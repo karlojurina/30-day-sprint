@@ -393,11 +393,11 @@ browser = await puppeteer.launch({
 })
 
 const STATES = [
-  { preset: null, file: 'none', text: /^0 days 0\/10$/i, lit: false },
-  { preset: 'cold', file: 'cold', text: /^0 days 3\/10$/i, lit: false },
-  { preset: 'some', file: 'some', text: /^4 days 4\/10$/i, lit: true },
-  { preset: 'long', file: 'long', text: /^128 days 8\/10$/i, lit: true },
-  { preset: 'all', file: 'all', text: /^30 days 10\/10$/i, lit: true },
+  { preset: null, file: 'none', text: /^0 days 0\/8$/i, lit: false },
+  { preset: 'cold', file: 'cold', text: /^0 days 3\/8$/i, lit: false },
+  { preset: 'some', file: 'some', text: /^4 days 4\/8$/i, lit: true },
+  { preset: 'long', file: 'long', text: /^128 days 6\/8$/i, lit: true },
+  { preset: 'all', file: 'all', text: /^30 days 8\/8$/i, lit: true },
 ]
 
 try {
@@ -411,7 +411,7 @@ try {
       r.check(`${name}: the pill ends at the header's right edge (the 40 px gutter), on the brand's line`, s.pillBox && s.brand && s.pillBox.r === s.vw - 40 && Math.abs((s.pillBox.t + s.pillBox.b) / 2 - (s.brand.t + s.brand.b) / 2) <= 2, { pill: s.pillBox, brand: s.brand })
       r.check(`${name}: the brand stands alone at the left (the header holds it and the group), far from the pill`, s.brand && s.brand.l === 40 && s.headerKids === 2 && s.end && s.end.l > s.brand.r + 200 && s.pillBox.l >= s.end.l, { brand: s.brand, group: s.end, pill: s.pillBox, kids: s.headerKids })
       r.check(`${name}: Sign out is the pill's last part`, s.out?.seen && s.out.box.l >= s.pill.box.r - 1 && Math.abs(s.out.box.r - s.pillBox.r) <= 1, s.out)
-      r.check(`${name}: the label reads it out`, /^Streak \d+ days?(, best \d+)?\. \d+ of 10 achievements\. Show them$/.test(s.pill?.label ?? ''), s.pill?.label)
+      r.check(`${name}: the label reads it out`, /^Streak \d+ days?(, best \d+)?\. \d+ of 8 achievements\. Show them$/.test(s.pill?.label ?? ''), s.pill?.label)
       await crop(page, `state-${st.file}.png`, groupEnd(s), 0)
       if (st.preset === 'some') await shot(page, 'map-some.png')
       await page.close()
@@ -427,10 +427,10 @@ try {
       r.check(`${preset}: the pill says it is open`, s.pill?.expanded === 'true', s.pill?.expanded)
       r.check(`${preset}: under the pill on the right, the place panel's size (right edge 48 in, top 92, 404 wide)`, s.list && s.list.box.r === s.vw - 48 && s.list.box.t === 92 && s.list.box.w === 404 && s.list.box.t > s.pillBox.b, s.list?.box)
       r.check(`${preset}: translucent over the open map (backdrop blur)`, /blur/.test(s.list?.backdrop ?? ''), s.list?.backdrop)
-      r.check(`${preset}: ten rows in four tiers`, s.list?.rows.length === 10 && s.list.groups.length === 4, { rows: s.list?.rows.length, groups: s.list?.groups })
+      r.check(`${preset}: eight rows in four tiers (v112)`, s.list?.rows.length === 8 && s.list.groups.length === 4, { rows: s.list?.rows.length, groups: s.list?.groups })
       if (preset === 'cold') {
         r.check('cold: 0 days, best 12, start a new one', /Streak 0 days Best 12 days/i.test(s.list?.text ?? '') && /start a new one/.test(s.list?.text ?? ''), s.list?.text)
-        r.check('cold: 3 of 10, three rows held', /Achievements 3 of 10/i.test(s.list?.text ?? '') && s.list.rows.filter((x) => x.held).length === 3, s.list?.rows.filter((x) => x.held).map((x) => x.text))
+        r.check('cold: 3 of 8, three rows held', /Achievements 3 of 8/i.test(s.list?.text ?? '') && s.list.rows.filter((x) => x.held).length === 3, s.list?.rows.filter((x) => x.held).map((x) => x.text))
       }
       if (preset === 'some') {
         // T-079: a finished lesson or action item keeps it going, so the line says "Finish" (it said "Watch").
@@ -440,7 +440,7 @@ try {
         r.check('some: the list scrolls inside itself', s.list && s.list.scrollH > s.list.clientH, { scrollH: s.list?.scrollH, clientH: s.list?.clientH })
       }
       if (preset === 'all') {
-        r.check('all: 10 of 10, the secret ones by name', /10 of 10/.test(s.list?.text ?? '') && /Perfectionist/.test(s.list?.text ?? '') && /Unbroken/.test(s.list?.text ?? '') && !/Hidden/.test(s.list?.text ?? ''), s.list?.text)
+        r.check('all: 8 of 8, the secret ones by name', /8 of 8/.test(s.list?.text ?? '') && /Perfectionist/.test(s.list?.text ?? '') && /Unbroken/.test(s.list?.text ?? '') && !/Hidden/.test(s.list?.text ?? ''), s.list?.text)
       }
       await shot(page, `list-${preset}.png`)
       if (preset === 'some') {
@@ -460,18 +460,18 @@ try {
   await runRow(3, 'a fresh unlock: the toast out of the pill, the count sand, read out, gone after 6.5 s, marked New', async (r) => {
     const page = await r.open({ hud: 'fresh' })
     const before = await page.evaluate(SNAP)
-    r.check('before: 2 of 10, no toast', /2\/10$/.test(before.pill?.text ?? '') && before.toast === null, { pill: before.pill?.text, toast: before.toast })
+    r.check('before: 2 of 8, no toast', /2\/8$/.test(before.pill?.text ?? '') && before.toast === null, { pill: before.pill?.text, toast: before.toast })
     await present(page, FIND.toast, { timeout: 8000, what: 'row 3: no toast' })
     await sleep(600)
     const s = await page.evaluate(SNAP)
     r.check('the toast names it: Achievement earned, Habit Builder', /Achievement earned Habit Builder/i.test(s.toast?.text ?? ''), s.toast?.text)
     r.check('it sits in the header row, left of the pill, clear of the brand', s.toast && s.toast.box.r <= s.pillBox.l && s.toast.box.b <= 72 && s.toast.box.l > s.brand.r, { toast: s.toast?.box, pill: s.pillBox, brand: s.brand })
-    r.check('the count says 3/10, in sand', /3\/10$/.test(s.pill?.text ?? '') && s.countFresh === true && /rgb\(240, 183, 126\)/.test(s.countColor ?? ''), { text: s.pill?.text, fresh: s.countFresh, color: s.countColor })
+    r.check('the count says 3/8, in sand', /3\/8$/.test(s.pill?.text ?? '') && s.countFresh === true && /rgb\(240, 183, 126\)/.test(s.countColor ?? ''), { text: s.pill?.text, fresh: s.countFresh, color: s.countColor })
     r.check('the status line reads it out', s.status === 'Achievement earned: Habit Builder.', s.status)
     await crop(page, 'fresh-toast.png', groupEnd(s), 0)
     await waitFor(page, () => !document.querySelector('main header button[aria-hidden="true"]'), { timeout: TOAST_MS + 2000, what: 'row 3: the toast did not go' })
     const after = await page.evaluate(SNAP)
-    r.check('it goes on its own; the count stays 3/10 in ink', after.toast === null && /3\/10$/.test(after.pill?.text ?? '') && after.countFresh === false && after.status === '', { toast: after.toast, text: after.pill?.text, status: after.status })
+    r.check('it goes on its own; the count stays 3/8 in ink', after.toast === null && /3\/8$/.test(after.pill?.text ?? '') && after.countFresh === false && after.status === '', { toast: after.toast, text: after.pill?.text, status: after.status })
     await openList(page, 'row 3')
     const l = await page.evaluate(SNAP)
     const fresh = l.list?.rows.filter((x) => x.fresh) ?? []
@@ -680,7 +680,7 @@ try {
     await present(page, FIND.toast, { timeout: 8000, what: 'row 7: no toast back on the map' })
     await sleep(600)
     s = await page.evaluate(SNAP)
-    r.check('back on the map the toast plays: Habit Builder, 5/10', /Habit Builder/.test(s.toast?.text ?? '') && s.toast.seen && /5\/10$/.test(s.pill?.text ?? ''), { toast: s.toast, pill: s.pill?.text })
+    r.check('back on the map the toast plays: Habit Builder, 5/8', /Habit Builder/.test(s.toast?.text ?? '') && s.toast.seen && /5\/8$/.test(s.pill?.text ?? ''), { toast: s.toast, pill: s.pill?.text })
     await shot(page, 'back-from-lesson.png')
   })
 

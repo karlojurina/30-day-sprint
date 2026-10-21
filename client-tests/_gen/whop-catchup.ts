@@ -23,8 +23,10 @@
  * the member opened the lesson there (Whop keeps no finish time); a time
  * later than the run's clock, a missing one or one that does not read as a
  * time becomes the run's clock, and is counted. A row that has a time keeps
- * it. Write mode then writes the member's sync row with the same columns and
- * values as the backfill (never the token columns) and ticks the streak only
+ * it. A row added with Whop's own time is marked as such (completed_at_real,
+ * v112: Triple Threat counts it on that day). Write mode then writes the
+ * member's sync row with the same columns and values as the backfill (never
+ * the token columns) and ticks the streak only
  * when a row it added was opened on Whop on the run's own UTC day (Lovro's
  * call A, 2026-10-19) and the member's streak does not count that day yet: a
  * tick on a counted day changes nothing, so it is neither counted nor listed
@@ -535,11 +537,28 @@ export async function runWhopCatchup(
           writeFailed = true;
         } else {
           // Only the rows the insert added come back; one a login wrote first stays as it was.
+          const whopTimed: string[] = [];
           for (const r of (data ?? []) as Array<{ id: string; lesson_id: string; completed_at: string }>) {
             changes.inserted.push([r.id, m.id, r.lesson_id, r.completed_at]);
             rows.inserted += 1;
             const time = timeByLesson.get(r.lesson_id);
             if (time) added.push(time);
+            if (time?.source === "whop") whopTimed.push(r.lesson_id);
+          }
+          // v112: a row added with Whop's own time says so (completed_at_real),
+          // so Triple Threat counts it on that day; one given the run's clock
+          // does not. Only rows this run added, so the undo, which deletes
+          // them, leaves no mark behind. Best-effort: a failure is logged and
+          // the rows stand.
+          if (whopTimed.length > 0) {
+            const { error: markError } = await supabase
+              .from("student_lesson_completions")
+              .update({ completed_at_real: true })
+              .eq("student_id", m.id)
+              .in("lesson_id", whopTimed);
+            if (markError) {
+              console.error(`[whop-catchup] student=${m.id} completed_at_real not written: ${markError.message}`);
+            }
           }
         }
       }

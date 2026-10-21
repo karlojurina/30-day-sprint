@@ -2,8 +2,10 @@
  * Phase 5 (brief v3 + 23-05-2026 list) - achievement evaluator.
  *
  * Server-side helper called from the same write paths that update
- * the streak (toggle-lesson, mark-action-shipped, submit-quiz,
- * refresh-watch-sync). Pulls the student's current state, evaluates
+ * the streak (lesson-watched and the Whop webhook through
+ * complete-lesson.ts, mark-action-shipped, toggle-lesson, submit-quiz,
+ * refresh-watch-sync, the login) and from the admin's
+ * backfill-achievements. Pulls the student's current state, evaluates
  * each achievement rule, and inserts any newly-earned unlocks into
  * student_achievements. Idempotent via the PK (student_id,
  * achievement_id) - duplicate inserts are silently rejected.
@@ -23,16 +25,25 @@
  * rows, so the same rules run on the old course (r1..r4) and the new
  * one (a1..a8). `unbroken` and `perfect_run` want every area that has
  * a counting lesson done; `dayNumber` counts from the course switch
- * for a student who paid before it. The four `r*_clear` rules,
- * `early_finisher` and `speedrun` name r1..r4, so on the new course
- * they never fire; the switch deletes their catalog rows (C3).
+ * for a student who paid before it.
+ *
+ * v112 (the owner's decisions of 2026-10-21): eight badges. Region Sweep
+ * and Two Weeks Strong are gone, rules and holders (kept in the schema
+ * archive_v112), and so are the six old-course rules (r1_clear..r4_clear,
+ * early_finisher, speedrun) whose catalog rows the switch deleted. Habit
+ * Builder counts only the streak's days on the new course, and Triple
+ * Threat only lessons really finished on one day (achievement-rules.ts has
+ * both). The migration also took the badges away from the holders who did
+ * not meet these rules; this evaluator itself still never takes one away.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { mostFinishedInOneDay, streakDaysSinceSwitch } from "./achievement-rules";
 import {
   courseAnchorIso,
   daysOnCourse,
   getCurriculumResetAt,
+  resetDateUtc,
 } from "./curriculum-reset";
 import { requestCounts } from "./world/discount";
 
@@ -51,20 +62,19 @@ export interface AchievementSnapshot {
   lessonsByRegion: Record<string, string[]>;
   currentStreak: number;
   longestStreak: number;
+  /** v112: the days of the current streak on or after the course
+   *  switch's date (achievement-rules.ts, streakDaysSinceSwitch); null
+   *  while the old course is live. Habit Builder reads it. */
+  streakDaysSinceSwitch: number | null;
   bountyAccessClaimedAt: string | null;
   discountEarnedAt: string | null;
   /** Day N on the course, 1-indexed, from first_paid_at (joined_at
    *  when null), or from the course switch when that is later. */
   dayNumber: number;
-  /** Number of distinct calendar days (in UTC) the student
-   *  completed at least one lesson on. Used for streak-since-day-1
-   *  detection (unbroken). */
-  uniqueActiveDaysSinceJoin: number;
-  /** Max distinct lessons completed on the same calendar day. */
+  /** v112: the most lessons really finished on one calendar day in UTC
+   *  (achievement-rules.ts, mostFinishedInOneDay). A row a login or
+   *  visit sync stamped with its own time is no finish on any day. */
   maxLessonsInOneDay: number;
-  /** Max distinct lessons completed in one region on the same
-   *  calendar day. */
-  maxRegionLessonsInOneDay: number;
 }
 
 interface AchievementRule {
@@ -88,8 +98,11 @@ function courseComplete(snap: AchievementSnapshot): boolean {
   );
 }
 
+/**
+ * The eight badges (v112), in the order v53 listed them. Their names, words
+ * and tiers are the `achievements` rows; v112 holds them.
+ */
 export const ACHIEVEMENT_RULES: AchievementRule[] = [
-  // Common
   {
     id: "first_lesson",
     evaluate: (s) => s.completedLessonIds.size >= 1,
@@ -100,67 +113,32 @@ export const ACHIEVEMENT_RULES: AchievementRule[] = [
   },
   {
     id: "streak_7",
-    evaluate: (s) => s.currentStreak >= 7 || s.longestStreak >= 7,
-  },
-  {
-    id: "r1_clear",
-    evaluate: (s) => regionComplete(s, "r1"),
-  },
-
-  // Uncommon
-  {
-    id: "r2_clear",
-    evaluate: (s) => regionComplete(s, "r2"),
+    // v112: a 7-day streak on the new course. The streak the flame shows is
+    // kept across the switch, so a student whose streak (or best streak)
+    // reached 7 on the old course was handed Habit Builder at their first
+    // visit after it, as if just earned. Now only the streak's days from the
+    // switch's date count, and the best streak, which holds old days, is not
+    // read. While the old course is live there is no switch to count from,
+    // and the rule is the old one.
+    evaluate: (s) =>
+      s.streakDaysSinceSwitch === null
+        ? s.currentStreak >= 7 || s.longestStreak >= 7
+        : s.streakDaysSinceSwitch >= 7,
   },
   {
     id: "discount_earned",
     evaluate: (s) => s.discountEarnedAt != null,
   },
   {
-    id: "streak_14",
-    evaluate: (s) => s.currentStreak >= 14 || s.longestStreak >= 14,
-  },
-  {
-    id: "r3_clear",
-    evaluate: (s) => regionComplete(s, "r3"),
-  },
-
-  // Rare
-  {
-    id: "r4_clear",
-    evaluate: (s) => regionComplete(s, "r4"),
-  },
-  // v56 - streak_30 (Rare) removed - it overlapped with the
-  // `unbroken` legendary and didn't earn its own tier slot.
-  {
+    // Unchanged by v112 (the owner: it has nothing to do with the course), so
+    // a Bounty Access approval from before the switch still earns it.
     id: "bounty_access_claimed",
     evaluate: (s) => s.bountyAccessClaimedAt != null,
   },
   {
     id: "triple_play",
+    // v112: 3 lessons really finished on one day (maxLessonsInOneDay).
     evaluate: (s) => s.maxLessonsInOneDay >= 3,
-  },
-  {
-    id: "region_sweep",
-    // Cleared an entire region in one day. For tiny regions
-    // (< 3 lessons) this would be too easy, so we also require the
-    // total to be >= 5 lessons on that day.
-    evaluate: (s) =>
-      s.maxRegionLessonsInOneDay >= 5 ||
-      (s.maxRegionLessonsInOneDay >= 3 && s.maxLessonsInOneDay >= 5),
-  },
-
-  // Legendary
-  {
-    id: "early_finisher",
-    // R4 cleared before day 21. dayNumber is the CURRENT day; we
-    // approximate by requiring R4 done AND dayNumber < 21 at the
-    // first observation. Sticky once awarded.
-    evaluate: (s) => regionComplete(s, "r4") && s.dayNumber < 21,
-  },
-  {
-    id: "speedrun",
-    evaluate: (s) => regionComplete(s, "r4") && s.dayNumber < 14,
   },
   {
     id: "unbroken",
@@ -204,7 +182,7 @@ export async function buildAchievementSnapshot(
   supabase: SupabaseClient,
   studentId: string,
 ): Promise<AchievementSnapshot | null> {
-  const [studentRes, completionsRes, lessonsRes, streaksRes, milestonesRes, discountRes, resetRes] =
+  const [studentRes, completionsRes, realRes, lessonsRes, streaksRes, milestonesRes, discountRes, resetRes] =
     await Promise.all([
       supabase
         .from("students")
@@ -217,6 +195,16 @@ export async function buildAchievementSnapshot(
           "lesson_id, completed_at, action_completed_at, skipped_at",
         )
         .eq("student_id", studentId),
+      // v112: the rows whose completed_at is the moment the lesson was really
+      // finished (completed_at_real). A read of its own, so on a database
+      // without the column (before v112 is pasted) every other badge is
+      // still judged: this read fails and no lesson counts toward Triple
+      // Threat until the column is there.
+      supabase
+        .from("student_lesson_completions")
+        .select("lesson_id")
+        .eq("student_id", studentId)
+        .eq("completed_at_real", true),
       supabase
         .from("lessons")
         .select(
@@ -224,7 +212,7 @@ export async function buildAchievementSnapshot(
         ),
       supabase
         .from("student_streaks")
-        .select("current_streak, longest_streak")
+        .select("current_streak, longest_streak, last_streak_date")
         .eq("student_id", studentId)
         .maybeSingle(),
       supabase
@@ -290,7 +278,8 @@ export async function buildAchievementSnapshot(
     (streaksRes.data as {
       current_streak: number;
       longest_streak: number;
-    } | null) ?? { current_streak: 0, longest_streak: 0 };
+      last_streak_date: string | null;
+    } | null) ?? { current_streak: 0, longest_streak: 0, last_streak_date: null };
   const milestones =
     (milestonesRes.data as {
       bounty_access_claimed_at: string | null;
@@ -325,31 +314,30 @@ export async function buildAchievementSnapshot(
       `[achievements] completions read failed for student=${studentId}: ${completionsRes.error.message}`,
     );
   }
-
-  const lessonsById = new Map<
-    string,
-    {
-      region_id: string;
-      requires_action: boolean;
-    }
-  >();
-  for (const l of lessons) {
-    lessonsById.set(l.id, {
-      region_id: l.region_id,
-      requires_action: l.requires_action,
-    });
+  // Same direction: with no answer, no lesson counts toward Triple Threat.
+  if (realRes.error) {
+    console.error(
+      `[achievements] completed_at_real read failed for student=${studentId}, no lesson counts toward Triple Threat this time: ${realRes.error.message}`,
+    );
   }
+  const realLessonIds = new Set(
+    ((realRes.data as Array<{ lesson_id: string }> | null) ?? []).map((r) => r.lesson_id),
+  );
+
+  // Lesson id to requires_action, for the "complete" predicate below and for
+  // Triple Threat's finish times. Every lesson, counting or not.
+  const requiresActionById = new Map<string, boolean>();
+  for (const l of lessons) requiresActionById.set(l.id, l.requires_action === true);
   // Cutover: one key per region (area) found in the lessons rows, so
   // r1..r4 on the old course and a1..a8 on the new one.
   const lessonsByRegion: Record<string, string[]> = {};
   for (const l of lessons) {
     // v74.3 - leave out the lessons that do not count toward progress
     // (l057 bounty onboarding on the old course, the a7l19 pond row on
-    // the new one) so achievements like early_finisher / speedrun /
-    // region_4 fire on the curriculum being done, not gated on the
-    // student also having applied to Bounty Access. On the old course
-    // v92 sets the flag false on l057 alone, the one id
-    // SPRINT_EXCLUDED_LESSON_IDS held.
+    // the new one) so unbroken and perfect_run fire on the curriculum
+    // being done, not gated on the student also having applied to Bounty
+    // Access. On the old course v92 sets the flag false on l057 alone, the
+    // one id SPRINT_EXCLUDED_LESSON_IDS held.
     if (l.counts_toward_progress === false) continue;
     (lessonsByRegion[l.region_id] ??= []).push(l.id);
   }
@@ -360,54 +348,37 @@ export async function buildAchievementSnapshot(
   const completedLessonIds = new Set<string>();
   const shippedActionLessonIds = new Set<string>();
   const skippedLessonIds = new Set<string>();
-  // Day buckets keyed by UTC date string for triple_play +
-  // region_sweep + uniqueActiveDaysSinceJoin.
-  const lessonsByDay = new Map<string, Set<string>>();
-  const lessonsByDayAndRegion = new Map<string, Map<string, Set<string>>>();
 
   for (const c of completions) {
-    const meta = lessonsById.get(c.lesson_id);
-    if (!meta) continue;
+    const requiresAction = requiresActionById.get(c.lesson_id);
+    if (requiresAction === undefined) continue;
     const isSkipped = c.skipped_at != null;
     const hasWatch = c.completed_at != null;
     const hasAction = c.action_completed_at != null;
     const complete = isSkipped
       ? true
-      : meta.requires_action
+      : requiresAction
         ? hasWatch && hasAction
         : hasWatch;
     if (complete) completedLessonIds.add(c.lesson_id);
     if (hasAction) shippedActionLessonIds.add(c.lesson_id);
     if (isSkipped) skippedLessonIds.add(c.lesson_id);
-
-    const dayStamp =
-      c.completed_at?.slice(0, 10) ??
-      c.action_completed_at?.slice(0, 10) ??
-      c.skipped_at?.slice(0, 10);
-    if (complete && dayStamp) {
-      if (!lessonsByDay.has(dayStamp)) lessonsByDay.set(dayStamp, new Set());
-      lessonsByDay.get(dayStamp)!.add(c.lesson_id);
-      if (!lessonsByDayAndRegion.has(dayStamp))
-        lessonsByDayAndRegion.set(dayStamp, new Map());
-      const byRegion = lessonsByDayAndRegion.get(dayStamp)!;
-      if (!byRegion.has(meta.region_id))
-        byRegion.set(meta.region_id, new Set());
-      byRegion.get(meta.region_id)!.add(c.lesson_id);
-    }
   }
 
-  const maxLessonsInOneDay = Array.from(lessonsByDay.values()).reduce(
-    (m, set) => Math.max(m, set.size),
-    0,
+  // v112: Triple Threat counts a lesson on the day it was really finished.
+  // The day used to be taken from completed_at, which a login or visit sync
+  // stamps with the sync's own time on every lesson it brings in from Whop,
+  // so lessons finished over several days counted as one day.
+  const maxLessonsInOneDay = mostFinishedInOneDay(
+    completions.map((c) => ({ ...c, completed_at_real: realLessonIds.has(c.lesson_id) })),
+    requiresActionById,
   );
-  let maxRegionLessonsInOneDay = 0;
-  for (const byRegion of lessonsByDayAndRegion.values()) {
-    for (const set of byRegion.values()) {
-      if (set.size > maxRegionLessonsInOneDay)
-        maxRegionLessonsInOneDay = set.size;
-    }
-  }
-  const uniqueActiveDaysSinceJoin = lessonsByDay.size;
+
+  // v112: Habit Builder reads the streak's days from the switch's date (UTC),
+  // the first day the snapshots count too.
+  const switchDate = resetDateUtc(resetRes.resetAt);
+  const streakSinceSwitch =
+    switchDate === null ? null : streakDaysSinceSwitch(streaks, switchDate);
 
   // v75.20: anchor day on first_paid_at (original signup), not
   // joined_at (current cycle start). Affects achievement evaluation
@@ -424,12 +395,11 @@ export async function buildAchievementSnapshot(
     lessonsByRegion,
     currentStreak: streaks.current_streak,
     longestStreak: streaks.longest_streak,
+    streakDaysSinceSwitch: streakSinceSwitch,
     bountyAccessClaimedAt: milestones.bounty_access_claimed_at,
     discountEarnedAt: discount?.created_at ?? null,
     dayNumber,
-    uniqueActiveDaysSinceJoin,
     maxLessonsInOneDay,
-    maxRegionLessonsInOneDay,
   };
 }
 

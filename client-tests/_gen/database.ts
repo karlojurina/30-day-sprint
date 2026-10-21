@@ -443,6 +443,14 @@ export interface StudentLessonCompletion {
    * Validated by the DB CHECK constraint added in v28.
    */
   discord_message_link: string | null;
+  /**
+   * v112: completed_at is the moment the lesson was really finished (the
+   * lesson page's player, Whop's event, or the Whop catch-up with Whop's own
+   * time). Null or false when a login or visit sync stamped its own time.
+   * Read by Triple Threat (src/lib/achievement-rules.ts). Optional: the
+   * student's reads do not select it.
+   */
+  completed_at_real?: boolean | null;
 }
 
 export interface DailyNote {

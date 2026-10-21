@@ -132,6 +132,39 @@ breaks of the two rules that round added (the read limit, and no tick for a
 streak that already counts today). `streak.test.mjs` runs the catch-up's one
 streak rule too.
 
+`achievements-v112.test.mjs` (2026-10-21, the badges for the new course,
+migration v112) runs every rule v112 changed on the real files:
+`achievements.ts` and `achievement-rules.ts` (no imports, copied untouched),
+and, through their own entry points on the stand-in database,
+`lesson-watched` with its real chain, the webhook, the visit's sync and the
+Whop catch-up (`runWhopCatchup` on the real `whop.ts` read over a stand-in
+`fetch`). It holds the eight rules and that none of the eight taken out is
+awarded to a student who meets their old rules; Triple Threat's
+`finishedAt` and `mostFinishedInOneDay` alone and through
+`evaluateAchievements` (a sync's three, three on their own, an action item
+whose video came by sync before or after its action, a setup action item, a
+skip, midnight UTC, and a database without `completed_at_real`, where every
+other badge is still judged); which writer marks `completed_at_real` (the
+player and the webhook do, a visit's sync does not, the catch-up only on
+rows with Whop's own time) and that a failed mark fails nothing; Habit
+Builder's `streakDaysSinceSwitch` alone and through the evaluator, the old
+rule with no switch and the streak only read; and the share's
+`countsInShare` and `sharePercent`, with v112's view naming the same three
+conditions (the migration harness runs the view itself against them). The
+stand-in's update writes any column it is given, so the column is not
+declared in `stub-server.ts`; a database without it is a `failWhen` on the
+mark or on the read. Each rule was broken once in the generated copies (17
+breaks: the flag ignored, no action item derivation or one past a late sync,
+days not in UTC, the whole streak read, days before the switch, the exempt
+or canceled members in the share, the share rounded down, Habit Builder from
+the best streak, Triple Threat at 2, the evaluator ignoring the read, the
+player or the webhook not marking, a mark of false, the catch-up marking the
+run's clock or nothing), and the suite failed every time. Since then
+`achievements-cutover.test.mjs` holds its parity with the module at
+`410e011` for the seven rules v112 left as they were, Habit Builder among
+them (with no switch it is the old rule); Triple Threat and the eight taken
+out are left out of it.
+
 The crons (bug hunt of 19 October) run with less stood in than the routes
 above: `engagement-alerts.test.mjs` copies the real route, `discord.ts`,
 `cron-auth.ts`, `dm-toggles.ts` and `supabase-server.ts`, so the database is

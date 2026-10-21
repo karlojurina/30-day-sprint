@@ -8,6 +8,8 @@
  *   node world-tests/v6-gates.mjs sheet          gates-sheet.png + gates.json from the stops on disk
  *   node world-tests/v6-gates.mjs --night        the night rows (below), into shots/v6/gates-night
  *   node world-tests/v6-gates.mjs --night sheet  their sheet
+ *   node world-tests/v6-gates.mjs --morning      the morning rows (below), into shots/v6/gates-morning
+ *   node world-tests/v6-gates.mjs --morning sheet  their sheet
  *
  * The page is pinned to day unless asked (src/lib/world-v6/clock.ts: every
  * page but /world is), so these rows grade the frames they always graded
@@ -36,6 +38,27 @@
  *                     (by day the opening's beach is about 200);
  * and the day rows' landmark and edge gates.
  *
+ * MORNING ROWS (2026-10-21, the morning layer of light.ts): the same seven
+ * frames on /dev/world-v6?tod=morning. Each stop is drawn twice in the same
+ * page, first with the light set to the day (the light module's setClock(0,
+ * 0)), then to the morning (setClock(0, 1)), and the morning is graded
+ * against its own day:
+ *   lamps out         every lamp material (light.ts "lamp", the windows, the
+ *                     lanterns' glass, the fire) at most MORNING_LAMP_MAX of
+ *                     its lit colour, the Landing's halos and the lake's
+ *                     lamps (the boathouse, the jetty) at 0, the star field
+ *                     hidden (read from the scene);
+ *   softer shadows    no more very dark pixels than the day's, and its
+ *                     darkest 5% no darker;
+ *   cooler            the frame's mean blue less red at least MORNING_COOLER
+ *                     over the day's, and its sky no warmer than the day's
+ *                     (the upper sky keeps the day's blue; at the lake, where
+ *                     the frame's sky is the horizon, it turns from orange to
+ *                     pink);
+ *   brighter          its mean luma at least the day's;
+ * and the day rows' landmark and edge gates. The day frame is saved beside
+ * the morning one ({id}-day.png).
+ *
  * Each stop is the page's own stop depth (stopDepths()), on the rail, not parked.
  * Per stop it renders twice:
  *   1. the frame as the student sees it (the beauty pass), with every draw
@@ -58,7 +81,8 @@ import puppeteer from "puppeteer-core";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const argv = process.argv.slice(2);
 const NIGHT = argv.includes("--night");
-const OUT = process.env.GATES_OUT ? path.resolve(process.env.GATES_OUT) : path.join(HERE, NIGHT ? "shots/v6/gates-night" : "shots/v6/gates");
+const MORNING = argv.includes("--morning");
+const OUT = process.env.GATES_OUT ? path.resolve(process.env.GATES_OUT) : path.join(HERE, NIGHT ? "shots/v6/gates-night" : MORNING ? "shots/v6/gates-morning" : "shots/v6/gates");
 fs.mkdirSync(OUT, { recursive: true });
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const BASE = process.env.BASE_URL || "http://localhost:3111";
@@ -118,7 +142,13 @@ const NIGHT_BEACH = 105;
 const NIGHT_GLOW = new Set(["a6"]);
 /** The landmark's centre is where the day row has it, except the opening's (the signpost stands right of centre, far). */
 const NIGHT_NO_CX = new Set(["k0"]);
-const ROWS = NIGHT ? NIGHT_STOPS : STOPS;
+/** The morning rows: the night rows' seven frames, graded against their own day. */
+const MORNING_STOPS = NIGHT_STOPS.map(([k, sid, name, lm]) => [k, sid, name, lm, "morning", null]);
+/** A lamp material's colour in the morning, at most this share of its lit colour (by day the lamps sit at 0.4 to 1: paint, or light). */
+const MORNING_LAMP_MAX = 0.15;
+/** The morning's frame is at least this much bluer (mean blue less red, 0..255) than its day. */
+const MORNING_COOLER = 8;
+const ROWS = NIGHT ? NIGHT_STOPS : MORNING ? MORNING_STOPS : STOPS;
 /** Walk stops, where trees and rocks must cover 40 to 55 percent of the land. */
 const WALK = new Set(["a1", "a2", "a5"]);
 const CLASS = ["sky", "terrain", "trees", "rocks", "cover", "water", "landmark", "other"];
@@ -159,7 +189,7 @@ const median = (a) => {
   return Math.round(s[Math.floor(s.length / 2)]);
 };
 
-function measure(px, id, stop, dims) {
+function measure(px, id, stop, dims, extra) {
   const [, sid, , , kind, accent] = stop;
   // C1: the page reads the drawing buffer at its own pixel ratio (1440x900 at
   // PR 1.5), not the 960x600 viewport; every row and box below uses its size.
@@ -320,8 +350,22 @@ function measure(px, id, stop, dims) {
   };
   const beachSorted = Float32Array.from(beach).sort();
 
+  // The morning rows: the frame's mean luma, its mean blue less red, and the sky's.
+  let sumL = 0;
+  let sumBR = 0;
+  let skyBR = 0;
+  for (let i = 0; i < n; i++) {
+    sumL += L[i];
+    const br = px[i * 4 + 2] - px[i * 4];
+    sumBR += br;
+    if (cls[i] === 0) skyBR += br;
+  }
+
   const land = n - counts[0] - counts[5];
   const m = {
+    meanLuma: +(sumL / n).toFixed(1),
+    cool: +(sumBR / n).toFixed(1),
+    skyCool: counts[0] ? +(skyBR / counts[0]).toFixed(1) : null,
     p5: Math.round(p(0.05)),
     p95: Math.round(p(0.95)),
     spread: Math.round(p(0.95) - p(0.05)),
@@ -346,12 +390,27 @@ function measure(px, id, stop, dims) {
     beachP90: beach.length ? Math.round(beachSorted[Math.floor(beach.length * 0.9)]) : null,
     beachMedian: beach.length ? Math.round(beachSorted[Math.floor(beach.length / 2)]) : null,
   };
-  return { m, gates: gates(m, sid, kind) };
+  return { m, gates: gates(m, sid, kind, extra) };
 }
 
-function gates(m, sid, kind) {
+function gates(m, sid, kind, extra) {
   const g = [];
   const add = (name, pass, value) => g.push({ gate: name, pass, value });
+  if (kind === "morning" && extra) {
+    const { day, lamps } = extra;
+    add(
+      `morning: lamps out (every lamp at most ${MORNING_LAMP_MAX} of its lit colour, the halos 0, no stars)`,
+      lamps.lamps > 0 && lamps.lampMax <= MORNING_LAMP_MAX && lamps.shoreHalo === 0 && lamps.lakeLamp === 0 && lamps.starsVisible === false && lamps.morning === 1,
+      `${lamps.lamps} lamp materials, the brightest at ${lamps.lampMax.toFixed(3)} (by day ${lamps.dayLampMax.toFixed(3)}); the Landing's halos ${lamps.shoreHalo}, the lake's lamps ${lamps.lakeLamp}; stars ${lamps.starsVisible ? "shown" : "hidden"}`,
+    );
+    add("morning: softer shadows (no more very dark pixels than the day's, the darkest 5% no darker)", m.darkPct <= day.darkPct && m.p5 >= day.p5, `very dark ${m.darkPct}% (day ${day.darkPct}%), p5 ${m.p5} (day ${day.p5})`);
+    add(
+      `morning: cooler (the frame's blue less red ${MORNING_COOLER}+ over the day's, its sky no warmer)`,
+      m.cool >= day.cool + MORNING_COOLER && (m.skyCool === null || day.skyCool === null || m.skyCool >= day.skyCool - 2),
+      `${m.cool} (day ${day.cool}); sky ${m.skyCool} (day ${day.skyCool})`,
+    );
+    add("morning: brighter (mean luma at least the day's)", m.meanLuma >= day.meanLuma, `${m.meanLuma} (day ${day.meanLuma})`);
+  }
   if (kind === "open") {
     add("luma spread >= 130", m.spread >= 130, m.spread);
     add("biggest 16-luma band <= 25%", m.biggestBand <= 25, m.biggestBand);
@@ -385,13 +444,13 @@ function gates(m, sid, kind) {
     if (m.beachPct >= 0.2) add(`night: no white beach (p90 <= ${NIGHT_BEACH})`, m.beachP90 !== null && m.beachP90 <= NIGHT_BEACH, `p90 ${m.beachP90}, median ${m.beachMedian}, ${m.beachPct}% of the frame`);
   }
   add("darkest 20% touches an edge", m.darkEdge > 5, m.darkEdge);
-  if (!(kind === "night" && NIGHT_NO_CX.has(sid))) {
+  if (!((kind === "night" || kind === "morning") && NIGHT_NO_CX.has(sid))) {
     add("landmark centre x 0.55-0.75", !!m.landmark.px && m.landmark.cx >= 0.55 && m.landmark.cx <= 0.75, m.landmark.px ? `${m.landmark.cx} (${m.landmark.px} px)` : "not in frame");
   } else {
     add("landmark in frame", !!m.landmark.px, m.landmark.px ? `${m.landmark.cx} (${m.landmark.px} px)` : "not in frame");
   }
   if (m.accentPct !== null) add("accent hue elsewhere < 0.5%", m.accentPct < 0.5, m.accentPct);
-  if (WALK.has(sid) && kind !== "night") add("trees + rocks 40-55% of land", m.treesRocksOverLand >= 40 && m.treesRocksOverLand <= 55, m.treesRocksOverLand);
+  if (WALK.has(sid) && kind !== "night" && kind !== "morning") add("trees + rocks 40-55% of land", m.treesRocksOverLand >= 40 && m.treesRocksOverLand <= 55, m.treesRocksOverLand);
   return g;
 }
 
@@ -418,8 +477,8 @@ async function renderStops(list) {
   const tLoad = Date.now();
   // poster=off: SwiftShader is a software renderer, so since the cheap laptops'
   // poster mode (poster.ts) the page would show the posters and build no 3D.
-  // The dev page is pinned to day; the night rows ask for night (clock.ts).
-  await page.goto(BASE + "/dev/world-v6?poster=off" + (NIGHT ? "&tod=night" : ""), { waitUntil: "domcontentloaded", timeout: 120000 });
+  // The dev page is pinned to day; the night rows ask for night, the morning rows for the morning (clock.ts).
+  await page.goto(BASE + "/dev/world-v6?poster=off" + (NIGHT ? "&tod=night" : MORNING ? "&tod=morning" : ""), { waitUntil: "domcontentloaded", timeout: 120000 });
   await page.waitForFunction(() => window.__worldReady || window.__worldError, { timeout: 180000, polling: 300 });
   const err = await page.evaluate(() => window.__worldError || null);
   if (err) throw new Error("world error: " + err);
@@ -434,19 +493,38 @@ async function renderStops(list) {
     let res = null;
     // The stop's index in PLACES order (stopDepths()); -1 is the opening, depth 0.
     const stopIndex = key < 0 ? -1 : STOPS.findIndex((s) => s[1] === sid);
-    for (let attempt = 0; attempt < 2; attempt++) {
-      res = await page.evaluate(renderInPage, stopIndex, lm);
-      // SwiftShader sometimes hands back a black buffer on a long batch: once more after a pause.
-      if (res.meanLuma > 3 || sid === "a4") break;
-      console.log(`  ${sid}: black frame, retrying`);
-      await sleep(2500);
+    const render = async () => {
+      let r = null;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        r = await page.evaluate(renderInPage, stopIndex, lm);
+        // SwiftShader sometimes hands back a black buffer on a long batch: once more after a pause.
+        if (r.meanLuma > 3 || sid === "a4") break;
+        console.log(`  ${sid}: black frame, retrying`);
+        await sleep(2500);
+      }
+      return r;
+    };
+    // The morning rows: the same stop by day first (the light module set straight to it, no ease), as the reference.
+    let extra = null;
+    if (MORNING) {
+      await page.evaluate(() => window.__worldV6Debug.debugScene().userData.light.setClock(0, 0, 0));
+      const dres = await render();
+      fs.writeFileSync(path.join(OUT, `${sid}-day.png`), Buffer.from(dres.png.split(",")[1], "base64"));
+      const dayLamps = await page.evaluate(lampState);
+      const day = measure(new Uint8Array(Buffer.from(dres.px, "base64")), new Uint8Array(Buffer.from(dres.id, "base64")), stop, { w: dres.bw, h: dres.bh }).m;
+      await page.evaluate(() => window.__worldV6Debug.debugScene().userData.light.setClock(0, 1, 0));
+      res = await render();
+      const lamps = await page.evaluate(lampState);
+      extra = { day, lamps: { ...lamps, dayLampMax: dayLamps.lampMax } };
+    } else {
+      res = await render();
     }
     fs.writeFileSync(path.join(OUT, `${sid}.png`), Buffer.from(res.png.split(",")[1], "base64"));
     fs.writeFileSync(path.join(OUT, `${sid}-id.png`), Buffer.from(res.idPng.split(",")[1], "base64"));
     const px = new Uint8Array(Buffer.from(res.px, "base64"));
     const id = new Uint8Array(Buffer.from(res.id, "base64"));
-    const { m, gates: g } = measure(px, id, stop, { w: res.bw, h: res.bh });
-    const out = { key, id: sid, railU: res.railU, frame: res.frame, attr: res.attr, attrTotals: res.attrTotals, metrics: m, gates: g };
+    const { m, gates: g } = measure(px, id, stop, { w: res.bw, h: res.bh }, extra);
+    const out = { key, id: sid, railU: res.railU, frame: res.frame, attr: res.attr, attrTotals: res.attrTotals, metrics: m, gates: g, ...(extra ? { day: extra.day, lamps: extra.lamps } : {}) };
     fs.writeFileSync(path.join(OUT, `${sid}.json`), JSON.stringify(out, null, 1));
     const top = Object.entries(res.attr)
       .sort((a, b) => b[1].tris - a[1].tris)
@@ -462,6 +540,43 @@ async function renderStops(list) {
   console.log(`console errors: ${errors.length}, /api requests: ${api.length}`);
   if (errors.length) console.log(errors.slice(0, 8).join("\n"));
   await browser.close();
+}
+
+/**
+ * Runs in the page (the morning rows): the lamps as the scene has them. Every
+ * lamp material's colour against the colour light.ts keeps as its lit base
+ * (its brightest channel's share), the Landing's halos' level (their
+ * onBeforeRender sets it from the light; run here, so it is the level a
+ * frame would draw now), the lake's lamps (dress-lakeforest's uLamp), the
+ * star field, and the light's morning.
+ */
+function lampState() {
+  const sc = window.__worldV6Debug;
+  const scene = sc.debugScene();
+  const s = scene.userData.light.state;
+  let lamps = 0;
+  let lampMax = 0;
+  scene.traverse((o) => {
+    const mats = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+    for (const m of mats) {
+      const kind = m.userData?.lightGlow ?? (m.name === "V4BlockGlow" ? "lamp" : undefined);
+      const b = m.userData?.lightGlowBase;
+      if (kind !== "lamp" || !m.color || !b) continue;
+      lamps++;
+      for (const ch of ["r", "g", "b"]) if (b[ch] > 1e-6) lampMax = Math.max(lampMax, m.color[ch] / b[ch]);
+    }
+  });
+  const halos = scene.getObjectByName("Shore:halos");
+  if (halos && typeof halos.onBeforeRender === "function") halos.onBeforeRender(sc.renderer, scene, sc.camera);
+  const lake = scene.getObjectByName("LakeHalos");
+  return {
+    morning: s.morning,
+    lamps,
+    lampMax,
+    shoreHalo: halos?.material?.uniforms?.uLevel?.value ?? null,
+    lakeLamp: lake?.material?.uniforms?.uLamp?.value ?? null,
+    starsVisible: scene.getObjectByName("LightStars")?.visible ?? null,
+  };
 }
 
 /** Runs in the page: seed the stop, beauty pass with attribution, ID pass. */
@@ -726,19 +841,19 @@ async function makeSheet() {
       .map(([k, v]) => `${k} ${Math.round(v.tris / 1000)}k`)
       .join(" · ");
   const html = `<html><body style="margin:0;background:#15171a;font:11px/1.35 -apple-system,Helvetica,sans-serif;color:#e8e4dc">
-  <div style="padding:10px 8px 2px;font-size:15px">${NIGHT ? "night rows (?tod=night): the opening and a1 to a6" : "v5 acceptance gates (bible section 7) · 8 stops"} at 960x600, GL buffer, no UI · ${new Date().toISOString().slice(0, 16)}</div>
+  <div style="padding:10px 8px 2px;font-size:15px">${NIGHT ? "night rows (?tod=night): the opening and a1 to a6" : MORNING ? "morning rows (?tod=morning): the opening and a1 to a6, each against its own day" : "v5 acceptance gates (bible section 7) · 8 stops"} at 960x600, GL buffer, no UI · ${new Date().toISOString().slice(0, 16)}</div>
   <div style="display:grid;grid-template-columns:${cellW}px ${cellW}px 330px;gap:8px;padding:8px">
   ${rows
     .map(
       ({ sid, name, j }) => `<img src="data:image/png;base64,${fs.readFileSync(path.join(OUT, `${sid}.png`)).toString("base64")}" style="width:${cellW}px;height:${cellH}px">
-  <img src="data:image/png;base64,${fs.readFileSync(path.join(OUT, `${sid}-id.png`)).toString("base64")}" style="width:${cellW}px;height:${cellH}px">
+  <img src="data:image/png;base64,${fs.readFileSync(path.join(OUT, MORNING ? `${sid}-day.png` : `${sid}-id.png`)).toString("base64")}" style="width:${cellW}px;height:${cellH}px">
   <div><div style="font-size:14px"><b>${sid} ${name}</b></div>
   <div style="color:#b8b2a8">${j.frame.triangles.toLocaleString()} tris / ${j.frame.calls} calls · sky ${j.metrics.share.sky}% · trees ${j.metrics.share.trees}% · rocks ${j.metrics.share.rocks}% · cover ${j.metrics.share.cover}%</div>
   <div style="color:#b8b2a8">${top(j.attr)}</div>${gl(j.gates)}</div>`,
     )
     .join("")}
   </div>
-  <div style="padding:4px 10px 10px;color:#b8b2a8">ID pass: blue sky · brown terrain (darker = steeper) · green trees · grey rocks · lime cover · navy water · red landmark · pink other</div>
+  <div style="padding:4px 10px 10px;color:#b8b2a8">${MORNING ? "left the morning, right the same stop by day" : "ID pass: blue sky · brown terrain (darker = steeper) · green trees · grey rocks · lime cover · navy water · red landmark · pink other"}</div>
   </body></html>`;
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: "new", args: ["--no-sandbox", "--hide-scrollbars"] });
   const p2 = await browser.newPage();

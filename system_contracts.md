@@ -51,7 +51,11 @@ When adding a new table, append it here. When deleting a field, scan
   `whop_plan_id` (v79 — drives paying / free classification via
   `PAYING_WHOP_PLAN_IDS` allowlist. Free-plan members keep full
   student-side access but are excluded from CSM tasks, dashboard
-  metrics, and operational surfaces.),
+  metrics, and operational surfaces. Since 2026-10-21 All students and
+  the Student journey also read it, against `MONTHLY_97_PLAN_IDS`, the
+  course's two $97 monthly plans (`src/lib/admin/students-list.ts`,
+  `journey-board.ts`): a student on any other plan, or with none on
+  file, is on neither page.),
   `first_paid_at` (the student's FIRST REAL WHOP PAYMENT since the
   first-paid fix, 2026-10-20: the earliest payment by that user with
   status paid, `paid_at` set, a total above 0 and not fully refunded

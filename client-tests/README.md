@@ -277,12 +277,19 @@ columns and pages by id. 81 checks.
 runs the rules of Tasks, its insights, All students, a student's page and
 the Student journey. The readers (`src/lib/admin/students-list.ts`,
 `student-detail.ts`, `journey-board.ts`, copied by `build.mjs`) run on
-`stub-server.ts`'s database: All students holds every student with a first
-payment (monthly, yearly, another plan, none, before 25 May, every
-membership, no Whop membership) and never a free seat, past 1,000 students
-read by key, with the list's columns only (no plan); the journey holds a
-first payment from `DISCOUNT_LAUNCH_DATE` on (not a millisecond before),
-any plan, active, past due or canceled with a membership; a student's
+`stub-server.ts`'s database: since the owner's answer of 2026-10-21 All
+students holds a first payment on one of the course's two $97 monthly plans
+(`MONTHLY_97_PLAN_IDS`: the visible one and the hidden one; before 25 May,
+every membership, no Whop membership) and never a yearly plan, an ETfB
+plan, no plan on file, a $97 member with no first payment or a free seat,
+past 1,000 students read by key, with the list's columns only (the plans
+are the read's filter, never a column); the journey holds the same two
+plans with a first payment from `DISCOUNT_LAUNCH_DATE` on (not a
+millisecond before), active, past due or canceled with a membership, and
+on one database it is exactly the list's students paid from the launch
+with a live or churned membership; the two readers as they were at
+`35d44d2` (git, copied into `_gen/*.before-97.ts`), run on the same
+databases, are the control that every plan used to be listed; a student's
 latest 30% request is the newest of any date, and the Whop sync read names
 no token. The builders run on hand-made reads: the order, the day, the
 progress over the counting lessons (a skip counts, a half-done action item
@@ -297,9 +304,13 @@ tiers, the closed lines (the reset's note in plain words), the queue line's
 "sent today" in Croatia. `computeOutreachInsights` with and without the
 floor, and `GET /api/admin/tasks/insights` (copied here with its imports
 pointed at the stand-ins) reading `tasks_reset_at` or answering 500 when it
-cannot. The words: "Membership status" and "still a member", and no plan or
-subscription in this lane's pages and readers. Where the old page held the
-rule inline, the page at `ca9b5ef` (git) is the control. 61 checks.
+cannot. The words: "Membership status" and "still a member"; no
+subscription in this lane's pages and readers, and no plan read as a
+column or shown on a row: All students' and the journey's readers name the
+plan only in their one filter on `MONTHLY_97_PLAN_IDS`
+(`PAYING_WHOP_PLAN_IDS` left as it was), and both headers say who is
+listed. Where the old page held the rule inline, the page at `ca9b5ef`
+(git) is the control. 68 checks (61 before the $97 plans came back).
 `build.mjs` copies `templates.ts` and `database.ts` again for it (the Tasks
 rules read the buckets' order), beside `metrics-definitions.ts`.
 

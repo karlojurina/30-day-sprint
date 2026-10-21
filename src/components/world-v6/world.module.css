@@ -1667,7 +1667,7 @@
   filter: blur(14px);
 }
 
-/* After dark on the student's clock (clock.ts posterNight, written on <html>
+/* After dark on the student's clock (clock.ts posterTod, written on <html>
    by the page head's script before the first paint): the night poster's,
    made the same way from public/world-v6/posters/k0-night.webp
    (world-tests/v6-posters.mjs --tod=night prints it). */
@@ -1675,8 +1675,15 @@
   background-image: url("data:image/webp;base64,UklGRvIAAABXRUJQVlA4IOYAAADwBgCdASowABsAPm0qkUYkIiGhMBVdUIANiWUApawubW7sejbr/l5U6NnGj4xTpb0s7iN8P4lY8ustHhWQJmTgAP78s9C5xkzzS6dMD/q787fN7vO2ClH5sUGD98NfZAYb8sc9RsNehzQyL4vkPSjUDa2DLAsEPLSYUvqqy+ow7BKVITkpb49ja+1f3xxehXgAcwqepCi2j3luqXZvnz5ckY7H0dQ9SMKEfJ/bnv8Uio2E0uo17FgBauAL7XQjfmCvlS0qKlOTeN1lLvolg5RgVb/EuDEY0yfHPzJ9bejV0ootsj8AAA==");
 }
 
+/* In the morning on the student's clock (the same attribute): the morning
+   poster's, made the same way from public/world-v6/posters/k0-morning.webp
+   (world-tests/v6-posters.mjs --tod=morning prints it). */
+:global(html[data-world-tod="morning"]) .poster::before {
+  background-image: url("data:image/webp;base64,UklGRlgBAABXRUJQVlA4IEwBAACwBwCdASowABsAPm0skUWkIqGYDVVUQAbEsgBOma0iJAFwsy8REPSp2s27XNTwSA0gKD3BrVGdvoAzwaP0eUDZWTRRFXUgAP7tWYwG9oKQa6rLG4wda2CjhkaJBJLwzAu8+5AnqlTg/hLWxp+uQZsdEqzVOkfx6j2v4gJnOq3/vokIpVYsdfu4Fidw35xQ4cqFyVCnUUxEnDfbKzkorZ5OaNG5pfz3okddw2aUMo/K1qUB8hsoQZTaWgtqvCTsHca72rOx6RWfnOFG/4T1iuv01z9ZlrV3sD8LHn5ZHY4J3PTfaO0ZY6+EvhOFLUnaO2kBeZccrajoN3+TvHCQ4AWzw+IZqhgpzowAEWCFduAWQIFJfkMEZWzxYG31illGlzd+ZUzgmyqj3jLaJgNohyWLdI6pRMMrnh0RGD76UvN21lGw1hrbv0CBdgAAAA==");
+}
+
 /* The landing poster, the opening's, from the first paint: drawn by the
-   stylesheet, so the day or the night file is chosen before any of the
+   stylesheet, so the day, the morning or the night file is chosen before any of the
    page's code runs, and only that one downloads. Only where the 3D draws
    (the complement of WorldV6.tsx NARROW_QUERY, its twin in
    client-tests/media-query.mjs), so a phone never downloads it. Once the
@@ -1689,6 +1696,10 @@
 
   :global(html[data-world-tod="night"]) .posterLanding {
     background-image: url("/world-v6/posters/k0-night.webp");
+  }
+
+  :global(html[data-world-tod="morning"]) .posterLanding {
+    background-image: url("/world-v6/posters/k0-morning.webp");
   }
 }
 

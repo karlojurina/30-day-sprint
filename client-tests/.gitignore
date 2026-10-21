@@ -10,3 +10,5 @@ _gen/terrain-70c934a.ts
 # The night layer's copies (build.mjs and night-clock.test.mjs write them on every run):
 _gen/world-light.ts
 _gen/light-d0ebe76.ts
+# The night as it stood before the morning (morning-clock.test.mjs takes it from git on every run):
+_gen/light-eab2330.ts

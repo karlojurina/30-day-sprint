@@ -110,7 +110,8 @@ console.log('\nThe watcher (watchClock), on a stand-in window and document')
   }
   let now = at(19, 58)
   const got = []
-  const stop = C.watchClock({ kind: 'clock' }, (n) => got.push(+n.toFixed(4)), () => now)
+  // The watcher hands a look (clock.ts ClockLook); this suite reads its night.
+  const stop = C.watchClock({ kind: 'clock' }, (l) => got.push(+l.night.toFixed(4)), () => now)
   ok(got.length === 1 && got[0] === 0, 'the factor now, at once', JSON.stringify(got))
   ok(timers.length === 1 && timers[0].ms === C.CLOCK.everyMs && C.CLOCK.everyMs === 300000, 'then a check every five minutes', String(timers[0]?.ms))
   ok(listeners.length === 1 && listeners[0].t === 'visibilitychange', 'and one when the tab becomes visible again')
@@ -129,7 +130,7 @@ console.log('\nThe watcher (watchClock), on a stand-in window and document')
   stop()
   ok(!timers[0].live && !listeners[0].live, 'stop() clears the timer and the listener')
   const got2 = []
-  const stop2 = C.watchClock({ kind: 'hour', hour: 23 }, (n) => got2.push(n), () => now)
+  const stop2 = C.watchClock({ kind: 'hour', hour: 23 }, (l) => got2.push(l.night), () => now)
   ok(got2.length === 1 && got2[0] === 1 && timers.length === 1, 'a pinned setting is read once and sets no timer')
   stop2()
   delete globalThis.window
@@ -157,7 +158,8 @@ const track = NEW.buildTrack(placeU)
 const a7U = placeU[6]
 
 // blendTrack writes into the state it is handed and neither module exports
-// newState: this is its shape (the old module's fields; the new adds aurora, band, night, rev).
+// newState: this is its shape (the old module's fields; the new adds aurora,
+// band, night, rev, and since the morning the morning and its mist).
 const THREE = await import('three')
 function emptyState() {
   const c = () => new THREE.Color()
@@ -169,11 +171,12 @@ function emptyState() {
     haze: c(), fogNear: 0, fogFar: 0, hemiSky: c(), hemiGround: c(), hemiIntensity: 0,
     ambient: c(), ambientIntensity: 0, exposure: 1, stars: 0, cloudTop: c(), cloudBase: c(), water: c(),
     lampGlow: 1, magicGlow: 1, aurora: 0, band: 0, night: 0, rev: 0, under: 0,
+    morning: 0, mist: 0, mistDepth: 1, mistNear: 0, mistFar: 1, mistColor: c(),
     nearShade: c(), halo: c(), hazeBase: 0, hazeFall: 1, hazeOn: 0, sunLobe: 0, fogCap: 0.92,
     liftR: 0, liftG: 0, liftB: 0, gainR: 1, gainG: 1, gainB: 1, gamma: 1, sat: 1, haloAmt: 0, haloDeg: 0, haloHalf: 1, haloFog: 0, fogAdd: 0,
   }
 }
-const OLD_FIELDS = Object.keys(emptyState()).filter((k) => !['aurora', 'band', 'night', 'rev'].includes(k))
+const OLD_FIELDS = Object.keys(emptyState()).filter((k) => !['aurora', 'band', 'night', 'rev', 'morning', 'mist', 'mistDepth', 'mistNear', 'mistFar', 'mistColor'].includes(k))
 const f64 = new Float64Array(1)
 const bits = (x) => {
   f64[0] = x

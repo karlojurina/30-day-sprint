@@ -70,7 +70,7 @@ function firstNameOf(name: string | null | undefined): string | null {
 export function WorldMap() {
   const { status, model } = useMapModel();
   const { base } = useWorldStage();
-  // The posters' day or night (clock.ts posterNight), on <html> before the
+  // The posters' set, day, morning or night (clock.ts posterTod), on <html> before the
   // card below paints. The page head's script already wrote it on the page
   // the visit started on; this writes it for this page, which is the same
   // answer unless the visit came in by a link (the login's redirect).
@@ -238,7 +238,7 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
 
   return (
     <>
-      {/* The students' map follows their own clock (night after dark, clock.ts); the dev harness stays on day unless its address asks. */}
+      {/* The students' map follows their own clock (night after dark, a morning after it, clock.ts); the dev harness stays on day unless its address asks. */}
       <WorldV6 source={source} corner={corner} liveClock={base === CLOCK_LIVE_BASE} />
       {/* Over the map, outside it: the discount's questions and the two celebrations. */}
       <WorldDiscountForm form={discountForm} paused={lessonId !== null} />
@@ -264,7 +264,7 @@ function Card({
   return (
     <div
       data-world-card={kind}
-      // The landing's still view, behind the loading card only: day or night by the clock (the stylesheet's .groundPoster).
+      // The landing's still view, behind the loading card only: day, morning or night by the clock (the stylesheet's .groundPoster).
       className={`${tokens.tokens} ${u.ground}${poster ? ` ${u.groundPoster}` : ""}`}
     >
       <div className={`${u.card} ${u.note}`}>{children}</div>

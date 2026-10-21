@@ -11,7 +11,7 @@ import { addPathLine, footprintStats, resetFootprints } from "./footprints";
 import { NO_PROGRESS, sameProgress, type WorldProgress } from "./progress";
 import { CHECKPOINT, type CheckpointLook } from "./checkpoint";
 import { BOUNTY } from "./bounty";
-import { CLOCK } from "./clock";
+import { CLOCK, type ClockLook } from "./clock";
 import type { LightModule } from "./light";
 
 /**
@@ -1565,8 +1565,9 @@ export class WorldScene {
   private worldProgress: WorldProgress = NO_PROGRESS;
   /** The discount checkpoint's look (checkpoint.ts), passed to modules with setCheckpoint. */
   private checkpointLook: CheckpointLook = "closed";
-  /** The night factor from the student's clock (setNight), handed to light.ts once it installs. */
+  /** The student's clock (setClock): the night factor and the morning factor, handed to light.ts once it installs. */
   private nightTarget = 0;
+  private morningTarget = 0;
   private depthMax = 1;
   private spacerEl: HTMLElement | null = null;
 
@@ -2864,12 +2865,12 @@ export class WorldScene {
         this.modules.push({ name, module: m, broken: false });
         this.moduleReport[name] = Math.round(performance.now() - t0);
         // The clock was read before the world was built: the light takes the
-        // night at once, so the first frame drawn (and the load probe that
-        // times it) is the night the student sees, and the modules after it
-        // install under that light.
+        // night and the morning at once, so the first frame drawn (and the
+        // load probe that times it) is the light the student sees, and the
+        // modules after it install under that light.
         const light = m as Partial<LightModule>;
-        if (typeof light.setNight === "function") {
-          light.setNight(this.nightTarget, 0);
+        if (typeof light.setClock === "function") {
+          light.setClock(this.nightTarget, this.morningTarget, 0);
           light.update?.(0, 0);
         }
       } catch (e) {
@@ -3346,29 +3347,37 @@ export class WorldScene {
   }
 
   /**
-   * The night factor from the student's clock (clock.ts), 0 day .. 1 night,
-   * for light.ts's night layer. A change wakes one frame and no more: the map
-   * still goes to sleep 45 s after the last input (the idle ladder). Awake,
-   * the change eases in over CLOCK.easeMs (the light animates for that long,
-   * at the ladder's rate); asleep, under reduced motion or before the first
-   * frame, it lands in the one frame it wakes. Before the world is built it
-   * is kept and handed to the light as it installs.
+   * The student's clock (clock.ts ClockLook): the night factor, 0 day .. 1
+   * night, and the morning factor under it, 0 .. 1, for light.ts's night and
+   * morning layers. A change wakes one frame and no more: the map still goes
+   * to sleep 45 s after the last input (the idle ladder). Awake, the change
+   * eases in over CLOCK.easeMs (the light animates for that long, at the
+   * ladder's rate); asleep, under reduced motion or before the first frame,
+   * it lands in the one frame it wakes. Before the world is built it is kept
+   * and handed to the light as it installs.
    */
-  setNight(f: number): void {
-    const n = Math.min(1, Math.max(0, Number.isFinite(f) ? f : 0));
+  setClock(look: ClockLook): void {
+    const n = Math.min(1, Math.max(0, Number.isFinite(look.night) ? look.night : 0));
+    const m = Math.min(1, Math.max(0, Number.isFinite(look.morning) ? look.morning : 0));
     this.nightTarget = n;
+    this.morningTarget = m;
     const light = this.scene?.userData.light as LightModule | undefined;
-    if (!light || typeof light.setNight !== "function") return;
+    if (!light || typeof light.setClock !== "function") return;
     const awake = this.ready && !this.reducedMotion && this.idle.phase(performance.now()) !== "asleep";
-    light.setNight(n, awake ? CLOCK.easeMs : 0);
+    light.setClock(n, m, awake ? CLOCK.easeMs : 0);
     this.dirty = true;
     this.wake();
   }
 
-  /** The night as the page asked for it and as the light shows it (harness). */
-  nightInfo(): { target: number; shown: number | null } {
+  /** The clock as the page asked for it and as the light shows it (harness): the night's `target` and `shown`, the morning's beside them. */
+  nightInfo(): { target: number; shown: number | null; morningTarget: number; morningShown: number | null } {
     const light = this.scene?.userData.light as LightModule | undefined;
-    return { target: this.nightTarget, shown: light && typeof light.nightFactor === "number" ? light.nightFactor : null };
+    return {
+      target: this.nightTarget,
+      shown: light && typeof light.nightFactor === "number" ? light.nightFactor : null,
+      morningTarget: this.morningTarget,
+      morningShown: light && typeof light.morningFactor === "number" ? light.morningFactor : null,
+    };
   }
 
   private forwardCheckpoint() {

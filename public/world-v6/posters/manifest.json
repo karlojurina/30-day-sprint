@@ -755,5 +755,54 @@
     "quality": 0.8
    }
   ]
+ },
+ "morning": {
+  "made": "2026-10-21T08:42:35.777Z",
+  "hour": 7.5,
+  "factor": 1,
+  "posters": [
+   {
+    "id": "k0",
+    "file": "k0-morning.webp",
+    "bytes": 104860,
+    "quality": 0.8
+   },
+   {
+    "id": "a1",
+    "file": "a1-morning.webp",
+    "bytes": 164708,
+    "quality": 0.8
+   },
+   {
+    "id": "a2",
+    "file": "a2-morning.webp",
+    "bytes": 168278,
+    "quality": 0.8
+   },
+   {
+    "id": "a3",
+    "file": "a3-morning.webp",
+    "bytes": 99840,
+    "quality": 0.8
+   },
+   {
+    "id": "a4",
+    "file": "a4-morning.webp",
+    "bytes": 80834,
+    "quality": 0.8
+   },
+   {
+    "id": "a5",
+    "file": "a5-morning.webp",
+    "bytes": 89792,
+    "quality": 0.8
+   },
+   {
+    "id": "a6",
+    "file": "a6-morning.webp",
+    "bytes": 148718,
+    "quality": 0.8
+   }
+  ]
  }
 }

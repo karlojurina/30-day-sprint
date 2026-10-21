@@ -55,7 +55,7 @@ import {
   type PosterManifest,
 } from "@/lib/world-v6/poster";
 import { benchText, runBench, type BenchResult } from "./bench";
-import { clockSetting, markPosterTod, posterNight, watchClock, writePosterTod } from "@/lib/world-v6/clock";
+import { clockSetting, markPosterTod, posterTod, watchClock, writePosterTod, type ClockLook, type PosterTod } from "@/lib/world-v6/clock";
 import tokens from "./tokens.module.css";
 import s from "./world.module.css";
 
@@ -464,8 +464,9 @@ interface Gate {
 
 /**
  * `liveClock`: the map follows the student's own clock (clock.ts), night after
- * dark. Only the students' map passes it (WorldMap on /world); every other
- * page stays pinned to day unless its address says ?tod= or ?hour=.
+ * dark and a morning after it. Only the students' map passes it (WorldMap on
+ * /world); every other page stays pinned to day unless its address says
+ * ?tod= or ?hour=.
  */
 export function WorldV6({ source, corner, liveClock = false }: { source?: WorldSource; corner?: Corner; liveClock?: boolean } = {}) {
   // The course's words and counts, for the map and every component under it (content.ts).
@@ -716,36 +717,36 @@ function WorldV6View({
     sceneRef.current?.setPaused(scenePaused(sourceRef.current));
   }, [paused]);
 
-  // The student's clock (clock.ts): the night factor now, every few minutes
-  // and on coming back to the tab, for the scene's light. A scene made later
-  // takes the last value as it is built (the scene effect below).
-  const nightRef = useRef(0);
-  // The posters' day or night (clock.ts posterNight: the night set once the
-  // live map is nearer its night). On <html> for the stylesheets, where the
-  // page head's script put it before the first paint; written again here
+  // The student's clock (clock.ts): the night and morning factors now, every
+  // few minutes and on coming back to the tab, for the scene's light. A scene
+  // made later takes the last value as it is built (the scene effect below).
+  const clockRef = useRef<ClockLook>({ night: 0, morning: 0 });
+  // The posters' set, day, morning or night (clock.ts posterTod: the set
+  // nearest to what the live map shows). On <html> for the stylesheets, where
+  // the page head's script put it before the first paint; written again here
   // with this map's own liveClock before it paints, kept in a ref for the
   // posters' code and in state for the phone's picture.
-  const nightPostersRef = useRef(false);
-  const [nightPosters, setNightPosters] = useState(false);
+  const posterTodRef = useRef<PosterTod>("day");
+  const [posterSet, setPosterSet] = useState<PosterTod>("day");
   useLayoutEffect(() => {
-    const n = markPosterTod(liveClock);
-    nightPostersRef.current = n;
-    setNightPosters(n);
+    const t = markPosterTod(liveClock);
+    posterTodRef.current = t;
+    setPosterSet(t);
   }, [liveClock]);
   useEffect(() => {
-    return watchClock(clockSetting(window.location.search, liveClock), (n) => {
-      nightRef.current = n;
-      sceneRef.current?.setNight(n);
-      // The clock crossed the posters' line with the page open: the other set,
+    return watchClock(clockSetting(window.location.search, liveClock), (look) => {
+      clockRef.current = look;
+      sceneRef.current?.setClock(look);
+      // The clock crossed a posters' line with the page open: the other set,
       // on every poster that has its file (and the stylesheets' by <html>).
-      const pn = posterNight(n);
-      if (pn === nightPostersRef.current) return;
-      nightPostersRef.current = pn;
-      writePosterTod(pn);
-      setNightPosters(pn);
+      const pt = posterTod(look);
+      if (pt === posterTodRef.current) return;
+      posterTodRef.current = pt;
+      writePosterTod(pt);
+      setPosterSet(pt);
       posterImgs.current.forEach((img, i) => {
         const was = img?.getAttribute("src");
-        const next = posterSrc(POSTER_IDS[i], pn);
+        const next = posterSrc(POSTER_IDS[i], pt);
         if (img && was && was !== BLANK_GIF && was !== next) img.src = next;
       });
     });
@@ -1458,7 +1459,7 @@ function WorldV6View({
     if (layer) layer.dataset.show = "";
     if (!all) return;
     posterImgs.current.forEach((img, i) => {
-      if (img && i > 0 && !img.getAttribute("src")) img.src = posterSrc(POSTER_IDS[i], nightPostersRef.current);
+      if (img && i > 0 && !img.getAttribute("src")) img.src = posterSrc(POSTER_IDS[i], posterTodRef.current);
     });
   }, []);
 
@@ -1489,14 +1490,14 @@ function WorldV6View({
   useLayoutEffect(() => {
     if (view !== "world") return;
     // The nearest poster to where the page opened (scroll restored on reload),
-    // day or night by the clock. The opening's is the stylesheet's until here
+    // day, morning or night by the clock. The opening's is the stylesheet's until here
     // (.posterLanding); its file goes in the src too, drawn exactly over it,
     // so the posters' code finds it loaded and can swap it.
     const max = document.documentElement.scrollHeight - window.innerHeight;
     const k = max > 0 && window.scrollY > 0 ? landingPoster(window.scrollY / max, depthsRef.current) : 0;
     const img = posterImgs.current[k];
     if (img) {
-      img.src = posterSrc(POSTER_IDS[k], nightPostersRef.current);
+      img.src = posterSrc(POSTER_IDS[k], posterTodRef.current);
       img.dataset.on = "";
     }
     if (k > 0 && posterImgs.current[0]) delete posterImgs.current[0].dataset.on;
@@ -2133,7 +2134,7 @@ function WorldV6View({
       const sc = scene;
       sceneRef.current = sc;
       // Before the world builds: its first frame is drawn in the clock's light.
-      sc.setNight(nightRef.current);
+      sc.setClock(clockRef.current);
       // Poster mode: on now (no WebGL, a software renderer, ?poster=on, a
       // remembered verdict) or later (the load probe, the governor, the panel).
       const enterPoster = (reason: string) => {
@@ -2860,7 +2861,7 @@ function WorldV6View({
       {/* Long travel: the frozen frame the camera jumps under (LONG_HOP). */}
       {view === "world" && <canvas ref={snapRef} className={s.snap} aria-hidden="true" />}
       {/* Cheap laptops: the posters (poster.ts). In the server HTML, so the opening shows before any script runs:
-          the stylesheet draws it (.posterLanding), day or night by the clock the page's head read (clock.ts CLOCK_BOOT).
+          the stylesheet draws it (.posterLanding), day, morning or night by the clock the page's head read (clock.ts CLOCK_BOOT).
           Its <picture> no longer chooses a file (a <source> did until 2026-10-21); the world tests find the layer by it. */}
       {view !== "list" && (
         <div ref={posterRef} className={s.poster} data-show="" aria-hidden="true">
@@ -3324,7 +3325,7 @@ function WorldV6View({
         </span>
       </header>
 
-      {view === "list" && <PhoneWorld place={study.place} night={nightPosters} />}
+      {view === "list" && <PhoneWorld place={study.place} tod={posterSet} />}
       {view === "list" && (
         <div className={s.list} inert={isOpen}>
           {phase === "failed" && <p className={s.note}>The 3D map could not load in this browser, so here is the list.</p>}
@@ -3547,11 +3548,11 @@ const HERO_TY = 130;
  * block, cropped so its landmark sits in the open band under the header. One
  * image, no WebGL, no per-frame work: the crop is computed once per place and
  * width from the manifest's landmark position (fx, fy), zooming in at most
- * 1.5x past "cover" when the landmark sits near a poster edge. After dark on
- * the student's clock (`night`, clock.ts posterNight) the night poster, which
- * the same markers crop.
+ * 1.5x past "cover" when the landmark sits near a poster edge. By the
+ * student's clock (`tod`, clock.ts posterTod) the night or the morning poster,
+ * which the same markers crop.
  */
-function PhoneWorld({ place, night }: { place: number; night: boolean }) {
+function PhoneWorld({ place, tod }: { place: number; tod: PosterTod }) {
   const id = `a${Math.min(N, Math.max(1, place + 1))}`;
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [mark, setMark] = useState<{ id: string; fx: number; fy: number } | null>(null);
@@ -3610,7 +3611,7 @@ function PhoneWorld({ place, night }: { place: number; night: boolean }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={id}
-          src={posterSrc(id, night)}
+          src={posterSrc(id, tod)}
           alt=""
           decoding="async"
           draggable={false}

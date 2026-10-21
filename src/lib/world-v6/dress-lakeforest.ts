@@ -2250,7 +2250,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   }
 
   // ── Frame loop ──
-  const light = () => (scene.userData.light as { state?: { magicGlow: number; lampGlow: number; night?: number } } | undefined)?.state;
+  const light = () => (scene.userData.light as { state?: { magicGlow: number; lampGlow: number; night?: number; morning?: number } } | undefined)?.state;
   const lampNight = new THREE.Color(...NIGHT_LAMP_TINT);
   const camPos = V3();
   const lastPos = V3(1e9, 0, 0);
@@ -2359,7 +2359,10 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
       const st = light();
       if (st) {
         u.uMagic.value = Math.min(st.magicGlow, 0.95);
-        u.uLamp.value = st.lampGlow;
+        // The morning layer (light.ts state.morning; 0 by day and at night):
+        // the boathouse's and the jetty's lamps are out, their glass and
+        // their halos with them.
+        u.uLamp.value = st.lampGlow * (1 - Math.min(1, Math.max(0, st.morning ?? 0)));
         // The night layer: the boathouse's and the jetty's lamps warm as the
         // other lamps do (light.ts NIGHT_LAMP_TINT); white by day.
         const nk = Math.min(1, Math.max(0, st.night ?? 0));

@@ -53,8 +53,8 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        {/* The map's loading posters follow the student's clock: day or night,
-            picked before the first paint (src/lib/world-v6/clock.ts CLOCK_BOOT). */}
+        {/* The map's loading posters follow the student's clock: day, morning or
+            night, picked before the first paint (src/lib/world-v6/clock.ts CLOCK_BOOT). */}
         <script dangerouslySetInnerHTML={{ __html: CLOCK_BOOT }} />
       </head>
       <body className="min-h-full bg-[var(--color-bg-primary)] text-[var(--color-ink)]">

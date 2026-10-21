@@ -293,7 +293,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devEvolve' }] })
   const live = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
   const row = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
-  ok(show(live.value) === show({ discounted: true, code: 'evolve10', source: 'live', liveFail: null }), 'Whop answers: discounted, evolve10, live', show(live.value))
+  ok(show(live.value) === show({ discounted: true, code: 'evolve10', source: 'live', liveFail: null, saved: true }), 'Whop answers: discounted, evolve10, live, and saved', show(live.value))
   ok(row && row.student_id === 's1' && row.whop_membership_id === 'mem_devEvolve' && row.promo_code === 'evolve10' && row.promo_code_id === 'promo_devEvolve'
        && row.renewal_price === 87.3 && row.plan_renewal_price === 97 && row.discounted === true && row.checked_at === new Date().toISOString(),
      'and the answer is stored for the map and the admin page', show(row))
@@ -311,7 +311,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   whop.answer = () => json(500, {})
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devEvolve' }], [MEMBERSHIP_DISCOUNTS_TABLE]: [storedEvolve('s1')] })
   const r = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
-  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'stored', liveFail: 'http_other' }), 'Whop fails: the stored row for this membership decides', show(r.value))
+  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'stored', liveFail: 'http_other', saved: false }), 'Whop fails: the stored row for this membership decides (nothing saved)', show(r.value))
   ok(r.lines.length === 1 && r.lines[0].includes('http_other') && r.lines[0].includes('the stored row decides') && !r.lines[0].includes('mem_'),
      'one line for the log, with the kind and no Whop id', show(r.lines))
 }
@@ -340,8 +340,8 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devEvolve' }] })
   db.fail[`${MEMBERSHIP_DISCOUNTS_TABLE}.upsert`] = { message: 'relation "student_membership_discounts" does not exist', code: '42P01' }
   const r = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
-  ok(r.value.discounted === true && r.value.source === 'live' && r.lines.some((l) => l.includes('was not stored')),
-     'a database without v111: the live answer still decides, and the failed write is logged', show(r.lines))
+  ok(r.value.discounted === true && r.value.source === 'live' && r.value.saved === false && r.lines.some((l) => l.includes('was not stored')),
+     'a database without v111: the live answer still decides, the failed write is logged, and the answer says it was not saved', show(r.lines))
   const db2 = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devEvolve' }] })
   db2.fail['students.select'] = { message: 'canceling statement due to statement timeout' }
   db2.tables[MEMBERSHIP_DISCOUNTS_TABLE] = [storedEvolve('s1')]
@@ -507,6 +507,141 @@ async function approve(override = false) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// The render review's second round: "Check Whop again" on the 30% page. A
+// pending row whose stored coupon says a discount is on the next renewal
+// offers only Reject, so the approve route's own live read never runs for it;
+// when the code was taken off the membership since, the row stayed refused.
+// POST /api/admin/thirty/check-coupon asks Whop for that one student
+// (checkMembershipDiscount) and stores the answer, and the list read after it
+// (loadThirtyData, buildThirtyView: the page's own) judges the row again.
+console.log('\n=== Check Whop again: POST /api/admin/thirty/check-coupon ===')
+const { POST: checkRoute } = await import('./_gen/admin-check-coupon-route.ts')
+const { loadThirtyData } = await import('./_gen/thirty-data.ts')
+const { buildThirtyView } = await import('./_gen/thirty-view.ts')
+const CSM_TOKEN = 'tok-csm'
+/** readyDb's student (every video up to the gate watched), a pending request, evolve10 stored for `membership`, and a csm who signs in. */
+function checkDb(membership, more = {}) {
+  const db = readyDb(membership, {
+    discount_requests: [{ id: 'r1', student_id: 's1', status: 'pending', created_at: new Date(Date.parse(NOW) - 3_600_000).toISOString() }],
+    [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...storedEvolve('s1', membership), checked_at: '2026-10-20T08:40:00.000Z' }],
+    team_members: [{ id: 'tm-csm', email: 'csm@example.com', full_name: 'Robin Hale', role: 'csm' }],
+    ...more,
+  })
+  db.users[CSM_TOKEN] = 'tm-csm'
+  return db
+}
+/** Every error sentence the route answered here, held to the team's words at the end. */
+const checkErrors = []
+async function checkAgain(body = { requestId: 'r1' }, token = CSM_TOKEN) {
+  const res = await checkRoute(new Request('http://app/api/admin/thirty/check-coupon', {
+    method: 'POST',
+    headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  }))
+  const json = await res.json()
+  if (res.status >= 400) checkErrors.push(json?.error)
+  return { status: res.status, body: json }
+}
+/** Request r1 as the 30% page's list has it, read from the same database at this moment. */
+async function listedRow(db) {
+  const load = await loadThirtyData(fakeClient(db))
+  return load.ok ? buildThirtyView(load.data, new Date(), '2026-10-19T14:33:00.000Z').requests.find((x) => x.id === 'r1') ?? null : null
+}
+{
+  resetWhop()
+  const db = checkDb('mem_devUsed')
+  const none = await quiet(() => checkAgain({ requestId: 'r1' }, null))
+  const student = await quiet(() => checkAgain({ requestId: 'r1' }, 'tok-1'))
+  ok(none.value.status === 401 && student.value.status === 403 && whop.log.length === 0 && db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].discounted === true,
+     'no token 401, a student\'s token 403 (the real team check): Whop is not asked, the stored row stays', show([none.value.status, student.value.status]))
+
+  // evolve10 was stored on 20 October; since then the code came off the membership (Whop: a used code, full price).
+  const before = await listedRow(db)
+  ok(before?.verdict?.reason === 'has-discount' && before.coupon?.discounted === true && before.couponCheck === 'stored',
+     'before: the stored row says evolve10 is on the renewal, so the row is the coupon\'s (Reject alone, and Check Whop again, on the page)', show(before?.verdict))
+  const made = promoCodes.length
+  const r = await quiet(() => checkAgain())
+  const row = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
+  ok(r.value.status === 200 && show(r.value.body) === show({ discounted: false, code: 'welcome50' }),
+     'a csm checks again: 200, Whop has no discount on the renewal now (the used code named), and nothing else in the answer', show(r.value))
+  ok(row.discounted === false && row.whop_membership_id === 'mem_devUsed' && row.checked_at === new Date().toISOString() && db.rows(MEMBERSHIP_DISCOUNTS_TABLE).length === 1,
+     'the stored row is Whop\'s answer, read now (still one row per student)', show(row))
+  const after = await listedRow(db)
+  ok(after?.verdict?.ok === true && after.verdict.reason === null && after.coupon?.discounted === false,
+     'the list read after it: the coupon is gone, the 30% rule decides and says yes, so the row shows Approve again', show(after?.verdict))
+  ok(promoCodes.length === made && db.rows('discount_requests')[0].status === 'pending' && db.calls('discount_requests', 'update').length === 0,
+     'no Whop code is made and the request is not changed')
+  ok(whop.log.length === 3 && whop.log.every((x) => x.version === PINNED) && whop.log[0].path === '/api/v1/memberships/mem_devUsed',
+     'one live read, pinned: the membership, its plan, its code', whop.log.map((x) => x.path).join())
+}
+{
+  resetWhop()
+  const db = checkDb('mem_devEvolve')
+  const r = await quiet(() => checkAgain())
+  ok(r.value.status === 200 && show(r.value.body) === show({ discounted: true, code: 'evolve10' }) && db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].checked_at === new Date().toISOString(),
+     'the code still applies: 200 naming it, the row read again now', show(r.value))
+  ok((await listedRow(db))?.verdict?.reason === 'has-discount', 'and the row stays the coupon\'s')
+}
+{
+  resetWhop()
+  whop.answer = () => json(503, {})
+  const db = checkDb('mem_devUsed')
+  const stored = show(db.rows(MEMBERSHIP_DISCOUNTS_TABLE))
+  const r = await quiet(() => checkAgain())
+  ok(r.value.status === 502 && r.value.body.error === 'Whop gave no answer, so nothing changed. Try again in a minute.'
+       && show(db.rows(MEMBERSHIP_DISCOUNTS_TABLE)) === stored && db.calls(MEMBERSHIP_DISCOUNTS_TABLE, 'upsert').length === 0,
+     'Whop gives no answer: 502 in plain words, the stored row as it was, nothing written', show(r.value))
+  ok(r.lines.some((l) => l.includes('Whop gave no answer (http_other)')) && !r.lines.some((l) => /mem_/.test(l)), 'the log says why by its kind, with no Whop id', show(r.lines))
+}
+{
+  resetWhop()
+  const db = checkDb('mem_devUsed')
+  db.fail[`${MEMBERSHIP_DISCOUNTS_TABLE}.upsert`] = { message: 'canceling statement due to statement timeout' }
+  const r = await quiet(() => checkAgain())
+  ok(r.value.status === 500 && r.value.body.error === "Whop answered, but its answer couldn't be saved, so the list still shows the old one. Try again."
+       && db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].discounted === true,
+     'Whop answers but the write fails: 500 saying the list still shows the old answer, never a 200 the list would contradict', show(r.value))
+}
+{
+  // The other answers, each in the team's words; Whop is not asked where it cannot help.
+  const answers = []
+  const one = async (label, prep, body, status, error, whopAsked = false) => {
+    resetWhop()
+    const db = prep()
+    const r = await quiet(() => checkAgain(body))
+    answers.push(label)
+    ok(r.value.status === status && r.value.body.error === error && (whopAsked || whop.log.length === 0) && db.rows(MEMBERSHIP_DISCOUNTS_TABLE).every((x) => x.checked_at === '2026-10-20T08:40:00.000Z'),
+       `${label}: ${status}, "${error}"${whopAsked ? '' : ', Whop not asked'}, the stored row as it was`, show(r.value))
+  }
+  const decided = () => checkDb('mem_devUsed', { discount_requests: [{ id: 'r1', student_id: 's1', status: 'approved', created_at: new Date(Date.parse(NOW) - 3_600_000).toISOString() }] })
+  await one('the request was decided meanwhile', decided, undefined, 409, 'This request was already decided.')
+  await one('no such request', () => checkDb('mem_devUsed'), { requestId: 'r-gone' }, 404, 'This request no longer exists.')
+  await one('no request id', () => checkDb('mem_devUsed'), {}, 400, 'Missing requestId')
+  await one('a body that is not JSON', () => checkDb('mem_devUsed'), '{not json', 400, 'Missing requestId')
+  await one('a payment\'s id where the membership belongs', () => checkDb('pay_devPayment'), undefined, 422,
+    "The student's Whop membership is not on file, so Whop can't be asked. Check the coupon in Whop.")
+  await one('no membership on file', () => checkDb(null), undefined, 422,
+    "The student's Whop membership is not on file, so Whop can't be asked. Check the coupon in Whop.")
+  await one('a membership Whop does not know', () => checkDb('mem_devMissing'), undefined, 422,
+    "Whop doesn't know the membership on file, so nothing changed. Check the student in Whop.", true)
+  await one('the request cannot be read', () => {
+    const db = checkDb('mem_devUsed')
+    db.fail['discount_requests.select'] = { message: 'canceling statement due to statement timeout' }
+    return db
+  }, undefined, 500, "Couldn't read this request, so Whop was not asked. Try again.")
+  await one('the student cannot be read', () => {
+    const db = checkDb('mem_devUsed')
+    db.fail['students.select'] = { message: 'canceling statement due to statement timeout' }
+    return db
+  }, undefined, 500, "Couldn't read the student's Whop membership, so Whop was not asked. Try again.")
+  delete process.env.WHOP_API_KEY
+  await one('no Whop key on the deployment', () => checkDb('mem_devUsed'), undefined, 500, "This deployment has no Whop key, so Whop can't be asked.")
+  process.env.WHOP_API_KEY = KEY
+  ok(checkErrors.length >= 10 && checkErrors.every((s) => typeof s === 'string' && s.trim() && !BANNED.test(s) && !/mem_|promo_|pay_|@/.test(s)),
+     'every refusal is a plain sentence: no em dash, "unlock" or "EcomTalent", no Whop id', show([...new Set(checkErrors)]))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 console.log('\n=== The cron route: who is read, what is written ===')
 process.env.CRON_SECRET = 'cron-test-secret'
 function cronDb() {
@@ -568,8 +703,8 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
   const b = r.value.body
   const rows = new Map(db.rows(MEMBERSHIP_DISCOUNTS_TABLE).map((x) => [x.student_id, x]))
   ok(r.value.status === 200 && b.ok === true && b.mode === 'write', 'a run: 200, ok', show(b))
-  ok(b.in_window === 11 && b.have_the_30 === 2 && b.candidates === 9,
-     'the window on 21 Oct, when every first payment from 1 October is still in one: active or past_due (11); the 2 with an approved or applied request left out (9 to check)', show({ in: b.in_window, held: b.have_the_30, c: b.candidates }))
+  ok(b.in_window === 11 && b.pending_requests === 1 && b.have_the_30 === 2 && b.candidates === 9,
+     'the window on 21 Oct, when every first payment from 1 October is still in one: active or past_due (11, the one pending request among them); the 2 with an approved or applied request left out (9 to check)', show({ in: b.in_window, pending: b.pending_requests, held: b.have_the_30, c: b.candidates }))
   ok(b.checked === 6 && b.discounted === 4 && b.written === 6 && b.skipped.no_membership === 1 && b.skipped.not_a_membership === 1 && show(b.failed) === show({ not_found: 1 }) && b.left === 0,
      '6 read and written (4 discounted), one with no membership, one with a payment\'s id, one Whop does not know', show(b))
   ok(rows.get('s-evolve')?.discounted === true && rows.get('s-evolve')?.promo_code === 'evolve10' && rows.get('s-used')?.discounted === false
@@ -618,6 +753,13 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
 
   resetWhop()
   db = cronDb()
+  db.fail['discount_requests.select'] = { message: 'canceling statement due to statement timeout' }
+  const noPending = await quiet(() => cron())
+  ok(noPending.value.status === 500 && /discount_requests \(pending\)/.test(noPending.value.body.error) && whop.log.length === 0,
+     'who holds a pending request cannot be read: 500 naming that read, nothing read from Whop (the render review\'s second round)', show(noPending.value.body.error))
+
+  resetWhop()
+  db = cronDb()
   db.fail[`${MEMBERSHIP_DISCOUNTS_TABLE}.upsert`] = { message: 'relation "student_membership_discounts" does not exist' }
   const noTable = await quiet(() => cron())
   ok(noTable.value.status === 500 && /student_membership_discounts/.test(noTable.value.body.error) && noTable.value.body.written === 0, 'a database without v111: 500 on the first write, and it says which table')
@@ -647,8 +789,11 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
 // students whose 30% window is still open (discountWindowOpen), with no
 // approved or applied request. It read every student who first paid from 1
 // October, active or past due: a list that only grew while their windows
-// closed and no request could be made any more.
-console.log('\n=== The cron: only the students whose 30% window is still open ===')
+// closed and no request could be made any more. Its second round: every
+// student holding a pending request is read too, whatever their window or
+// membership, so a stale answer on the 30% page's row heals by itself (the
+// first round left them out once their window closed).
+console.log('\n=== The cron: the students whose 30% window is still open, and every pending request ===')
 {
   const ms = (iso) => RealDate.parse(iso)
   // The rule's own edges, on the suite's clock moved where each is.
@@ -680,10 +825,16 @@ console.log('\n=== The cron: only the students whose 30% window is still open ==
         p('w-approved', '2026-11-02T10:00:00.000Z', 'mem_devFull'),
         // Open, but not a member any more.
         p('w-canceled', '2026-11-03T10:00:00.000Z', 'mem_devFull', { membership_status: 'canceled' }),
+        // A pending request outside any open window (the render review's second round): the shared group's, asked
+        // by 23 October and still waiting; and one from before 1 October, of a member who canceled since.
+        p('w-shared-pending', '2026-10-06T10:00:00.000Z', 'mem_devLegacy'),
+        p('w-gone-pending', '2026-09-20T10:00:00.000Z', 'mem_devKept', { membership_status: 'canceled' }),
       ],
       discount_requests: [
         { id: 'r-wp', student_id: 'w-pending', status: 'pending', created_at: '2026-11-04T10:00:00.000Z' },
         { id: 'r-wa', student_id: 'w-approved', status: 'approved', created_at: '2026-11-04T10:00:00.000Z' },
+        { id: 'r-wsp', student_id: 'w-shared-pending', status: 'pending', created_at: '2026-10-22T10:00:00.000Z' },
+        { id: 'r-wgp', student_id: 'w-gone-pending', status: 'pending', created_at: '2026-10-02T10:00:00.000Z' },
       ],
     })
     installDb(db)
@@ -699,16 +850,21 @@ console.log('\n=== The cron: only the students whose 30% window is still open ==
     const b = r.value.body
     const rows = new Set(db.rows(MEMBERSHIP_DISCOUNTS_TABLE).map((x) => x.student_id))
     const read = whop.log.filter((x) => x.path.startsWith('/api/v1/memberships/')).map((x) => x.path.split('/').pop()).sort()
-    ok(r.value.status === 200 && b.in_window === 4 && b.have_the_30 === 1 && b.candidates === 3,
-       '5 Nov: in the window the 4 whose window is open and who are members (the edge of 22 Oct, 25 Oct, 1 Nov past due, 2 Nov); the approved one left out, 3 to check',
-       show({ in: b.in_window, held: b.have_the_30, c: b.candidates }))
-    ok(show(read) === show(['mem_devEvolve2', 'mem_devFull', 'mem_devYearCode']) && show([...rows].sort()) === show(['w-edge', 'w-open', 'w-pending']),
-       'Whop is asked about those 3 alone, and their rows written; a pending request does not keep a student out', show({ read, rows: [...rows] }))
+    ok(r.value.status === 200 && b.in_window === 4 && b.pending_requests === 3 && b.have_the_30 === 1 && b.candidates === 5,
+       '5 Nov: in the window the 4 whose window is open and who are members (the edge of 22 Oct, 25 Oct, 1 Nov past due, 2 Nov); 3 pending requests, 2 of them outside any open window; the approved one left out, 5 to check',
+       show({ in: b.in_window, pending: b.pending_requests, held: b.have_the_30, c: b.candidates }))
+    ok(show(read) === show(['mem_devEvolve2', 'mem_devFull', 'mem_devKept', 'mem_devLegacy', 'mem_devYearCode'])
+         && show([...rows].sort()) === show(['w-edge', 'w-gone-pending', 'w-open', 'w-pending', 'w-shared-pending']),
+       'Whop is asked about those 5 alone, and their rows written: the open windows, and every student holding a pending request whatever their window or membership', show({ read, rows: [...rows] }))
     ok(!rows.has('w-shared') && !rows.has('w-closed') && !rows.has('w-approved') && !rows.has('w-canceled'),
-       'the shared window (closed 23 Oct) and the own window closed on 3 Nov are no longer read, nor the approved or the canceled student')
+       'the shared window (closed 23 Oct) and the own window closed on 3 Nov are no longer read with no request waiting, nor the approved or the canceled student')
+    ok(rows.has('w-shared-pending') && rows.has('w-gone-pending'),
+       'a pending request of the shared group (its window closed on 23 Oct) and one of a canceled member from before 1 October are read: a stale answer on their 30% row heals by itself (the render review\'s second round)')
     const asked = db.calls('students', 'select').map((c) => c.filters).flat()
     ok(asked.some((f) => f === 'first_paid_at>=2026-10-22T09:00:00.000Z'),
        'the students read itself starts at the earliest first payment still open (22 Oct), so it stays as short as the window', show(asked))
+    ok(asked.some((f) => f === 'id in (w-gone-pending,w-shared-pending)') && db.calls('discount_requests', 'select').some((c) => c.filters.includes('status=pending')),
+       'the pending requests are read by their status, and only their holders outside the window are read again, by id', show(asked))
 
     // 21 October, the suite's own day: both of these windows are still open, and the read starts at 1 October.
     clock = ms('2026-10-21T09:00:00.000Z')

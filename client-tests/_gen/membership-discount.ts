@@ -34,12 +34,19 @@
  *     (refreshMembershipDiscounts below), for the students whose 30% window
  *     is still open (discountWindowOpen: a first payment from
  *     DISCOUNT_ELIGIBLE_FROM and a deadline not past), active or past_due,
- *     with no approved or applied request. Since the render review's fix
- *     round: before it, every student who first paid from 1 October, a list
- *     that grew with each new student while their windows closed;
+ *     and every student holding a pending request whatever their window or
+ *     membership, all with no approved or applied request. The window since
+ *     the render review's fix round (until then every student who first paid
+ *     from 1 October, a list that grew with each new student while their
+ *     windows closed); the pending requests since its second round (the
+ *     first left them out once their window closed, and a stale answer then
+ *     held the 30% page's row to Reject);
  *   - the request routes and the approve route, after a live read
  *     (checkMembershipDiscount below), so the map and the admin page catch
- *     up at their next read.
+ *     up at their next read;
+ *   - "Check Whop again" on the 30% page (POST
+ *     /api/admin/thirty/check-coupon), the same live read for one student
+ *     whose pending request the stored row refuses.
  * A stored row counts only for the membership it was read from: a student
  * who moved to another membership since has no stored answer.
  *
@@ -339,14 +346,21 @@ export interface CouponCheck {
   source: "live" | "stored" | "none";
   /** Why Whop gave no answer now, for the route's log line; null when it did. */
   liveFail: MembershipReadFail | "no_membership" | "student_unread" | null;
+  /**
+   * Whop's answer now was written to student_membership_discounts. False
+   * whenever `source` is not live, and for a live answer whose write failed
+   * (logged): "Check Whop again" says so, since its list would still show
+   * the old row (the render review's second round).
+   */
+  saved: boolean;
 }
 
 /**
- * The request routes and the approve route (D5): Whop now, then the stored
- * row for this membership, then nothing (the request goes through). A live
- * answer is stored, best effort, so the map and the admin page catch up.
- * Never throws. `apiKey` defaults to WHOP_API_KEY; without one there is no
- * live read.
+ * The request routes, the approve route (D5) and "Check Whop again": Whop
+ * now, then the stored row for this membership, then nothing (the request
+ * goes through). A live answer is stored, best effort, so the map and the
+ * admin page catch up. Never throws. `apiKey` defaults to WHOP_API_KEY;
+ * without one there is no live read.
  */
 export async function checkMembershipDiscount(
   db: SupabaseClient,
@@ -371,11 +385,13 @@ export async function checkMembershipDiscount(
     const ctx = newReadContext(apiKey, started + ROUTE_START_BUDGET_MS, started + ROUTE_ANSWER_BUDGET_MS);
     const live = await readMembershipDiscount(membershipId, ctx);
     if (live.ok) {
+      let saved = false;
       try {
         const { error } = await db
           .from(MEMBERSHIP_DISCOUNTS_TABLE)
           .upsert(rowOf(studentId, live.membership, new Date().toISOString()), { onConflict: "student_id" });
         if (error) console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${error.message}`);
+        else saved = true;
       } catch (e) {
         console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -384,13 +400,14 @@ export async function checkMembershipDiscount(
         code: live.membership.promoCode ?? live.membership.promoCodeId,
         source: "live",
         liveFail: null,
+        saved,
       };
     }
     liveFail = live.fail;
   }
 
   // The stored row, when it was read from the membership the student has now (or when that could not be read).
-  let answer: CouponCheck = { discounted: false, code: null, source: "none", liveFail };
+  let answer: CouponCheck = { discounted: false, code: null, source: "none", liveFail, saved: false };
   try {
     const { data, error } = await db
       .from(MEMBERSHIP_DISCOUNTS_TABLE)
@@ -399,7 +416,7 @@ export async function checkMembershipDiscount(
       .maybeSingle();
     const row = error ? null : (data as Pick<MembershipDiscountRow, "whop_membership_id" | "promo_code_id" | "promo_code" | "discounted"> | null);
     if (row && (membershipId === undefined || storedRowApplies(row, membershipId))) {
-      answer = { discounted: row.discounted === true, code: codeOf(row), source: "stored", liveFail };
+      answer = { discounted: row.discounted === true, code: codeOf(row), source: "stored", liveFail, saved: false };
     }
   } catch {
     // No stored answer: nothing blocks (the PRD's fallback).
@@ -429,6 +446,12 @@ export interface RefreshAnswer {
   run_started_at: string;
   /** Students whose 30% window is still open (discountWindowOpen at the run's start), active or past_due. */
   in_window: number;
+  /**
+   * Students holding a pending request, read whatever their window or
+   * membership (some are in `in_window` too): the 30% page's Applied rows,
+   * so a stale stored answer heals by itself.
+   */
+  pending_requests: number;
   /** Left out: an approved or applied request. */
   have_the_30: number;
   /** The students this run had to check. */
@@ -454,12 +477,17 @@ export interface RefreshAnswer {
 /**
  * The cron's run (GET /api/cron/refresh-membership-discounts): every student
  * whose 30% window is still open at the run's start (discountWindowOpen),
- * active or past_due, with no approved or applied request; those never
- * checked first, then the longest unchecked; each read live and stored, 25
- * rows at a time. A student whose window has closed is not read again: no
- * request can be made then, and a pending one is decided by the approve
- * route's own live read. "dry" reads and writes nothing. A run that cannot
- * read who is in the window, or whose every read failed, answers ok: false.
+ * active or past_due, and every student holding a pending request, whatever
+ * their window or membership; of those, the ones with no approved or applied
+ * request; those never checked first, then the longest unchecked; each read
+ * live and stored, 25 rows at a time. A student whose window has closed can
+ * make no request, so is read again only while a request of theirs waits:
+ * the 30% page judges that row by the stored answer, and a row whose answer
+ * says a discount is on the renewal offers only Reject, so the approve
+ * route's own live read never runs for it (the render review's second
+ * round). "dry" reads and writes nothing. A run that cannot read who is in
+ * the window or who holds a pending request, or whose every read failed,
+ * answers ok: false.
  */
 export async function refreshMembershipDiscounts(
   db: SupabaseClient,
@@ -471,6 +499,7 @@ export async function refreshMembershipDiscounts(
     mode,
     run_started_at: new Date(startedAtMs).toISOString(),
     in_window: 0,
+    pending_requests: 0,
     have_the_30: 0,
     candidates: 0,
     checked: 0,
@@ -497,12 +526,30 @@ export async function refreshMembershipDiscounts(
       .order("id"),
   );
   if (inWindow.error) return done({ error: `students: ${inWindow.error.message}` });
-  const members = [
-    ...new Map(
-      inWindow.data.filter((s) => discountWindowOpen(s.first_paid_at, startedAtMs)).map((s) => [s.id, s] as const),
-    ).values(),
-  ];
-  answer.in_window = members.length;
+  const byId = new Map(
+    inWindow.data.filter((s) => discountWindowOpen(s.first_paid_at, startedAtMs)).map((s) => [s.id, s] as const),
+  );
+  answer.in_window = byId.size;
+
+  // Every student holding a pending request, whatever their window or membership: the 30% page judges their
+  // row by the stored answer, so a stale one (a code taken off the membership in Whop since) heals here
+  // instead of holding the row to Reject. They are few.
+  const pendingRead = await fetchAllRowsPaginated<{ student_id: string }>(() =>
+    db.from("discount_requests").select("student_id").eq("status", "pending").order("id"),
+  );
+  if (pendingRead.error) return done({ error: `discount_requests (pending): ${pendingRead.error.message}` });
+  const pendingIds = [...new Set(pendingRead.data.map((r) => r.student_id))];
+  const outside = pendingIds.filter((id) => !byId.has(id)).sort();
+  for (let i = 0; i < outside.length; i += BATCH) {
+    const batch = outside.slice(i, i + BATCH);
+    const r = await fetchAllRowsPaginated<Member>(() =>
+      db.from("students").select("id, whop_membership_id, first_paid_at").in("id", batch).order("id"),
+    );
+    if (r.error) return done({ error: `students (holding a pending request): ${r.error.message}` });
+    for (const s of r.data) byId.set(s.id, s);
+  }
+  answer.pending_requests = pendingIds.filter((id) => byId.has(id)).length;
+  const members = [...byId.values()];
 
   const ids = members.map((m) => m.id);
   const batches: string[][] = [];

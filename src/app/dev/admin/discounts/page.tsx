@@ -18,9 +18,13 @@ import type { FixtureCall } from "../fixtures";
  *                               unreadable (fixtures.ts)
  *          owncode              the team's own 30% codes already on the
  *                               Approved memberships in Whop (fixtures.ts)
+ *          stalecoupon          a code taken off Tara's membership in Whop
+ *                               since the cron stored it: Check Whop again
+ *                               finds it gone (fixtures.ts)
  *   ?conflict=1   the decision buttons answer as if another team member
  *                 decided the request first (fixtures.ts says how)
  *   ?reload=fail  the list loads once, then every read of it fails
+ *   ?whop=down    Check Whop again gets no answer from Whop
  *   ?tab=applied | approved | rejected | code-applied
  *   ?student=<id>  one student on every tab, as the student page links it
  *                  (p-maya, p-ethan, p-omar ... in fixtures.ts)
@@ -43,6 +47,7 @@ function DevThirty() {
       state: parseFixtureState(params.get("state")),
       conflict: params.get("conflict") === "1",
       reloadFails: params.get("reload") === "fail",
+      whopDown: params.get("whop") === "down",
     }),
   );
   useEffect(() => {

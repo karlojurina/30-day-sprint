@@ -14,9 +14,11 @@ import type { ThirtyView } from "@/lib/admin/thirty-view";
  * at with no login and no database.
  *
  * The 30% page's calls (work item 3): its read and the three discount
- * routes. The ads tick's call went with the tick (2026-10-20). Today's
- * calls, and the 30% page's "Mark messaged" and its Undo through Today's
- * mark route, went with Today (admin rebuild 2, D2).
+ * routes, and since the render review's second round of admin rebuild 2
+ * "Check Whop again" (POST /api/admin/thirty/check-coupon). The ads tick's
+ * call went with the tick (2026-10-20). Today's calls, and the 30% page's
+ * "Mark messaged" and its Undo through Today's mark route, went with Today
+ * (admin rebuild 2, D2).
  *
  * No call throws. Every answer is `{ ok: true, data }` or `{ ok: false,
  * error }`, where `error` is a sentence the page can show: the route's own
@@ -39,6 +41,12 @@ export interface ThirtyTransport {
   reject(requestId: string, reason: string | null): Promise<Answer<null>>;
   /** POST /api/discounts/mark-applied: the code is on the student's membership in Whop. */
   markApplied(requestId: string): Promise<Answer<null>>;
+  /**
+   * POST /api/admin/thirty/check-coupon ("Check Whop again" on a pending
+   * row the stored coupon refuses): Whop now for that one student, stored.
+   * `code` names the code on the membership, when there is one.
+   */
+  checkCoupon(requestId: string): Promise<Answer<{ discounted: boolean; code: string | null }>>;
 }
 
 const NO_SERVER = "Couldn't reach the server. Check the connection and try again.";
@@ -123,5 +131,12 @@ export const adminTransport: ThirtyTransport = {
       appliedBy: me,
     }));
     return r.ok ? { ...r, data: null } : r;
+  },
+
+  async checkCoupon(requestId) {
+    const r = await send<{ discounted?: unknown; code?: unknown }>("POST", "/api/admin/thirty/check-coupon", () => ({ requestId }));
+    return r.ok
+      ? { ...r, data: { discounted: r.data?.discounted === true, code: typeof r.data?.code === "string" ? r.data.code : null } }
+      : r;
   },
 };

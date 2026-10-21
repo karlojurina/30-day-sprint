@@ -39,6 +39,11 @@ import { quickDms, type StudentDetail, type SyncView } from "@/lib/admin/student
  * one line (synced since the switch or not, when, how many lessons it
  * brought in), and its counts, its note or error and the Whop lessons with
  * no lesson here are folded under "Sync details".
+ *
+ * The render review's second round: a block whose read failed (the Whop
+ * sync, the 30% request, the lessons) starts with the same warning dot as a
+ * number that failed (SectionFailure), so every failure on the page looks
+ * alike; the journey's drawer draws its failed blocks the same way.
  */
 
 type Loaded =
@@ -178,6 +183,20 @@ export function Block({ title, children }: { title: string; children: React.Reac
       <h2 style={{ ...T.eyebrow, fontSize: 12, marginBottom: 8 }}>{title}</h2>
       {children}
     </section>
+  );
+}
+
+/**
+ * A block whose read failed: the warning dot a failed number has (Fact),
+ * then what could not be loaded and why in plain words, the database's own
+ * behind Details (ReadFailure).
+ */
+export function SectionFailure({ lead, raw, style }: { lead: string; raw: string | null | undefined; style?: React.CSSProperties }) {
+  return (
+    <div data-section-failed="" className="flex items-start" style={{ gap: 8, minWidth: 0, ...style }}>
+      <Dot color="var(--color-warning)" />
+      <ReadFailure lead={lead} raw={raw} style={{ minWidth: 0, flex: "1 1 auto" }} />
+    </div>
   );
 }
 
@@ -325,7 +344,7 @@ function SyncBlock({ sync }: { sync: StudentDetail["sync"] }) {
   if (!sync.ok) {
     return (
       <Card padding={16}>
-        <ReadFailure lead={`${COULD_NOT_LOAD} the Whop sync.`} raw={sync.error} />
+        <SectionFailure lead={`${COULD_NOT_LOAD} the Whop sync.`} raw={sync.error} />
       </Card>
     );
   }
@@ -434,7 +453,7 @@ export function DiscountBlock({ student: s }: { student: StudentDetail }) {
     <Card padding={16}>
       <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
         {!d.ok ? (
-          <ReadFailure lead={`${COULD_NOT_LOAD} the 30% request.`} raw={d.error} style={{ flex: "1 1 220px" }} />
+          <SectionFailure lead={`${COULD_NOT_LOAD} the 30% request.`} raw={d.error} style={{ flex: "1 1 220px" }} />
         ) : d.data ? (
           <>
             <Pill tone={d.data.tone as PillTone}>{d.data.text}</Pill>
@@ -459,7 +478,7 @@ function LessonsBlock({ areas }: { areas: StudentDetail["areas"] }) {
   if (!areas.ok) {
     return (
       <Card padding={16}>
-        <ReadFailure lead={`${COULD_NOT_LOAD} the lessons.`} raw={areas.error} />
+        <SectionFailure lead={`${COULD_NOT_LOAD} the lessons.`} raw={areas.error} />
       </Card>
     );
   }

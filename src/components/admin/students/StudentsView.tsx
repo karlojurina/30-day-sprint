@@ -260,8 +260,9 @@ function StudentRow({ row, nowMs, courseIsNew }: { row: StudentListRow; nowMs: n
       {/* Wide: one line of columns. */}
       <div className="hidden lg:grid" style={{ gridTemplateColumns: GRID, gap: 12, alignItems: "center" }}>
         <div style={{ minWidth: 0 }}>
-          {/* The name as on every admin page; the row itself is the link, so no second one inside it. */}
-          <p style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {/* The name as on every admin page; the row itself is the link, so no second one inside it. Cut short
+              with an ellipsis, it has the whole name in its title. */}
+          <p title={row.name} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             <StudentName id={row.id} name={row.name} size={13} asText />
           </p>
           {row.email && row.email !== row.name && (
@@ -270,7 +271,10 @@ function StudentRow({ row, nowMs, courseIsNew }: { row: StudentListRow; nowMs: n
             </p>
           )}
         </div>
-        <span style={{ ...T.bodyDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span
+          title={row.username ? `@${row.username}` : undefined}
+          style={{ ...T.bodyDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+        >
           {row.username ? `@${row.username}` : <span className="sr-only">No username</span>}
         </span>
         <div>

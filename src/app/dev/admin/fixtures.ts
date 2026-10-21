@@ -29,15 +29,24 @@
  *                     pressed yet): Ethan's named ECOM30-3F9A21, Nora's with
  *                     no name read, only the request's own Whop promo id. No
  *                     coupon warning on either (the render review's fix round)
+ *          stalecoupon  full, with the forever 10% taken off Tara's
+ *                     membership in Whop since the cron stored it: her row
+ *                     still offers only Reject, and Check Whop again finds no
+ *                     discount, so the rule decides her row and Approve is
+ *                     back (the render review's second round)
  *
  * The Approved rows' coupon is what Whop says now (liveCoupons, as
  * GET /api/admin/thirty asks it): Ethan was approved before the coupon rule
  * with nothing stored, and Whop names the forever 10%; for Nora Whop gives
- * no answer, and the stored row stands in, with its date.
+ * no answer, and the stored row stands in, with its date. Check Whop again
+ * (POST /api/admin/thirty/check-coupon) reads Whop the way the approve route
+ * does here, and stores what it read.
  *   ?conflict=1   approve, reject and mark-applied answer as if another team
  *                 member decided the request first: approve and reject with
  *                 lane G1's 409 and its sentence, mark-applied with its 400
  *   ?reload=fail  the first read of the list works, every later one fails
+ *   ?whop=down    Check Whop again gets no answer from Whop: the route's 502
+ *                 and its sentence, and nothing changes
  *
  * The page's clock is FIXTURE_NOW, so every date reads the same on every run.
  */
@@ -237,6 +246,17 @@ function ownCodeDb(): FixtureDb {
   return db;
 }
 
+/**
+ * The full fixture, with the forever 10% taken off Tara's membership in Whop
+ * since the cron read it: the stored row still says evolve10, Whop now says
+ * no code (the render review's second round).
+ */
+function staleCouponDb(): FixtureDb {
+  const db = fullDb();
+  db.people.find((p) => p.id === "p-tara")!.live = CLEAN;
+  return db;
+}
+
 /** The full fixture plus one student whose progress cannot be read, with a request waiting. */
 function partialDb(): FixtureDb {
   const db = fullDb();
@@ -359,9 +379,9 @@ function liveCoupons(db: FixtureDb, failAll: boolean): Map<string, LiveCoupon> {
 }
 
 // ── The stand-in for the server ─────────────────────────────────────────────
-export type FixtureState = "full" | "empty" | "loading" | "error" | "partial" | "novideos" | "nocoupons" | "owncode";
+export type FixtureState = "full" | "empty" | "loading" | "error" | "partial" | "novideos" | "nocoupons" | "owncode" | "stalecoupon";
 
-const STATES: FixtureState[] = ["full", "empty", "loading", "error", "partial", "novideos", "nocoupons", "owncode"];
+const STATES: FixtureState[] = ["full", "empty", "loading", "error", "partial", "novideos", "nocoupons", "owncode", "stalecoupon"];
 
 export function parseFixtureState(value: string | null): FixtureState {
   return STATES.find((s) => s === value) ?? "full";
@@ -369,7 +389,7 @@ export function parseFixtureState(value: string | null): FixtureState {
 
 /** One call the page made, for world-tests to read (window.__adminCalls on the dev page). */
 export interface FixtureCall {
-  name: "loadThirty" | "approve" | "reject" | "markApplied";
+  name: "loadThirty" | "approve" | "reject" | "markApplied" | "checkCoupon";
   args: unknown[];
 }
 
@@ -388,9 +408,19 @@ export function fixtureThirtyTransport(opts: {
   state: FixtureState;
   conflict: boolean;
   reloadFails?: boolean;
+  /** Check Whop again gets no answer from Whop (?whop=down). */
+  whopDown?: boolean;
 }): ThirtyTransport & { calls: FixtureCall[] } {
   const db =
-    opts.state === "empty" ? emptyDb() : opts.state === "partial" ? partialDb() : opts.state === "owncode" ? ownCodeDb() : fullDb();
+    opts.state === "empty"
+      ? emptyDb()
+      : opts.state === "partial"
+        ? partialDb()
+        : opts.state === "owncode"
+          ? ownCodeDb()
+          : opts.state === "stalecoupon"
+            ? staleCouponDb()
+            : fullDb();
   const calls: FixtureCall[] = [];
   let minute = 0;
   let served = false;
@@ -496,6 +526,23 @@ export function fixtureThirtyTransport(opts: {
       }
       Object.assign(a, { status: "applied", appliedAt: at(), appliedBy: ME });
       return later<null>({ ok: true, status: 200, data: null });
+    },
+
+    checkCoupon(id) {
+      calls.push({ name: "checkCoupon", args: [id] });
+      type Checked = { discounted: boolean; code: string | null };
+      const a = ask(id);
+      const p = a ? person(a.studentId) : undefined;
+      if (!a || !p) return later<Checked>(notFound);
+      if (a.status !== "pending") return later<Checked>({ ok: false, status: 409, error: "This request was already decided." });
+      if (opts.whopDown) {
+        return later<Checked>({ ok: false, status: 502, error: "Whop gave no answer, so nothing changed. Try again in a minute." });
+      }
+      // As the route: Whop now (the stored row when Whop says nothing new), and what it read stored.
+      const now = p.live ?? p.stored ?? CLEAN;
+      p.stored = now;
+      const row = couponRow(p, now, at());
+      return later<Checked>({ ok: true, status: 200, data: { discounted: row.discounted, code: row.promo_code ?? row.promo_code_id } });
     },
   };
 }

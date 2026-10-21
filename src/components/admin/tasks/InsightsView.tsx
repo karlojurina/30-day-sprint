@@ -28,6 +28,10 @@ import { stripBucketGlyph } from "@/lib/templates";
  * folded under one line, as on Insights; and under 640px each template is a
  * card (its name and success rule, then Sent, Time to send, Success and
  * Replied in a 2 by 2 grid) where the table would scroll sideways.
+ *
+ * The render review's second round: Saves and Success rate are in the
+ * primary ink like the other numbers (they were Airy Blue, the colour of a
+ * link, and are not links).
  */
 
 type SortKey = "title" | "sent" | "time" | "success" | "replied";
@@ -209,7 +213,6 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
               ? "no save DMs sent in this range"
               : `${totals.saves} of ${totals.saves_eligible} save DMs: still a member`
           }
-          tone={totals.saves_eligible > 0 ? "accent" : "default"}
         />
         <Stat
           label="Success rate"
@@ -219,7 +222,6 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
               ? "no graded sends in this range"
               : `${totals.success} of ${totals.success_eligible} graded sends did what the DM asked`
           }
-          tone={totals.success_eligible > 0 ? "accent" : "default"}
         />
       </div>
 

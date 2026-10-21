@@ -948,7 +948,12 @@ When adding a new table, append it here. When deleting a field, scan
   Today's 30% reasons read the same through `loadThirtyData` until admin
   rebuild 2 removed Today), the coupon cron
   `refresh-membership-discounts` (`student_id` of the approved and
-  applied requests, whose students it leaves out), Whop promo flow, `src/lib/csm-triggers.ts`
+  applied requests, whose students it leaves out, and since the render
+  review's second round of admin rebuild 2 `student_id` of the pending
+  ones, whose students it reads whatever their window),
+  `POST /api/admin/thirty/check-coupon` (the same round: `id,
+  student_id, status` of the one request it is asked about, which must
+  be pending), Whop promo flow, `src/lib/csm-triggers.ts`
   (membership/discount status checks where applicable),
   `src/lib/first-paid-repair.ts` (reads `student_id`, `status`,
   `created_at` of the students whose `first_paid_at` it would move, to
@@ -1049,11 +1054,18 @@ When adding a new table, append it here. When deleting a field, scan
   the read itself from `earliestOpenFirstPayment`), `membership_status`
   active or past_due, and no approved or applied request; it read every
   student from `DISCOUNT_ELIGIBLE_FROM`, a list that only grew; reads
-  `students.id, whop_membership_id, first_paid_at`),
-  and `POST /api/discounts/request`, `POST /api/discounts/submit-feedback`
+  `students.id, whop_membership_id, first_paid_at`; since its second
+  round also every student holding a pending request, whatever their
+  window or membership, read from `discount_requests` by status and then
+  from `students` by id for those outside the window, so a stale answer
+  on the 30% page's row heals by itself; still none with an approved or
+  applied request),
+  `POST /api/discounts/request`, `POST /api/discounts/submit-feedback`
   and `POST /api/discounts/approve` after a live read
-  (`checkMembershipDiscount`). One row per student, upserted on
-  `student_id`.
+  (`checkMembershipDiscount`), and since the same second round
+  `POST /api/admin/thirty/check-coupon` ("Check Whop again", the same
+  live read for the student of one pending request). One row per
+  student, upserted on `student_id`.
 - **Depended on by:** `GET /api/student/data` (`whop_membership_id,
   discounted` only; answers `membershipDiscounted`, never the code or the
   prices, and a failed read is `false`, never a 500), the request and
@@ -1104,7 +1116,12 @@ When adding a new table, append it here. When deleting a field, scan
   `/admin/tasks` through `GET /api/admin/tasks` and the
   `/api/admin/tasks/[id]` routes (read, copy, transition, dismiss,
   outcome, refire); `/admin/tasks/insights` through
-  `GET /api/admin/tasks/insights` (`src/lib/outreach-insights.ts`); the
+  `GET /api/admin/tasks/insights` (`src/lib/outreach-insights.ts`);
+  `/admin/templates`'s numbers per template through
+  `GET /api/admin/templates/stats`, which reads every task of any date
+  through the same `computeOutreachInsights`, with no floor (listed since
+  admin rebuild 2's render review, second round: this list left it out
+  and then said nothing else reads `tasks`); the
   Dashboard's Open tasks tile (`src/app/admin/(authenticated)/page.tsx`,
   a count); the crons `check-csm-tasks` (reads and writes it) and
   `check-na-tasks` (writes it); `src/lib/csm-events.ts` (the event tasks: it writes them, and reads
@@ -1185,7 +1202,10 @@ When adding a new table, append it here. When deleting a field, scan
   tile draws the same line (D7): it reads the key itself and checks it
   with `configReads` of `src/lib/admin/dashboard-metrics.ts`, apart from
   `getTasksResetAt` (see `admin_config`). The crons, `csm-events.ts` and
-  `csm-task-evaluation.ts` read tasks of any date, as before.
+  `csm-task-evaluation.ts` read tasks of any date, as before, and so does
+  `GET /api/admin/templates/stats` (`computeOutreachInsights` with no
+  `tasksFloorIso`): the Templates page's numbers count every task, from
+  before the reset too.
 
 ### `daily_progress_snapshots`
 - **Depends on:** `students`, `lessons`
@@ -2127,7 +2147,49 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
 - **Rules its caller relies on:** the page decides through the existing
   routes (`POST /api/discounts/approve`, `/reject`, `/mark-applied`),
   which decide with their own read of the one student; this route only
-  shows.
+  shows. A pending row's coupon is the stored row, so "Check Whop again"
+  (`POST /api/admin/thirty/check-coupon`, below) stores Whop's answer
+  now and the page reads this route again to show it.
+
+### `POST /api/admin/thirty/check-coupon`
+- **What it is:** "Check Whop again" on the 30% page (admin rebuild 2,
+  the render review's second round, 2026-10-21; not on production). A
+  pending row whose stored coupon says a discount is on the next
+  renewal offers only Reject; when the code was taken off the membership
+  since, this asks Whop again for that one student.
+- **Called by:** `ThirtyView`'s `PendingRow`, on the coupon's row, through
+  `adminTransport.checkCoupon` (`src/lib/admin/admin-transport.ts`); the
+  page then reads `GET /api/admin/thirty` again.
+- **Auth:** `requireTeam` with founder, admin or csm (401 with no token or
+  a bad one, 403 for a login that is not a team member).
+- **Depends on:** `discount_requests` (`id, student_id, status` by `id`),
+  then `checkMembershipDiscount` (`src/lib/membership-discount.ts`):
+  `students.whop_membership_id`, Whop's v1 membership, plan and promo
+  code pinned to `2026-10-15-1` (no request started after 6 s, none
+  waited on past 8 s), the stored row as its fallback.
+- **Produces:**
+  - 200 `{ discounted, code }`: Whop answered now and its answer is
+    stored; `code` is the code's name, or its promo id, or null.
+  - 400 "Missing requestId" (no id, or a body that is not JSON).
+  - 404 "This request no longer exists."
+  - 409 "This request was already decided." (the page reads its list
+    again).
+  - 422 "The student's Whop membership is not on file, so Whop can't be
+    asked. Check the coupon in Whop." (no membership id, or a payment's);
+    422 "Whop doesn't know the membership on file, so nothing changed.
+    Check the student in Whop." (Whop's 404).
+  - 500 "Couldn't read this request, so Whop was not asked. Try again.";
+    "Couldn't read the student's Whop membership, so Whop was not asked.
+    Try again."; "This deployment has no Whop key, so Whop can't be
+    asked."; "Whop answered, but its answer couldn't be saved, so the
+    list still shows the old one. Try again." (`saved` false on the
+    reader's answer: never a 200 the list would contradict).
+  - 502 "Whop gave no answer, so nothing changed. Try again in a minute."
+    (any other failure of the read; the reader logs its kind).
+- **Writes:** only through `checkMembershipDiscount`: the student's row of
+  `student_membership_discounts`, upserted on `student_id`, when Whop
+  answers. No Whop code is made and the request is not changed. No answer
+  names a Whop id.
 
 ### `PUT /api/admin/config` (admin rebuild 2, D6)
 - **What it is:** the one way the admin writes `admin_config`: the 2

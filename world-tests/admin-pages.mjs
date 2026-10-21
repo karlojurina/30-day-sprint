@@ -44,14 +44,21 @@
  *           Approve anyway after it), the Approve anyway link and its confirm,
  *           Reject, a 409 on approve and on reject, a failed reload, Mark
  *           code applied, the coupon warning on Approved, ?student=; every
- *           tap 44px, the link too
+ *           tap 44px, the link too. Since the render review's second round:
+ *           a coupon row's Reject starting with the map's sentence, changed
+ *           by the team before sending, and Check Whop again with each of
+ *           its answers (the code still there; gone, and Approve back,
+ *           ?state=stalecoupon; Whop down, ?whop=down)
  *   dash    /dev/admin/dashboard (admin rebuild 2, WI-2): full, renewed,
  *           empty, partial, error and loading; Month 2 waiting with no
  *           rate before the first renewals, then its rate; Avg progress's
- *           line from the switch only; every failed tile "Couldn't load"
- *           with no number; the readouts by pointer and keyboard; How it's
- *           counted; Refresh for a founder (its line, a refusal, a step that
- *           failed) and none for a csm; Retry; every tap 44px
+ *           line from the switch only, its 2 readings 2 dots and a short
+ *           line (the render review's second round); every failed tile
+ *           "Couldn't load" with no number, and the header "Couldn't load"
+ *           when every read failed (the same round); the readouts by pointer
+ *           and keyboard; How it's counted; Refresh for a founder (its line,
+ *           a refusal, a step that failed) and none for a csm; Retry; every
+ *           tap 44px
  *   tasks   /dev/admin/tasks (admin rebuild 2, D7): To do, Sent, Dismissed
  *           and Archived full, before the reset (no Archived), empty, loading
  *           and error; the Archived rows read only, with the reset's words;
@@ -91,7 +98,12 @@
  *           name part on every page; the folds' markers and Show settings'
  *           aria-expanded; the team's own ECOM30 code with no warning; the
  *           course switch page and the not-found page in the dark look, and
- *           the old admin addresses answered 404 by the catch-all
+ *           the old admin addresses answered 404 by the catch-all. Its
+ *           second round: Outreach insights' 5 numbers in the primary ink; a
+ *           username longer than its journey card on one line, cut with an
+ *           ellipsis, the whole of it in a title; no underline on a name
+ *           with no student behind it; every failed block of a student's
+ *           page and of the drawer starting with the tiles' warning dot
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
  * or two of them), and each one is measured. It fails on: a horizontal
@@ -632,6 +644,8 @@ if (wanted('thirty')) {
     'code-applied': 'No code has been applied in Whop yet.',
   }
   const COUPON_LINE = 'This student already has a discount on their membership (evolve10).'
+  /** The map's sentence for a discount already on the account: since the render review's second round, the reason a coupon row's Reject starts with. */
+  const MAP_LINE = "You can't apply for this discount because you already have a discount applied to your account."
   const open = (query, size) => go(`/dev/admin/discounts${query}`, size)
   const waitReady = () => page.waitForSelector('[role="tablist"]', { timeout: 30000 })
   const row = (name) => page.evaluateHandle((n) => [...document.querySelectorAll('.list-row')].find((r) => r.querySelector('a')?.textContent === n) ?? null, name)
@@ -834,7 +848,7 @@ if (wanted('thirty')) {
     await press(await buttonIn(hugo, 'Reject'))
     await page.waitForSelector('input[placeholder^="For example"]')
     const prefilled = await page.$eval('input[placeholder^="For example"]', (i) => i.value)
-    expect(prefilled === 'Already has a discount on their membership (evolve10)', 'his Reject opens with the reason filled in, naming the code', prefilled)
+    expect(prefilled === MAP_LINE, 'his Reject opens with the reason filled in: the map\'s own sentence to the student, who reads it there (the render review\'s second round)', prefilled)
     await press(await buttonIn(await row('Hugo Lindahl'), 'Cancel'))
     counts = await tabCounts()
     expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'and he stays on Applied, nothing approved', counts.join(' | '))
@@ -842,6 +856,87 @@ if (wanted('thirty')) {
       await viewport(size)
       await check(`30% off, Approve refused for the coupon, ${size.join('x')}`, `thirty-coupon-refused-${size[0]}`)
     }
+  }
+
+  // The render review's second round: a coupon row asks Whop again for its one student
+  // (POST /api/admin/thirty/check-coupon on the real page; fixtures.ts answers it here).
+  console.log('\n30% off: Check Whop again on the coupon\'s row, and the reason the team can change')
+  {
+    const CHECK = 'Check Whop again'
+    const DOWN = 'Whop gave no answer, so nothing changed. Try again in a minute.'
+    // full: evolve10 is still on Tara's membership in Whop.
+    await open('')
+    await waitReady()
+    let tara = await row('Tara Quinn')
+    const look = await (await buttonIn(tara, CHECK)).evaluate((b) => {
+      const cs = getComputedStyle(b)
+      const r = b.getBoundingClientRect()
+      return { bg: cs.backgroundColor, border: cs.borderTopStyle, underline: cs.textDecorationLine, size: cs.fontSize, h: Math.round(r.height) }
+    })
+    expect(look.bg === 'rgba(0, 0, 0, 0)' && look.border === 'none' && look.underline === 'underline' && look.size === '13px' && look.h >= 44,
+      'Tara\'s coupon row: "Check Whop again" in Approve\'s place, a small link as Approve anyway is (no fill, underlined 13px words, a 44px target)', JSON.stringify(look))
+    const before = (await calls()).length
+    await press(await buttonIn(tara, CHECK))
+    await page.waitForFunction(() => document.body.innerText.includes("Whop still shows a discount on Tara Quinn's membership (evolve10)."), { timeout: 10000 })
+    await settled()
+    const made = (await calls()).slice(before).map((c) => (c.args.length ? `${c.name}:${c.args.join(',')}` : c.name))
+    expect(JSON.stringify(made) === JSON.stringify(['checkCoupon:r-tara', 'loadThirty']), 'one check for her request, then the list read again', JSON.stringify(made))
+    tara = await row('Tara Quinn')
+    expect((await rowText(tara)).includes(COUPON_LINE) && (await isNull(await buttonIn(tara, 'Approve'))) && !(await isNull(await buttonIn(tara, CHECK))),
+      'Whop still names evolve10: the notice says so, and the row stays the coupon\'s (Check Whop again and Reject, no Approve)', await rowText(tara))
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`30% off, Check Whop again, the code still there, ${size.join('x')}`, `thirty-check-still-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    // The reason Reject starts with is the map's sentence, and the team can change it before it is sent.
+    await press(await buttonIn(await row('Tara Quinn'), 'Reject'))
+    await page.waitForSelector('input[placeholder^="For example"]')
+    expect((await page.$eval('input[placeholder^="For example"]', (i) => i.value)) === MAP_LINE, 'Tara\'s Reject opens with the map\'s own sentence, no code and no "their"')
+    await page.$eval('input[placeholder^="For example"]', (i) => i.select())
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type('You already have a discount on your membership.')
+    await press(await buttonIn(await row('Tara Quinn'), 'Reject the request'))
+    await page.waitForFunction(() => document.body.innerText.includes('Rejected the request from Tara Quinn.'), { timeout: 10000 })
+    await settled()
+    const sent = (await calls()).filter((x) => x.name === 'reject').map((x) => x.args)
+    expect(JSON.stringify(sent) === JSON.stringify([['r-tara', 'You already have a discount on your membership.']]), 'the team changed it: the rejection carries their words', JSON.stringify(sent))
+
+    // stalecoupon: evolve10 came off Tara's membership in Whop since the cron stored it.
+    await open('?state=stalecoupon')
+    await waitReady()
+    tara = await row('Tara Quinn')
+    expect((await rowText(tara)).includes(COUPON_LINE) && (await isNull(await buttonIn(tara, 'Approve'))), 'the stored answer still says evolve10: no Approve on her row yet')
+    await press(await buttonIn(tara, CHECK))
+    await page.waitForFunction(() => document.body.innerText.includes("Whop shows no discount on Tara Quinn's membership now."), { timeout: 10000 })
+    await settled()
+    tara = await row('Tara Quinn')
+    const t = await rowText(tara)
+    const approveOn = !(await isNull(await buttonIn(tara, 'Approve'))) && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled))
+    expect(t.includes('Every video up to the checkpoint was done in time.') && t.includes('61 of 61 videos') && !t.includes(COUPON_LINE) && approveOn && (await isNull(await buttonIn(tara, CHECK))),
+      'the coupon is gone: the row is the rule\'s again, its yes and its count, with Approve on and no Check Whop again', t)
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`30% off, Check Whop again, the coupon gone, ${size.join('x')}`, `thirty-check-gone-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    await press(await buttonIn(await row('Tara Quinn'), 'Approve'))
+    await page.waitForFunction(() => document.body.innerText.includes('Approved Tara Quinn.'), { timeout: 10000 })
+    await settled()
+    const counts = await tabCounts()
+    expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'and Approve goes through: Tara moves to Approved', counts.join(' | '))
+
+    // whop=down: Whop gives no answer. The row says so, and nothing changes.
+    await open('?whop=down')
+    await waitReady()
+    const loads = (await calls()).filter((c) => c.name === 'loadThirty').length
+    await press(await buttonIn(await row('Tara Quinn'), CHECK))
+    await page.waitForFunction((d) => document.body.innerText.includes(d), { timeout: 10000 }, DOWN)
+    tara = await row('Tara Quinn')
+    const alert = await tara.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
+    expect(alert === DOWN && (await rowText(tara)).includes(COUPON_LINE) && (await calls()).filter((c) => c.name === 'loadThirty').length === loads && !(await isNull(await buttonIn(tara, CHECK))),
+      'Whop down: the route\'s sentence on the row, the row as it was, the list not read again, Check Whop again there to try again', alert ?? '')
+    await check('30% off, Check Whop again, Whop down, 1280x720', 'thirty-check-down-1280')
   }
 
   console.log('\n30% off: Approve anyway, the small link, an inline confirm, then the call with override')
@@ -1010,6 +1105,12 @@ if (wanted('dash')) {
   const TILES = ['month2', 'bounty', 'open-tasks', 'to-decide', 'active', 'canceling', 'churned', 'avg-progress']
   const open = (query, size) => go(`/dev/admin/dashboard${query}`, size)
   const ready = () => page.waitForFunction(() => /Updated \d\d:\d\d/.test(document.body.innerText), { timeout: 30000 })
+  /** Every read failed: the header says "Couldn't load" (the render review's second round), so there is no "Updated" to wait for. */
+  const readyFailed = () => page.waitForSelector('main header [data-meta-failed]', { timeout: 30000 })
+  const headerMeta = () => page.evaluate(() => {
+    const h = [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))
+    return h ? { failed: !!h.querySelector('[data-meta-failed]'), text: h.innerText.replace(/\s+/g, ' ') } : null
+  })
   /** Each tile: its words, whether it shows a number, whether it says it could not load. */
   const tiles = () => page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-tile]')].map((t) => [t.dataset.tile, {
     text: t.innerText.replace(/\s+/g, ' ').trim(),
@@ -1042,6 +1143,21 @@ if (wanted('dash')) {
       expect(t['avg-progress'].numbers[0] === '2.7%' && avgRows.length === 14 && JSON.stringify(avgRows.slice(12)) === JSON.stringify(['Mon 19 Oct 2.66%', 'Tue 20 Oct 2.71%'])
           && avgRows.slice(0, 12).every((r) => r.endsWith('Before the switch')) && t['avg-progress'].text.includes('From Mon 19 Oct'),
         `${label}: Avg progress 2.7%, its line on the 14 days with readings from the switch only (19 and 20 Oct, no 36%), "From Mon 19 Oct" over them`, JSON.stringify([t['avg-progress'].numbers, avgRows.slice(10)]))
+      const marks = await page.evaluate(() => {
+        const chart = document.querySelector('[data-tile="avg-progress"] [aria-roledescription="chart"]')
+        const box = chart.getBoundingClientRect()
+        const dots = [...chart.querySelectorAll('[data-reading-dot]')].map((d) => {
+          const r = d.getBoundingClientRect()
+          return { x: Math.round(r.left + r.width / 2 - box.left), left: r.left, right: r.right, w: Math.round(r.width), h: Math.round(r.height), ring: getComputedStyle(d).boxShadow }
+        })
+        return {
+          dots, width: Math.round(box.width), gap: dots.length === 2 ? Math.round((dots[1].left - dots[0].right) * 10) / 10 : null,
+          line: !!chart.querySelector('path[vector-effect="non-scaling-stroke"]'), active: document.querySelectorAll('[data-tile="active"] [data-reading-dot]').length,
+        }
+      })
+      expect(marks.dots.length === 2 && marks.dots.every((d) => d.w === 6 && d.h === 6 && d.ring === 'none' && d.x > marks.width * 0.85) && marks.dots[0].x < marks.dots[1].x
+          && marks.gap >= 3 && marks.line && marks.active === 0,
+        `${label}: Avg progress's 2 readings are a dot each at the right end of the 14 days, the short line between them showing (${marks.gap}px of it), never a 20px stroke alone; Active's 14 days have no reading dots (the render review's second round)`, JSON.stringify(marks))
       expect((await tableOf('active')).length === 14 && (await tableOf('churned')).length === 14, `${label}: the other lines hold the 14 days`)
       expect(!(await isNull(await refreshButton())) && !(await isNull(await syncButton())), `${label}: a founder has Refresh (reads again) and Sync Whop and rebuild`)
       const order = await page.evaluate(() => ['dash-today', 'dash-program', 'dash-trends'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)))
@@ -1107,6 +1223,8 @@ if (wanted('dash')) {
         `${label}: one line at the top says why in plain words, each reason once, with Retry; the database's own words are not on the page`, alert.replace(/\s+/g, ' '))
       const tileWords = Object.values(t).map((x) => x.text).join(' ')
       expect(!/permission denied|canceling statement|admin_config|statement timeout/.test(tileWords), `${label}: no tile repeats a reason, or a table's name`)
+      const m = await headerMeta()
+      expect(m && !m.failed && /Updated \d\d:\d\d/.test(m.text), `${label}: with tiles drawn, the header keeps its time`, JSON.stringify(m))
       await page.$eval('[role="alert"] details summary', (sm) => sm.click())
       await sleep(100)
       const opened = await page.$eval('[role="alert"]', (e) => e.innerText)
@@ -1118,11 +1236,14 @@ if (wanted('dash')) {
       const label = `Dashboard, error (every read fails), ${w}x${h}`
       console.log(`\n${label}`)
       await open('?state=error', size)
-      await ready()
+      await readyFailed()
       await check(label, `dash-error-${w}`)
       const t = await tiles()
       expect(TILES.every((k) => t[k].failed && t[k].numbers.length === 0), `${label}: all 8 tiles "Couldn't load", not one number`, JSON.stringify(TILES.map((k) => t[k].numbers)))
       expect((await page.$eval('[role="alert"]', (e) => e.innerText)).includes("Couldn't load the dashboard."), `${label}: the line at the top says nothing could load`)
+      const m = await headerMeta()
+      expect(m && m.failed && m.text.includes("Couldn't load") && !/Updated \d\d:\d\d/.test(m.text),
+        `${label}: the header says "Couldn't load" with the warning dot, never "Updated" over numbers it never read (the render review's second round)`, JSON.stringify(m))
     }
     {
       const label = `Dashboard, loading, ${w}x${h}`
@@ -1206,7 +1327,7 @@ if (wanted('dash')) {
       await sleep(100)
     }
     await open('?state=error', [1280, 720])
-    await ready()
+    await readyFailed()
     const loadsBefore = (await dashCalls()).filter((c) => c === 'load').length
     await press(await button('Retry'))
     await page.waitForFunction((n) => (window.__dashCalls ?? []).filter((c) => c.name === 'load').length > n, { timeout: 10000 }, loadsBefore)
@@ -2394,6 +2515,35 @@ if (wanted('render')) {
   })
   expect(card.href === '/admin/students/p-maya' && card.weight === '600' && card.user === '@maya.lq' && card.btnH >= card.cardH - 2,
     'a card: the name links to the student\'s page (600, @username after it); the button under it covers the card', JSON.stringify(card))
+  // The render review's second round: a username longer than its card ends in an ellipsis, never broken between characters.
+  for (const size of [[1280, 720], [1440, 900]]) {
+    await go('/dev/admin/journey', size)
+    await settle()
+    const u = await page.evaluate(() => {
+      const c = document.querySelector('[data-journey-card="p-maximilian"]')
+      const name = c.querySelector('[data-student-name]').getBoundingClientRect()
+      const user = c.querySelector('[data-student-username]')
+      const cs = getComputedStyle(user)
+      const r = user.getBoundingClientRect()
+      const box = c.getBoundingClientRect()
+      return {
+        text: user.textContent, title: user.getAttribute('title'), h: Math.round(r.height), fontSize: parseFloat(cs.fontSize), cut: user.scrollWidth > user.clientWidth,
+        ellipsis: cs.textOverflow, nowrap: cs.whiteSpace, inside: r.left >= box.left && r.right <= box.right, under: r.top >= name.bottom - 2,
+      }
+    })
+    expect(u.text === '@max.featherstonehaugh.smythe' && u.title === u.text && u.h <= u.fontSize * 1.8 && u.cut && u.ellipsis === 'ellipsis' && u.nowrap === 'nowrap' && u.inside && u.under,
+      `${size.join('x')}: a username longer than its journey card stays on one line under the name, cut with an ellipsis inside the card, the whole of it in its title (it broke between characters)`, JSON.stringify(u))
+    await check(`render, the journey, a long username, ${size.join('x')}`, `render-journey-username-${size[0]}`)
+  }
+
+  console.log('\nrender: Outreach insights\' numbers in the primary ink (the render review\'s second round)')
+  for (const size of [[1440, 900], [390, 844]]) {
+    await go('/dev/admin/tasks/insights', size)
+    await settle()
+    const nums = await page.evaluate(() => [...document.querySelectorAll('main .stat-value')].map((v) => ({ label: v.previousElementSibling?.textContent ?? '', value: v.textContent, color: getComputedStyle(v).color })))
+    expect(nums.length === 5 && nums.every((n) => n.color === 'rgba(247, 246, 243, 0.92)') && nums.some((n) => n.label === 'Saves' && /%$/.test(n.value)) && nums.some((n) => n.label === 'Success rate' && /%$/.test(n.value)),
+      `${size.join('x')}: Outreach insights' 5 numbers, Saves and Success rate among them, in the primary ink, none in Airy Blue (they are not links)`, JSON.stringify(nums))
+  }
 
   console.log('\nrender: the Dashboard\'s sections and Month 2\'s bar')
   for (const size of [[1440, 900], [390, 844]]) {
@@ -2481,6 +2631,28 @@ if (wanted('render')) {
       `${label}, 390x844: every number on one line, none in Airy Blue; a failed one is a dot and "Couldn't load" at 13px`, JSON.stringify(facts))
     await check(`render, ${label}, 390x844`, `render-student-${label.replace(/[^a-z]+/gi, '-').toLowerCase()}-390`)
   }
+  // The render review's second round: every block whose read failed starts with the warning dot a failed number has.
+  for (const [route, label] of [['/dev/admin/students/p-maya?state=partial', 'A student, partial'], ['/dev/admin/journey?state=partial&drawer=p-maya', 'The drawer, partial']]) {
+    for (const size of [[390, 844], [1440, 900]]) {
+      await go(route, size)
+      await settle()
+      const f = await page.evaluate(() => {
+        const tile = document.querySelector('[data-failed] > span[aria-hidden="true"]')
+        return {
+          tileDot: tile ? getComputedStyle(tile).backgroundColor : null,
+          blocks: [...document.querySelectorAll('[data-section-failed]')].map((b) => {
+            const dot = b.firstElementChild
+            const r = dot.getBoundingClientRect()
+            const words = b.querySelector('p')
+            return { text: words?.textContent.slice(0, 42), bg: getComputedStyle(dot).backgroundColor, w: Math.round(r.width), h: Math.round(r.height), hidden: dot.getAttribute('aria-hidden'), beside: r.left < words.getBoundingClientRect().left }
+          }),
+        }
+      })
+      expect(f.tileDot !== null && f.blocks.length === 3 && f.blocks.every((b) => b.bg === f.tileDot && b.w === 8 && b.h === 8 && b.hidden === 'true' && b.beside && b.text.startsWith("Couldn't load the")),
+        `${label}, ${size.join('x')}: each of its 3 blocks whose read failed starts with the warning dot a failed number has (its colour, 8px), then "Couldn't load the ..."`, JSON.stringify(f))
+      await check(`render, ${label}, the failed blocks, ${size.join('x')}`, `render-${label.replace(/[^a-z]+/gi, '-').toLowerCase()}-blocks-${size[0]}`)
+    }
+  }
   {
     await go('/dev/admin/students/p-jonah', [1440, 900])
     await settle()
@@ -2503,11 +2675,13 @@ if (wanted('render')) {
     const names = await page.evaluate(() => [...document.querySelectorAll('main [data-student-name]')].filter((n) => n.getBoundingClientRect().width > 0).map((n) => ({
       tag: n.tagName, text: n.textContent, href: n.getAttribute('href') ?? n.closest('a')?.getAttribute('href') ?? null, weight: getComputedStyle(n).fontWeight, line: getComputedStyle(n).textDecorationLine, color: getComputedStyle(n).color,
     })))
-    // A name with no student behind it (a student gone, an application whose student was deleted) has nothing to link to.
+    // A name with no student behind it (a student gone, an application whose student was deleted) has nothing to link to,
+    // and since the render review's second round no underline either: nothing opens from it.
     const NOBODY = ['Unknown student', 'A student no longer on file']
-    expect(names.length > 0 && names.every((n) => n.weight === '600' && n.line === 'underline' && n.color === 'rgba(247, 246, 243, 0.92)')
+    const underline = (n) => (link && n.tag !== 'A' ? n.line === 'none' : n.line === 'underline')
+    expect(names.length > 0 && names.every((n) => n.weight === '600' && underline(n) && n.color === 'rgba(247, 246, 243, 0.92)')
         && names.every((n) => (link ? (n.tag === 'A' ? n.href.startsWith('/admin/students/') : NOBODY.includes(n.text)) : n.tag === 'SPAN' && n.href?.startsWith('/admin/students/'))),
-      `${label}: every name the same (600, the primary ink, a hairline underline), ${link ? 'each a link to the student\'s page' : 'inside the row that is the link'}`, JSON.stringify([names.length, names[0], names.filter((n) => n.tag !== 'A').map((n) => n.text)]))
+      `${label}: every name the same (600, the primary ink, a hairline underline where it opens the student's page), ${link ? 'each a link to the student\'s page, or no link and no underline with no student behind it' : 'inside the row that is the link'}`, JSON.stringify([names.length, names[0], names.filter((n) => n.tag !== 'A').map((n) => `${n.text}: ${n.line}`)]))
   }
   {
     await go('/dev/admin/students', [1440, 900])

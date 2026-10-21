@@ -582,6 +582,20 @@ function failedReads(reads: DashboardReads): DashboardModel["failed"] {
   return out;
 }
 
+/** Every tile of the page, the numbers the team reads. */
+const TILES = ["monthTwo", "bounty", "openTasks", "toDecide", "active", "canceling", "churned", "avgProgress"] as const;
+
+/**
+ * No tile could be drawn: the reads every tile needs failed (every read, or
+ * the loader threw). The header then says "Couldn't load" (FailedMeta),
+ * never "Updated 10:30", which would tell the team the numbers were just
+ * read (the render review's second round). With one tile drawn, the header
+ * keeps its time and the line at the top says what failed.
+ */
+export function nothingLoaded(model: Pick<DashboardModel, (typeof TILES)[number]>): boolean {
+  return TILES.every((k) => !model[k].ok);
+}
+
 /** Every read failed: what the page shows when its loader threw, so no tile is left with a number. */
 export function allFailed(error: string): DashboardReads {
   const no = { ok: false as const, error };

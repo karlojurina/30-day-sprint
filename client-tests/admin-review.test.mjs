@@ -159,9 +159,10 @@ console.log('\n=== A failed read in plain words ===')
   ok(!/Failed error=\{tile\.error\}/.test(dash) && /Failed error=\{tile\.error\}/.test(fromBase('src/components/admin/dashboard/DashboardView.tsx')),
      `control: at ${BASE} every tile printed the database's error under "Couldn't load"`)
   const people = ['src/components/admin/students/StudentsView.tsx', 'src/components/admin/students/StudentDetailView.tsx', 'src/components/admin/journey/JourneyView.tsx'].map(fromSrc).join('\n')
+  // The render review's second round: a failed block says it through SectionFailure, ReadFailure with the tiles' warning dot.
   ok(!/\(\{(?:refreshError|sync\.error|d\.error|areas\.error|loaded\.data\.areas\.error|loaded\.data\.actionItems\.error)\}\)/.test(people)
-       && (people.match(/<ProblemNotice /g) ?? []).length >= 5 && (people.match(/<ReadFailure /g) ?? []).length >= 5,
-     'All students, a student\'s page and the journey put no raw error in a sentence: ProblemNotice and ReadFailure say it')
+       && (people.match(/<ProblemNotice /g) ?? []).length >= 5 && (people.match(/<ReadFailure |<SectionFailure /g) ?? []).length >= 5,
+     'All students, a student\'s page and the journey put no raw error in a sentence: ProblemNotice and ReadFailure (or SectionFailure, which draws it) say it')
   const insights = fromSrc('src/components/admin/insights/InsightsView.tsx')
   ok(insights.includes('<ReadFailure raw={counts.error} lead="Couldn\'t count." />') && !insights.includes('Couldn&apos;t count: {counts.error}'),
      'Insights: the pace card\'s failed count in plain words too')
@@ -431,10 +432,11 @@ console.log("\n=== The 30% page: every row's coupon check ===")
   const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/** The 30% code, and a button that copies it. */'))
   // The render review's fix round changed the coupon's row: no Approve at all beside the coupon's verdict (it
   // was kept on, for the route to refuse), and Reject is that row's one action, raised.
+  // Since the render review's second round "Check Whop again" stands in Approve's place on the coupon's row.
   ok(/disabled=\{locked \|\| \(busy !== null && busy !== "approve"\)\}/.test(pending) && !/disabled=\{!verdict\.ok/.test(pending)
-       && /\) : coupon \? null : \(\s*<Button/.test(pending),
+       && /\) : coupon \? \(\s*<button[\s\S]*?"Check Whop again"\}\s*<\/button>\s*\) : \(\s*<Button/.test(pending),
      'Approve is on wherever it can approve, and gone beside the coupon\'s verdict (the route refuses it with no override)')
-  ok(/\{canOverride \? \(\s*<button[\s\S]*?Approve anyway[\s\S]*?\) : coupon \? null : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),
+  ok(/\{canOverride \? \(\s*<button[\s\S]*?Approve anyway[\s\S]*?\) : coupon \? \(\s*<button[\s\S]*?Check Whop again[\s\S]*?\) : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),
      'Approve anyway takes Approve\'s place in the row, as tall as Reject, never a disabled Approve beside a link')
   ok(/<Button\s+variant=\{coupon \? "raised" : "ghost"\}\s+size="md"\s+disabled=\{off\}\s+expanded=\{confirm === "reject"\}/.test(pending)
        && /variant="danger"[\s\S]{0,400}Reject the request/.test(pending),

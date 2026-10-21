@@ -24,7 +24,7 @@ import { adminTransport } from "@/lib/admin/admin-transport";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { DISCOUNT_STATUS } from "@/lib/admin/discount-status";
-import { couponRejectReason, couponWarns } from "@/lib/admin/thirty-view";
+import { COUPON_REJECT_REASON, couponWarns } from "@/lib/admin/thirty-view";
 import type {
   StudentBrief,
   TeamRef,
@@ -54,8 +54,15 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * never after the coupon's: a student whose Whop membership already has a
  * discount on its next renewal gets no 30%, and the approve route refuses
  * it with no override (D5). Such a row (the render review's fix round) has
- * no Approve at all: Reject is its one action, its reason filled in ("Already
- * has a discount on their membership (evolve10)"). The verdicts, the counts
+ * no Approve at all: Reject is its one decision, its reason filled in with
+ * the map's own sentence to the student ("You can't apply for this discount
+ * because you already have a discount applied to your account.", since the
+ * render review's second round: the student reads the reason on the map),
+ * which the team can change before sending. In Approve's place it has "Check
+ * Whop again", a small link like Approve anyway: Whop is asked now for that
+ * one student (POST /api/admin/thirty/check-coupon), the answer is stored,
+ * and the list is read again, so a coupon taken off the membership since the
+ * stored read brings Approve back. The verdicts, the counts
  * and the coupons come from GET /api/admin/thirty, which runs the student
  * app's own rule and asks Whop now about the Approved rows' coupons; this
  * file only shows them and sends the team's decisions to the existing
@@ -70,8 +77,8 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * Buttons (the brand kit: one ink primary at most, verbs that say what
  * happens): Approve, Mark code applied and Refresh are raised; Reject is
  * ghost, the "no" of the row, as Dismiss is on Tasks, and raised on the
- * coupon's row, where it is the one action; "Reject the request", which the
- * student cannot undo by asking again, is the danger button.
+ * coupon's row, where it is the one decision; "Reject the request", which
+ * the student cannot undo by asking again, is the danger button.
  *
  * What a decision did shows in a fixed place at the bottom of the window
  * (NoticeStack, list-parts.tsx), where it is seen however far down the row
@@ -150,14 +157,18 @@ function byWhom(ref: TeamRef | null): string {
   return n ? ` by ${n}` : "";
 }
 
+/** What a row's button asked: a decision, or "check" (Check Whop again). */
+type RowCall = "approve" | "reject" | "applied" | "check";
+
 /**
- * The page's own words for a decision the route refused. A 409 is the
- * route's sentence as it is (it names the Whop code to delete), and so is the
+ * The page's own words for a call the route refused. A 409 is the route's
+ * sentence as it is (it names the Whop code to delete), and so is the
  * coupon's refusal (it names the code on the membership). The approve route's
  * other 400s name a button this page does not have, so they get the page's
- * words; the row's verdict then says why.
+ * words; the row's verdict then says why. Check Whop again's refusals are
+ * its route's sentences.
  */
-function decisionError(kind: "approve" | "reject" | "applied", r: Refusal): string {
+function decisionError(kind: RowCall, r: Refusal): string {
   if (r.status === 409) return r.error;
   if (r.status === 404) return "This request no longer exists.";
   if (kind === "approve" && r.status === 400) {
@@ -172,8 +183,8 @@ function decisionError(kind: "approve" | "reject" | "applied", r: Refusal): stri
 }
 
 /** A refusal that means the list is out of date: show it in the notices and read the list again. */
-function listIsStale(kind: "approve" | "reject" | "applied", status: number): boolean {
-  return status === 409 || status === 404 || (status === 400 && kind !== "reject");
+function listIsStale(kind: RowCall, status: number): boolean {
+  return status === 409 || status === 404 || (status === 400 && (kind === "approve" || kind === "applied"));
 }
 
 export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyTransport }) {
@@ -262,7 +273,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     setAddress(next);
   }
 
-  async function refused(kind: "approve" | "reject" | "applied", row: ThirtyRequestRow, r: Refusal): RowResult {
+  async function refused(kind: RowCall, row: ThirtyRequestRow, r: Refusal): RowResult {
     const text = decisionError(kind, r);
     if (!listIsStale(kind, r.status)) return text;
     // A code made in Whop for a request someone else decided must be deleted there: it stays here until dismissed, copyable.
@@ -301,6 +312,26 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
     if (!r.ok) return refused("applied", row, r);
     lock(row.id);
     show({ tone: "success", text: `Marked the code as applied in Whop for ${studentName(row.student)}.` });
+    await reload();
+    return null;
+  }
+
+  /**
+   * Check Whop again, on a row the stored coupon refuses: Whop now for that
+   * student, stored by the route, then the list read again, which judges the
+   * row by what was stored. Nothing is decided, so the row is not locked.
+   * Whop giving no answer is the route's sentence on the row.
+   */
+  async function checkCoupon(row: ThirtyRequestRow): RowResult {
+    const r = await transport.checkCoupon(row.id);
+    if (!r.ok) return refused("check", row, r);
+    const name = studentName(row.student);
+    show({
+      tone: "success",
+      text: r.data.discounted
+        ? `Whop still shows a discount on ${name}'s membership${r.data.code ? ` (${r.data.code})` : ""}.`
+        : `Whop shows no discount on ${name}'s membership now. The 30% rule decides this request again.`,
+    });
     await reload();
     return null;
   }
@@ -428,6 +459,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
                 stale={stale}
                 onApprove={approve}
                 onReject={reject}
+                onCheck={checkCoupon}
               />
             ) : (
               <DecidedRow key={row.id} row={row} locked={locked.has(row.id)} stale={stale} onMarkApplied={markApplied} />
@@ -465,9 +497,9 @@ const ERROR_TEXT: React.CSSProperties = {
 };
 
 /**
- * "Approve anyway": a small text link, not a third pill beside Approve and
- * Reject. The text is 13px in Airy Blue (4.9:1 on a card at the lowest); the
- * box is the kit's 44px touch target.
+ * "Approve anyway" and "Check Whop again": a small text link, not a third
+ * pill beside Approve and Reject. The text is 13px in Airy Blue (4.9:1 on a
+ * card at the lowest); the box is the kit's 44px touch target.
  */
 const SMALL_LINK: React.CSSProperties = {
   display: "inline-flex",
@@ -628,8 +660,9 @@ function verdictDetail(row: ThirtyRequestRow, v: Verdict): string[] {
  * An Applied row: the date applied, the verdict line, and the actions on the
  * right (RowSplit): Approve and Reject, Approve anyway in Approve's place
  * after a refusal that is not the coupon's. A row the coupon refuses has no
- * Approve and no Approve anyway: Reject is its one action, raised, and its
- * reason starts filled in (the render review's fix round).
+ * Approve and no Approve anyway: Reject is its one decision, raised, and its
+ * reason starts filled in (the render review's fix round); "Check Whop
+ * again" stands in Approve's place (its second round).
  */
 function PendingRow({
   row,
@@ -637,6 +670,7 @@ function PendingRow({
   stale,
   onApprove,
   onReject,
+  onCheck,
 }: {
   row: ThirtyRequestRow;
   /** Decided since the last read that worked: its buttons stay off until a read works. */
@@ -644,6 +678,8 @@ function PendingRow({
   stale: boolean;
   onApprove: (row: ThirtyRequestRow, override: boolean) => RowResult;
   onReject: (row: ThirtyRequestRow, reason: string | null) => RowResult;
+  /** Check Whop again: Whop now for this student, stored, then the list read again. */
+  onCheck: (row: ThirtyRequestRow) => RowResult;
 }) {
   const verdict: Verdict = row.verdict ?? {
     ok: false,
@@ -654,7 +690,7 @@ function PendingRow({
   // D5: the coupon's refusal has no override, so no Approve and no Approve anyway after it.
   const coupon = verdict.reason === "has-discount";
   const canOverride = !verdict.ok && !coupon;
-  const [busy, setBusy] = useState<null | "approve" | "override" | "reject">(null);
+  const [busy, setBusy] = useState<null | "approve" | "override" | "reject" | "check">(null);
   const [confirm, setConfirm] = useState<null | "override" | "reject">(null);
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -676,7 +712,8 @@ function PendingRow({
 
   const actions = (
     <>
-      {/* Approve, or "Approve anyway" in its place after a refusal that is not the coupon's: a small link, as tall as Reject. */}
+      {/* Approve; in its place "Approve anyway" after a refusal that is not the coupon's, and "Check Whop again" on the
+          coupon's row: small links, as tall as Reject. */}
       {canOverride ? (
         <button
           type="button"
@@ -687,7 +724,25 @@ function PendingRow({
         >
           Approve anyway
         </button>
-      ) : coupon ? null : (
+      ) : coupon ? (
+        <button
+          type="button"
+          data-check-whop=""
+          style={{ ...SMALL_LINK, padding: "0 6px", opacity: off ? 0.5 : 1, cursor: busy === "check" ? "wait" : off ? "not-allowed" : "pointer" }}
+          disabled={off}
+          aria-busy={busy === "check" || undefined}
+          onClick={() =>
+            void run("check", async () => {
+              const e = await onCheck(row);
+              // The reason filled in for the coupon goes with the answer it was for; one the team wrote stays.
+              if (!e) setReason((cur) => (cur === COUPON_REJECT_REASON ? "" : cur));
+              return e;
+            })
+          }
+        >
+          {busy === "check" ? "Checking Whop" : "Check Whop again"}
+        </button>
+      ) : (
         <Button
           variant="raised"
           size="md"
@@ -706,9 +761,10 @@ function PendingRow({
         onClick={() => {
           const opening = confirm !== "reject";
           setConfirm(opening ? "reject" : null);
-          // The coupon's row: the reason starts as what the team would type. Filled when the panel opens, so a row
-          // the coupon refuses only after a reload (Approve refused by Whop) gets it too.
-          if (opening && coupon && !reason.trim()) setReason(couponRejectReason(row.coupon?.code ?? null));
+          // The coupon's row: the reason starts as the map's own sentence to the student, who reads it there (the
+          // team can change it). Filled when the panel opens, so a row the coupon refuses only after a reload
+          // (Approve refused by Whop) gets it too.
+          if (opening && coupon && !reason.trim()) setReason(COUPON_REJECT_REASON);
         }}
       >
         Reject

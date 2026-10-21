@@ -159,8 +159,9 @@ const PEOPLE: Person[] = [
     request: { status: "applied", code: "ECOM30-A1D9E0", at: "2026-10-18T08:00:00.000Z" },
   },
   {
+    // A username longer than a journey card is wide: it ends in an ellipsis there, its whole text in a title.
     id: "p-maximilian", name: "Maximilian Featherstonehaugh-Smythe", email: "max.featherstonehaugh.smythe@example.com",
-    username: "max.featherstonehaugh", status: "active", paid: "2026-10-09T10:00:00.000Z", lastActive: "2026-10-21T06:00:00.000Z",
+    username: "max.featherstonehaugh.smythe", status: "active", paid: "2026-10-09T10:00:00.000Z", lastActive: "2026-10-21T06:00:00.000Z",
     done: 14, lastLesson: "2026-10-21T05:30:00.000Z", streak: { current: 6, last: "2026-10-21" },
   },
   // Before the launch: on All students, never on the journey.

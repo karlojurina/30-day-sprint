@@ -344,8 +344,9 @@ console.log('\n=== The 30%: the team\'s own code, the coupon\'s row ===')
        && !TV.isThirtyCode({ code: 'evolve10', promoCodeId: 'promo_e10' }, { whop_promo_id: 'promo_own', promo_code: 'ECOM30-AB12CD' })
        && !TV.isThirtyCode({ code: null, promoCodeId: 'promo_other' }, { whop_promo_id: 'promo_own' }),
      'the team\'s own code: an ECOM30 code by its name (any case), or the request\'s own Whop promo id; evolve10 or another id is not')
-  ok(TV.couponRejectReason('evolve10') === 'Already has a discount on their membership (evolve10)' && TV.couponRejectReason(null) === 'Already has a discount on their membership',
-     'the reason a coupon row\'s Reject starts with, naming the code; no em dash')
+  // The render review's second round changed the words: the student reads them on the map (admin-render-second.test.mjs).
+  ok(TV.COUPON_REJECT_REASON === "You can't apply for this discount because you already have a discount applied to your account.",
+     'the reason a coupon row\'s Reject starts with (since the second round the map\'s own sentence to the student); no em dash')
 
   const NOW = new Date('2026-10-20T08:30:00.000Z')
   const student = (id) => ({ id, name: `Student ${id}`, email: `${id}@example.com`, discord_username: null, membership_status: 'active', first_paid_at: '2026-10-10T09:00:00.000Z', whop_membership_id: `mem_dev${id}` })
@@ -409,10 +410,11 @@ console.log('\n=== The 30%: the team\'s own code, the coupon\'s row ===')
 
   const page = fromSrc('src/components/admin/thirty/ThirtyView.tsx')
   const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/** The 30% code, and a button that copies it. */'))
-  ok(/\) : coupon \? null : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending) && /const canOverride = !verdict\.ok && !coupon;/.test(pending),
+  // Since the render review's second round "Check Whop again" stands in Approve's place there, and the reason is the map's sentence.
+  ok(/\) : coupon \? \(\s*<button[\s\S]*?Check Whop again[\s\S]*?\) : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending) && /const canOverride = !verdict\.ok && !coupon;/.test(pending),
      'Applied, the coupon\'s verdict: no Approve and no Approve anyway')
-  ok(/variant=\{coupon \? "raised" : "ghost"\}/.test(pending) && /if \(opening && coupon && !reason\.trim\(\)\) setReason\(couponRejectReason\(row\.coupon\?\.code \?\? null\)\);/.test(pending),
-     'Reject is that row\'s one action, raised, its reason filled in when it opens ("Already has a discount on their membership (evolve10)")')
+  ok(/variant=\{coupon \? "raised" : "ghost"\}/.test(pending) && /if \(opening && coupon && !reason\.trim\(\)\) setReason\(COUPON_REJECT_REASON\);/.test(pending),
+     'Reject is that row\'s one decision, raised, its reason filled in when it opens')
   ok(/row\.couponCheck === "not-checked" && verdict\.ok && \(/.test(pending) && !pending.includes('Approve asks Whop again first.'),
      '"Coupon not checked yet" only beside the rule\'s yes: never on a row refused for another reason')
   ok(/const coupon = couponWarns\(row\) \? row\.coupon : null;/.test(page), 'the Approved row warns through couponWarns: never about the team\'s own code')

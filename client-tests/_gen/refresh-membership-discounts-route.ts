@@ -6,13 +6,17 @@
  * and stores it in student_membership_discounts. The window: a 30% window
  * still open at the run's start (discountWindowOpen in discount.ts: a first
  * payment from 1 October and a deadline not past), membership active or
- * past_due, and no approved or applied 30% request. The run and the rule
- * are src/lib/membership-discount.ts refreshMembershipDiscounts; this file
- * is its door.
+ * past_due; with them every student holding a pending 30% request, whatever
+ * their window or membership (the render review's second round: a stale
+ * answer on the 30% page's row heals by itself); and of all those, none with
+ * an approved or applied 30% request. The run and the rule are
+ * src/lib/membership-discount.ts refreshMembershipDiscounts; this file is
+ * its door.
  *
  * The map reads the stored flag (/api/student/data), and so does the admin's
  * 30% page. The request routes and the approve route ask Whop again
- * themselves and fall back to the stored row.
+ * themselves and fall back to the stored row, and the 30% page's "Check Whop
+ * again" asks for one student (POST /api/admin/thirty/check-coupon).
  *
  * ?mode=dry reads Whop and writes nothing, for the first look after a deploy:
  * it passes when `checked` is above 0 and `failed` is about empty (Whop
@@ -20,8 +24,9 @@
  * number of students in the window on a code like evolve10.
  *
  * Auth: CRON_SECRET as a bearer, like every cron (src/lib/cron-auth.ts), with
- * a cron_runs row. Answers 500, ok: false, when who is in the window cannot
- * be read, when a write fails, when every Whop read failed, or when Whop
+ * a cron_runs row. Answers 500, ok: false, when who is in the window or who
+ * holds a pending request cannot be read, when a write fails, when every
+ * Whop read failed, or when Whop
  * answered no read before the time ran out, so nothing was checked (the
  * review's fix round; that run answered 200, ok); 500 without WHOP_API_KEY. No request starts after 240 s; a student not reached is read
  * first by the next run. No answer names a student, an email or a Whop id.

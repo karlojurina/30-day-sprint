@@ -32,12 +32,17 @@
  * code, or the request's own whop_promo_id), so the coupon carries `ours`
  * and the Approved and Code Applied rows never warn about it (couponWarns).
  * An Applied row the coupon refuses offers only Reject, with its reason
- * filled in (couponRejectReason).
+ * filled in (COUPON_REJECT_REASON: the map's own sentence to the student,
+ * since the student reads the reason there), and since the render review's
+ * second round "Check Whop again" (POST /api/admin/thirty/check-coupon),
+ * which stores Whop's answer now: with the coupon gone, the next read judges
+ * the row by the rule again.
  */
 
 import {
   DISCOUNT_ELIGIBLE_FROM,
   DISCOUNT_SHARED_DEADLINE,
+  MEMBERSHIP_DISCOUNT_LINE,
   discountEndsAt,
   discountState,
   discountWindow,
@@ -272,12 +277,15 @@ export function couponWarns(row: Pick<ThirtyRequestRow, "status" | "coupon">): b
 
 /**
  * The reason an Applied row refused by the coupon starts its Reject with (the
- * render review's fix round): the code on the membership, in the team's
- * words. No em dash, since the student may read it on their map.
+ * render review's fix round). The student reads a rejection's reason on
+ * their map's 30% panel, so since its second round this is the map's own
+ * sentence for a discount already on the account, the owner's words
+ * (MEMBERSHIP_DISCOUNT_LINE): spoken to the student, naming no code. It was
+ * "Already has a discount on their membership (evolve10)", the team's words
+ * about the student. The team can still change it before sending; the code
+ * stays on the row's verdict line for the team.
  */
-export function couponRejectReason(code: string | null): string {
-  return code ? `Already has a discount on their membership (${code})` : "Already has a discount on their membership";
-}
+export const COUPON_REJECT_REASON = MEMBERSHIP_DISCOUNT_LINE;
 
 /** The first payment and the deadline, with no counts: the progress could not be read. */
 function factsWithoutProgress(firstPaidAt: string | null, now: Date): Facts {

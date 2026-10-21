@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import tokens from "@/components/admin/admin-tokens.module.css";
-import { ListHeader, ListPage, TAP } from "@/components/admin/list-parts";
+import { FailedMeta, ListHeader, ListPage, TAP } from "@/components/admin/list-parts";
 import { FailureList } from "@/components/admin/review-parts";
 import { Button, Card, T } from "@/components/admin/ui";
 import { clockLabel, dayLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
@@ -12,6 +12,7 @@ import {
   buildDashboard,
   deltaOf,
   momentMs,
+  nothingLoaded,
   refreshSummary,
 } from "@/lib/admin/dashboard-metrics";
 import type {
@@ -57,7 +58,9 @@ import { TrendChart, pointDay } from "./TrendChart";
  * every state renders with no login. A read that failed shows "Couldn't
  * load" on each tile it feeds, and one line at the top says why in plain
  * words (read-failure.ts), with the database's own text behind Details and
- * Retry beside it; no failed read is ever shown as 0.
+ * Retry beside it; no failed read is ever shown as 0. When no tile could be
+ * drawn, the header says "Couldn't load" too, where it would say "Updated
+ * 10:30" (the render review's second round).
  *
  * Refresh reads every number again. "Sync Whop and rebuild" (founders and
  * admins, as POST /api/admin/refresh-everything allows) syncs Whop, rebuilds
@@ -217,12 +220,14 @@ export function DashboardView({
     );
   }
 
-  const meta = [
-    `Updated ${clockLabel(model.generatedAt)}`,
-    refreshing ? "Syncing Whop and rebuilding, about 2 minutes" : reloading ? "Updating" : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const busyNote = refreshing ? "Syncing Whop and rebuilding, about 2 minutes" : reloading ? "Updating" : null;
+  // Every tile failed: nothing was read just now, so the header says so as every page's does (FailedMeta), never
+  // "Updated 10:30" (the render review's second round).
+  const meta = nothingLoaded(model) ? (
+    <FailedMeta text={busyNote ? `Couldn't load · ${busyNote}` : "Couldn't load"} />
+  ) : (
+    [`Updated ${clockLabel(model.generatedAt)}`, busyNote].filter(Boolean).join(" · ")
+  );
   const waiting = model.monthTwo.ok && model.monthTwo.value.kind === "waiting" ? model.monthTwo.value : null;
 
   return (

@@ -21,7 +21,9 @@ import type { Point } from "@/lib/admin/dashboard-metrics";
  *   screen reader      the readout is spoken, and a table holds every day
  *
  * A day with no reading is a gap in the line (and "No reading" in the
- * readout and the table), never a 0.
+ * readout and the table), never a 0. A run of readings too short to read as
+ * a line (SHORT_RUN) gets a dot on each reading, joined by its line, and a
+ * reading alone a dot.
  *
  * Insights draws its charts with this one too (admin rebuild 2, the review's
  * fix round), with labelled gridlines (`guides`, from axisTicks in
@@ -33,6 +35,20 @@ import type { Point } from "@/lib/admin/dashboard-metrics";
 const ACCENT = "var(--color-accent-dark)";
 /** Room kept free at both ends of the plot, so the end dots stay inside it. */
 const INSET = 6;
+/**
+ * The longest run of readings (days between gaps) drawn with a dot on each
+ * reading. Shorter than this, a line is a stroke a day or two long on the
+ * 14 days' axis, about 20px wide, which reads as a mark rather than as
+ * readings (the render review's second round: Avg progress the day after the
+ * switch, 2 readings at the end of an empty chart).
+ */
+const SHORT_RUN = 3;
+/**
+ * A reading of a short run: 6px with no ring, so the line meets it. On a
+ * phone the 14 days are about 10px apart: two 8px dots with their 2px rings
+ * would touch there and hide the line between them.
+ */
+const MARK = 6;
 
 /** "Tue 20 Oct" for a UTC date of the snapshots: noon UTC is that same date in Croatia. */
 export function pointDay(date: string): string {
@@ -71,6 +87,19 @@ const dotStyle = (left: string, top: number): React.CSSProperties => ({
   background: ACCENT,
   // The kit's 2px surface ring, so a dot reads where it sits on the line.
   boxShadow: "0 0 0 2px var(--color-bg-card)",
+  pointerEvents: "none",
+});
+
+const markStyle = (left: string, top: number): React.CSSProperties => ({
+  position: "absolute",
+  left,
+  top,
+  width: MARK,
+  height: MARK,
+  marginLeft: -MARK / 2,
+  marginTop: -MARK / 2,
+  borderRadius: 999,
+  background: ACCENT,
   pointerEvents: "none",
 });
 
@@ -166,8 +195,10 @@ export function TrendChart({
           )
           .join(" ")
       : "";
-  // A reading with no neighbour has no line to sit on: it gets its own dot.
-  const lone = segments.filter((s) => s.length === 1).map((s) => s[0]);
+  // A reading with no neighbour has no line to sit on: it gets its own dot. So does each reading of a run too short
+  // to read as a line, joined by that line (SHORT_RUN). The last reading's ring dot is not drawn over one of them.
+  const marked = segments.filter((s) => s.length <= SHORT_RUN).flat();
+  const lastMarked = marked.some((p) => p.i === lastRead);
 
   // The tallest bar carries its value (the latest, when several tie).
   let tallest = -1;
@@ -361,8 +392,8 @@ export function TrendChart({
           </div>
         )}
 
-        {kind === "line" && lone.map((p) => <div key={p.i} aria-hidden="true" style={dotStyle(left(p.i), y(p.v))} />)}
-        {kind === "line" && lastRead >= 0 && shown === null && (
+        {kind === "line" && marked.map((p) => <div key={p.i} aria-hidden="true" data-reading-dot="" style={markStyle(left(p.i), y(p.v))} />)}
+        {kind === "line" && lastRead >= 0 && shown === null && !lastMarked && (
           <div aria-hidden="true" style={dotStyle(left(lastRead), y(points[lastRead].value!))} />
         )}
 

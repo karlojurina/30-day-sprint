@@ -435,6 +435,16 @@ gen('../src/app/api/cron/refresh-membership-discounts/route.ts', './_gen/refresh
   ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
   ...toStub('next/server', '@/lib/supabase-server'),
 ])
+// "Check Whop again" on the 30% page (the render review's second round,
+// membership-discount.test.mjs): POST /api/admin/thirty/check-coupon, the
+// coupon rule's live read for one student (the copy above), over the REAL
+// team check (admin-auth.ts, copied above for the admin routes), so no token
+// answers 401 and a student's token 403, as on Vercel.
+gen('../src/app/api/admin/thirty/check-coupon/route.ts', './_gen/admin-check-coupon-route.ts', [
+  ['from "@/lib/admin-auth"', 'from "./admin-auth.ts"'],
+  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+  ...toStub('next/server'),
+])
 
 // ── Admin rebuild 2, lane WI-5 and WI-6 (Tasks, All students, the student page,
 // the journey), for admin-tasks.test.mjs and admin-people.test.mjs. The tasks

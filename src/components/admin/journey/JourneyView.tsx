@@ -5,8 +5,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, Pill, T } from "@/components/admin/ui";
 import { FailedMeta, ListHeader, ListPage, LoadError, SkeletonRows, TAP } from "@/components/admin/list-parts";
 import { ActivityPill, FactsLine, Meter, STATUS_WORDS } from "@/components/admin/people-parts";
-import { ProblemNotice, ReadFailure } from "@/components/admin/review-parts";
-import { Block, DiscountBlock, StatGrid, useStudent } from "@/components/admin/students/StudentDetailView";
+import { ProblemNotice } from "@/components/admin/review-parts";
+import { Block, DiscountBlock, SectionFailure, StatGrid, useStudent } from "@/components/admin/students/StudentDetailView";
 import { StudentName } from "@/components/admin/student-name";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
@@ -384,14 +384,14 @@ function JourneyDrawer({ studentId, transport, onClose }: { studentId: string; t
                 </Card>
               ) : (
                 <Card padding={14}>
-                  <ReadFailure lead="Couldn't load the lessons." raw={loaded.data.areas.error} />
+                  <SectionFailure lead="Couldn't load the lessons." raw={loaded.data.areas.error} />
                 </Card>
               )}
             </Block>
             <Block title="Action items">
               <Card padding={14}>
                 {!loaded.data.actionItems.ok ? (
-                  <ReadFailure lead="Couldn't load the action items." raw={loaded.data.actionItems.error} />
+                  <SectionFailure lead="Couldn't load the action items." raw={loaded.data.actionItems.error} />
                 ) : loaded.data.actionItems.data.length === 0 ? (
                   <p style={T.bodyDim}>This course has no action items.</p>
                 ) : (

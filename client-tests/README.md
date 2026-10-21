@@ -377,6 +377,33 @@ sentence's words, so only the label comparison puts the old one back) and
 `thirty-view` (98: the first rebuild's helpers went with their tests) changed
 with it.
 
+`admin-render-fixes.test.mjs` (admin rebuild 2, the render review's fix
+round, 2026-10-21; 76 checks) holds every rule that round added: a failed
+read said in the header too (`FailedMeta`, on the ten pages with a header);
+the journey's board in the page's column; the Dashboard's program row
+(Bounty left, Month 2 right, as tall as each other), its equal section gaps,
+its Today links and Month 2's bar with no knob; the 30% page's and Tasks'
+actions on the right (`RowSplit`) and the pill rows on one scrolling line on
+a phone (`PILL_ROW`); a student's numbers on one line, a failed read plainly
+not a value, the Whop sync in one line with the rest folded; one name part
+on every page (`student-name.tsx`, rendered); a marker on every "how it's
+counted" fold and `aria-expanded` on Show settings (`MessageSettings`
+rendered closed); the not-found page in the admin's frame; the course switch
+page in the dark look with every sentence of its `d0ebe76` self; the team's
+own ECOM30 code never warned about (`buildThirtyView` over decided rows,
+Whop now and stored, named and nameless); a coupon row's Reject alone with
+its reason filled in; the not-activated page byte for byte as at `d0ebe76`;
+`readAllDmToggles` gone; `system_contracts.md`'s tasks contract. It compiles
+the views it renders into `_gen/rf-*.mjs`. A control reads the files at
+`8d0f2ff` where a rule is about words in a file. With it changed: `dashboard`
+(Avg progress on the 14 days, its readings from the switch, "from" the
+switch's date), `membership-discount` (the cron's window on the suite's
+clock moved to 5 November: a shared window closed after 23 October and an
+own window closed after its 14 days are not read, a pending request is),
+`admin-review` (its 30% row, header, fold and removal checks follow the new
+rules), `thirty-view` (the coupon's id and `ours` on the row), `lesson-feedback`
+(the username its students read) and `streak` (the student page's number tile).
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

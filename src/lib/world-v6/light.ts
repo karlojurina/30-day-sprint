@@ -73,7 +73,9 @@ import { LAKE_PAD, lakeShoreR, terrainHeight } from "./terrain";
  * dawn is the night going off the morning). state.morning is the morning's
  * weight where the camera is: the lamps' halos go out by it, the lamp
  * materials turn to unlit glass (MORNING_LAMP_TINT), the grade's dew comes
- * in (MORNING_DEW), and the fog ramp lays the morning's mist (LookKey.mist).
+ * in (MORNING_DEW), and the fog ramp lays the morning's mist and air
+ * (LookKey.mist and LookKey.air: a bank of lit mist in the low ground and
+ * more of the ramp's haze there, the haze pass of 2026-10-21).
  * With the morning at 0 the day and the night are what they were, value for
  * value (client-tests/morning-clock.test.mjs).
  *
@@ -470,15 +472,35 @@ export interface LookKey {
    *  and take the ramp's hue (Firewatch's stylistic fog); the far end still
    *  meets the sky. Omitted = 0. */
   fogAdd?: number;
-  /** The morning's mist (MORNING_LOOK): a layer of `mistColor` lying from the
-   *  key's hazeBase up to mistDepth above it, coming in from mistNear to
-   *  mistFar away, at most `mist` of a pixel. Omitted = 0: no mist (every
-   *  authored key, every night key). */
+  /** The morning's mist (MORNING_LOOK): a bank of `mistColor` lying in the
+   *  low ground, its top mistDepth over the key's hazeBase, coming in from
+   *  mistNear to mistFar away, at most `mist` of a pixel. Omitted = 0: no
+   *  mist (every authored key, every night key). */
   mist?: number;
   mistDepth?: number;
   mistNear?: number;
   mistFar?: number;
   mistColor?: number;
+  /** The bank's shape (2026-10-21, the morning haze): its top edge fades over
+   *  mistSoft each way (world units), and rises and falls by up to mistWave
+   *  over the ground, so it lies in drifts with a soft top and the tree tops
+   *  and ridges stand out of it. Omitted: mistDepth / 2 and 0. */
+  mistSoft?: number;
+  mistWave?: number;
+  /** Lit mist: 0..1, how far its side turned from the sun cools toward the
+   *  haze (the side toward the sun keeps `mistColor`), and how much of the
+   *  sun's glow (sunGlow x sunLobe) the side toward the sun carries. Omitted:
+   *  0. */
+  mistCool?: number;
+  mistGlow?: number;
+  /** The morning air: more of the fog ramp's own haze on the low ground,
+   *  `air` times the ramp's alpha up to airLift over the key's hazeBase,
+   *  falling off over airFall above that, so the mountains' feet are lost in
+   *  the haze while their upper slopes and peaks keep the day's clearer air
+   *  and their light. Omitted: 0 (none), the key's hazeFall and 0. */
+  air?: number;
+  airFall?: number;
+  airLift?: number;
 }
 
 const DAY_HALO = { halo: null, haloAmt: 0.55, haloDeg: 1.6, haloHalf: 3.2 } as const;
@@ -913,8 +935,12 @@ export function nightLook(day: LookKey, row: NightRow): LookKey {
  *   - a clear sky: a cool blue top, a pale mid, a pink and peach band on the
  *     horizon, pale gold toward the sun; no stars, no moon, no aurora and no
  *     Milky Way;
- *   - a pale lilac haze, and a cool white mist lying low in the valleys
- *     (MORNING_LOOK's mist: from the key's hazeBase up, coming in with
+ *   - a pale blue lilac haze that lies thicker on the low ground (the air:
+ *     each ridge further back paler, the mountains' feet lost in it, the
+ *     peaks clear above), and a bank of lit mist lying in the low ground,
+ *     the tree tops and ridges standing out of its drifting top, warm toward
+ *     the sun and cool on the side turned from it (MORNING_LOOK's mist and
+ *     air, laid per row by the heights in each view, coming in with
  *     distance, so the foreground stays crisp);
  *   - the lamps out: lampGlow low, and the lamp materials turned toward unlit
  *     glass by state.morning (MORNING_LAMP_TINT); the halos off (dress-shore,
@@ -945,7 +971,9 @@ export const MORNING_BASE = {
   moonColor: 0xc8d4ff, moonIntensity: 0, moonVis: 0,
   rimColor: 0xffe8d8, rimIntensity: 0,
   skyTop: 0x5a94dc, skyMid: 0xc8cfee, skyHorizon: 0xf4cfc8, skyGlow: 0xffe0b8,
-  haze: 0xd6d0e6,
+  // The haze pass (2026-10-21): a bluer lilac (0xd6d0e6), so each ridge
+  // further back steps paler and cooler where the day's steps go gold.
+  haze: 0xd2d6ee,
   hemiSky: 0xb0c0e8, hemiGround: 0x4e5c48,
   ambient: 0xa2a8cc,
   stars: 0, aurora: 0, band: 0,
@@ -953,28 +981,61 @@ export const MORNING_BASE = {
   lampGlow: 0.12, magicGlow: 0.15,
 } satisfies Partial<LightKeyframe>;
 
-/** The morning's look: warm highlights over a cool, lifted shade (the day's saturation times MORNING_LIGHT.sat), a pink halo, the mist. The ramp's distances and the haze's shape stay the day's. */
+/**
+ * The morning's look: warm highlights over a cool, lifted shade (the day's
+ * saturation times MORNING_LIGHT.sat), a pink halo, the mist and the air. The
+ * ramp's distances and the haze's shape stay the day's.
+ *
+ * The haze pass (2026-10-21, the owner on the 07:30 sheet: "these don't really
+ * have any difference. Adding some haze would probably be more realistic of a
+ * morning"): the mist is a bank lying in the low ground with a soft, drifting
+ * top (mistDepth, mistSoft, mistWave), lit warm white toward the sun with the
+ * sun's glow in it and cooler on the side turned from it (mistColor,
+ * mistCool, mistGlow), and the air puts more of the ramp's own haze on the
+ * low ground (air, airLift, airFall), so the mountains' feet are lost in it
+ * and the peaks stand clear above. Each row lays its bank by the heights in
+ * its own view: mistDepth over the row's hazeBase, starting past what must
+ * stay crisp (mistNear).
+ */
 export const MORNING_LOOK = {
-  nearShade: 0x5a6088, sunLobe: 0.3,
+  // Haze pass: the lobe 0.3 -> 0.6, the haze and the mist warmer toward the sun.
+  nearShade: 0x5a6088, sunLobe: 0.6,
   lift: [0.02, 0.03, 0.07], gain: [1.02, 1.0, 0.98], gamma: 0.97,
   halo: 0xf8cfc4, haloAmt: 0.6, haloDeg: 1.2, haloHalf: 5, haloFog: 0,
-  mist: 0.4, mistDepth: 60, mistNear: 300, mistFar: 1200, mistColor: 0xe8e8f4,
+  mist: 0.5, mistDepth: 60, mistSoft: 25, mistWave: 18, mistNear: 400, mistFar: 1200, mistColor: 0xffe6cc,
+  mistCool: 0.6, mistGlow: 0.2, air: 0.6, airLift: 40, airFall: 300,
 } satisfies Partial<LookKey>;
 
 /** One row per light key the opening and the first six places use (the keys between them included), as NIGHT_ROWS. */
 export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
-  // The opening (tune pass): the base's mist lay on the tree band across the
-  // water (900 to 1100 units out) as a milky lilac veil, and the frame had no
-  // dark anchor. A thinner mist: the band 80 luma (it was 89, 67 by day). The
-  // near shade halfway back toward the day's dark one; on the 07:30 frame it
-  // measures as no change (the ramp starts at 800 units here).
-  "opening-gold": { dial: 1, look: { mist: 0.15, nearShade: 0x404a6c } },
-  // The Landing (tune pass): the mid forest went grey and the massif's lower
-  // slopes pale. A thinner mist, and less of the day's additive fog (0.3, set
-  // for a gold haze, it added pale lilac on the massif under the morning's):
-  // the massif's lower slopes 176 luma (186), the mid forest 145 (155).
-  "afternoon-gold": { dial: 1, look: { mist: 0.15, fogAdd: 0.2 } },
-  afternoon: { dial: 1 },
+  // The opening (tune pass): the near shade halfway back toward the day's
+  // dark one. Haze pass: the bank lies on the shore and in the forest band
+  // across the water (the ground there 0 to 60 over the sea), its top 72 up
+  // and drifting by 22, so the trees' feet are in it and their tops stand out.
+  // It comes in from 850 units out, just past the signpost (945 out, its arms
+  // 19 to 42 over its foot), which stands dark against it.
+  "opening-gold": {
+    dial: 1,
+    look: { nearShade: 0x404a6c, mist: 0.6, mistDepth: 72, mistSoft: 26, mistWave: 22, mistNear: 850, mistFar: 1500, air: 0.9, airLift: 60, airFall: 300 },
+  },
+  // The Landing (tune pass): less of the day's additive fog (0.3, set for a
+  // gold haze, it added pale lilac on the massif under the morning's). Haze
+  // pass: the bank in the meadow and the forest's feet (the ground 0 to 70
+  // here), from 300 units out; the signpost is 276 out.
+  "afternoon-gold": {
+    dial: 1,
+    look: { fogAdd: 0.2, mist: 0.6, mistDepth: 68, mistSoft: 28, mistWave: 22, mistNear: 300, mistFar: 850, air: 1.1, airLift: 80, airFall: 300 },
+  },
+  // Base Camp (haze pass): the camera stands on the crest (hazeBase 120); the
+  // ground behind it rises from 150 to 300 before the mountains' feet (500 and
+  // more). The bank fills that hollow, top 230 over the base and drifting by
+  // 45, from 240 units out (the cabin and the tower's foot nearer), and the
+  // air lies thick up to 380 over the base and twice the ramp's own there, so
+  // the mountains' feet are lost in it and their tops catch the light.
+  afternoon: {
+    dial: 1,
+    look: { mist: 0.6, mistDepth: 230, mistSoft: 55, mistWave: 45, mistNear: 240, mistFar: 600, air: 2.0, airLift: 380, airFall: 300 },
+  },
   // The Falls (tune pass): the cliff in shade right of the falls read as a
   // moonlit navy (the base's mossy bounce is half the fill on a vertical face,
   // then the blue lift). A warm bounce as by day (the meadows face up and keep
@@ -982,7 +1043,17 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // gain, and half the day's additive fog, which veiled the lit cliff in mauve.
   // The shade's core now a dark violet (hue 268, sat 0.30, luma 38; it was
   // 238 / 0.39 / 43); a lift of 0.045 blue left it indigo (258 / 0.34).
-  "late-afternoon": { dial: 1, light: { hemiGround: 0x5c4c40 }, look: { lift: [0.025, 0.02, 0.035], gain: [1.04, 1.0, 0.95], fogAdd: 0.2 } },
+  // Haze pass: the bank on the pool and along the river's valley (the ground
+  // there 41 to 61, the base 60), top 60 over it, from 160 units out, so the
+  // falls' foot and the valley's trees stand in it to half their height.
+  "late-afternoon": {
+    dial: 1,
+    light: { hemiGround: 0x5c4c40 },
+    look: {
+      lift: [0.025, 0.02, 0.035], gain: [1.04, 1.0, 0.95], fogAdd: 0.2,
+      mist: 0.6, mistDepth: 60, mistSoft: 25, mistWave: 16, mistNear: 160, mistFar: 650, air: 0.8, airLift: 40, airFall: 200,
+    },
+  },
   // The gorge: a warmer sun and a pink haze, so the far range keeps the
   // morning's first light (with the base's lilac haze it went grey).
   // Tune pass: the far range was still a grey-white sheet (170 luma, sat
@@ -990,7 +1061,14 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // of it, a haze a step darker in the same rose, and the warm bounce, so the
   // right wall's shade turns mauve brown: the range 143 luma. The blue sky and
   // white clouds stay: they are what make this view a morning.
-  "gorge-sunset": { dial: 1, light: { sunColor: 0xffcf96, skyHorizon: 0xf6cac4, haze: 0xd6b8c2, hemiGround: 0x5c4c40 }, look: { fogAdd: 0.25 } },
+  // Haze pass: the bank in the gorge, on the pool (61) and up the walls to 110
+  // over the base, from 600 units out (the bench and the hut are nearer); the
+  // air thick up to 200 over it, so the range's feet behind the rim are lost.
+  "gorge-sunset": {
+    dial: 1,
+    light: { sunColor: 0xffcf96, skyHorizon: 0xf6cac4, haze: 0xd6b8c2, hemiGround: 0x5c4c40 },
+    look: { fogAdd: 0.25, mist: 0.6, mistDepth: 110, mistSoft: 40, mistWave: 20, mistNear: 600, mistFar: 1000, air: 0.9, airLift: 200, airFall: 250 },
+  },
   "sunset-cliff": { dial: 1 },
   // The lake: its low sun kept, cooler; a pink horizon over the water; the
   // mist a thin pink white layer on the water (the day's additive haze, 0.55,
@@ -1003,10 +1081,16 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // between hue 320 and 340: toward coral it is the day's sunset again). The
   // lake 135 luma with the forest and the hill clear in it, the far shore's
   // band 140 (164).
+  // Haze pass: the same thin band on the water (from the lake up 10, as it was:
+  // depth 5, soft 5), a little brighter and lit, and a light air on the far
+  // slopes; the mirror nearer stays clear.
   sunset: {
     dial: 1,
     light: { skyMid: 0xd0c8ec, skyHorizon: 0xf6c8c0, skyGlow: 0xffd8b0, haze: 0xd6bccb, water: 0x4c6684 },
-    look: { fogAdd: 0.15, mist: 0.16, mistDepth: 10, mistNear: 400, mistFar: 1100, mistColor: 0xf2e4ea },
+    look: {
+      fogAdd: 0.15, sunLobe: 0.3, mist: 0.18, mistDepth: 5, mistSoft: 5, mistWave: 3, mistNear: 450, mistFar: 1100, mistColor: 0xf2e4ea,
+      mistCool: 0.2, mistGlow: 0.6, air: 0.45, airLift: 40, airFall: 220,
+    },
   },
   // The forest: its dusk keeps the sun under the horizon and the floor dark
   // (FOREST_DIM), so its morning is the dawn's pink and blue over the trees,
@@ -1015,7 +1099,12 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   dusk: {
     dial: 1,
     light: { magicGlow: 0.55, skyTop: 0x7a92d6, skyMid: 0xc8c2ea, skyHorizon: 0xf6c6c4, skyGlow: 0xffd2b4, haze: 0xcec4de },
-    look: { mist: 0.45, mistNear: 600, mistFar: 2000 },
+    // Haze pass: the same mist on the floor past the clearing, in drifts, and
+    // a little air between the far trunks.
+    look: {
+      mist: 0.5, mistDepth: 40, mistSoft: 30, mistWave: 25, mistNear: 600, mistFar: 2000, mistColor: 0xf6f0f2,
+      mistCool: 0.4, mistGlow: 0.6, air: 0.6, airLift: 80, airFall: 250,
+    },
   },
 };
 
@@ -1275,6 +1364,14 @@ export interface LightState {
   mistNear: number;
   mistFar: number;
   mistColor: THREE.Color;
+  /** The mist bank's shape and light, and the morning air (LookKey.mistSoft..airFall). 0 or harmless by day and at night. */
+  mistSoft: number;
+  mistWave: number;
+  mistCool: number;
+  mistGlow: number;
+  air: number;
+  airFall: number;
+  airLift: number;
   /** The moon disc's radius here, degrees (LightKeyframe.moonRadius). */
   moonRadius: number;
   /** Counts every time the module applies a new light (a scroll or a night change), for modules that cache what they read from it. */
@@ -1386,6 +1483,7 @@ const LOOK_NUMBERS = [
   "fogNear", "fogFar", "hazeBase", "hazeFall", "hazeOn", "sunLobe", "fogCap",
   "liftR", "liftG", "liftB", "gainR", "gainG", "gainB", "gamma", "sat", "haloAmt", "haloDeg", "haloHalf", "haloFog", "fogAdd",
   "mist", "mistDepth", "mistNear", "mistFar",
+  "mistSoft", "mistWave", "mistCool", "mistGlow", "air", "airFall", "airLift",
 ] as const;
 export interface LinearLook {
   colors: Record<(typeof LOOK_COLORS)[number], THREE.Color>;
@@ -1406,6 +1504,9 @@ function linearLook(k: LookKey, skyHorizon: number | null): LinearLook {
       gainR: k.gain[0], gainG: k.gain[1], gainB: k.gain[2], gamma: k.gamma, sat: k.sat,
       haloAmt: k.haloAmt, haloDeg: k.haloDeg, haloHalf: k.haloHalf, haloFog: k.haloFog ?? 0, fogAdd: k.fogAdd ?? 0,
       mist: k.mist ?? 0, mistDepth: k.mistDepth ?? 1, mistNear: k.mistNear ?? 0, mistFar: k.mistFar ?? 1,
+      // The bank's shape and light, and the air (none on a key without a morning).
+      mistSoft: k.mistSoft ?? (k.mistDepth ?? 1) / 2, mistWave: k.mistWave ?? 0, mistCool: k.mistCool ?? 0, mistGlow: k.mistGlow ?? 0,
+      air: k.air ?? 0, airFall: k.airFall ?? k.hazeFall, airLift: k.airLift ?? 0,
     },
   };
 }
@@ -1481,6 +1582,7 @@ function newState(): LightState {
     ambient: c(), ambientIntensity: 0, exposure: 1, stars: 0, cloudTop: c(), cloudBase: c(), water: c(),
     lampGlow: 1, magicGlow: 1, aurora: 0, band: 0, night: 0, moonRadius: MOON_RADIUS_DEG, rev: 0, under: 0,
     morning: 0, mist: 0, mistDepth: 1, mistNear: 0, mistFar: 1, mistColor: new THREE.Color(1, 1, 1),
+    mistSoft: 0.5, mistWave: 0, mistCool: 0, mistGlow: 0, air: 0, airFall: 1, airLift: 0,
     nearShade: c(), halo: c(), hazeBase: 0, hazeFall: 1, hazeOn: 0, sunLobe: 0, fogCap: 0.92,
     liftR: 0, liftG: 0, liftB: 0, gainR: 1, gainG: 1, gainB: 1, gamma: 1, sat: 1, haloAmt: 0, haloDeg: 0, haloHalf: 1, haloFog: 0, fogAdd: 0,
   };
@@ -1961,9 +2063,15 @@ export interface FwUniforms {
   fwAdd: { value: number };
   /** The night layer's pale rule (NIGHT_PALE x state.night): how much a pale albedo comes down, how much any albedo greys. Read only by the materials nightPale() hooks. */
   fwPale: { value: THREE.Vector2 };
-  /** The morning's mist: its linear colour and strength (0 but in the morning), and its shape: depth over the haze base, near, far. */
+  /** The morning's mist: its colour toward the sun (display, not linear) and strength (0 but in the morning), and its shape: depth over the haze base, near, 1 / (far - near), 1 / (2 x the top edge's softness). */
   fwMist: { value: THREE.Vector4 };
-  fwMistShape: { value: THREE.Vector3 };
+  fwMistShape: { value: THREE.Vector4 };
+  /** The mist's side turned from the sun (display, not linear), and how far its top rises and falls over the ground (world units). */
+  fwMistShade: { value: THREE.Vector4 };
+  /** The morning air: x more of the ramp's haze on the low ground, y -log2(e) / its fall over height, z the height it is full up to. */
+  fwAir: { value: THREE.Vector3 };
+  /** The mist's drift: a small tiling noise (MIST_NOISE_N square, MIST_NOISE_TILE world units across), read once a pixel in the morning only. */
+  fwMistNoise: { value: THREE.DataTexture };
   /** The morning's dew (MORNING_DEW x state.morning): how much fresher the greens come out of the grade. */
   fwDew: { value: number };
 }
@@ -2008,6 +2116,16 @@ export function nightPale(mat: THREE.Material): void {
   mat.customProgramCacheKey = () => "v6-night-pale";
 }
 
+/**
+ * The morning mist's drift (the haze pass): a tiling value noise, two
+ * octaves (4 and 8 cells across), MIST_NOISE_N texels square and
+ * MIST_NOISE_TILE world units across, so the bank's top rises and falls in
+ * drifts of about 140 to 280 units. One texture read a pixel, in the morning
+ * only, in place of the two sines the first build of the bank used.
+ */
+const MIST_NOISE_N = 64;
+const MIST_NOISE_TILE = 1100;
+
 const FW_FOG_PARS_VERTEX = /* glsl */ `
 #ifdef USE_FOG
 	varying float vFogDepth;
@@ -2041,7 +2159,10 @@ const FW_FOG_PARS_FRAGMENT = /* glsl */ `
 	uniform vec3 fwLobe;
 	uniform float fwAdd;
 	uniform vec4 fwMist;
-	uniform vec3 fwMistShape;
+	uniform vec4 fwMistShape;
+	uniform vec4 fwMistShade;
+	uniform vec3 fwAir;
+	uniform sampler2D fwMistNoise;
 #endif
 `;
 const FW_FOG_FRAGMENT = /* glsl */ `
@@ -2068,15 +2189,36 @@ const FW_FOG_FRAGMENT = /* glsl */ `
 			// v6 additive term: mid distance layers lighten toward the ramp's hue;
 			// a * (1 - a) keeps the far end (a -> cap) meeting the sky.
 			gl_FragColor.rgb = min( gl_FragColor.rgb + fwOut * ( fwAdd * 2.0 * fwF.a * ( 1.0 - fwF.a ) ), vec3( 1.0 ) );
-			// The morning's mist (light.ts MORNING_LOOK; fwMist.a is 0 but in the
-			// morning, and then this is skipped): a cool layer lying from the
-			// haze base up to fwMistShape.x over it, coming in with distance
-			// (fwMistShape.y to .z), so the valley floors and the water read
-			// misty and the foreground stays crisp.
+			// The morning (light.ts MORNING_LOOK; fwMist.a is 0 but in the
+			// morning, and then all of this is skipped). One test on a uniform
+			// and nothing that tests the pixel inside it: a test on the pixel
+			// (an early way out under the mist, nested or joined to this one)
+			// changed how the lines above compile and moved the day's picture
+			// by a level on a few pixels.
 			if ( fwMist.a > 0.0 ) {
 				float fwMy = cameraPosition.y + vFwOff.y - fwHaze.x;
-				float fwMk = ( 1.0 - smoothstep( 0.0, fwMistShape.x, fwMy ) ) * smoothstep( fwMistShape.y, fwMistShape.z, fwD ) * fwMist.a;
-				gl_FragColor.rgb = mix( gl_FragColor.rgb, linearToOutputTexel( vec4( fwMist.rgb, 1.0 ) ).rgb, fwMk );
+				// The air: more of the ramp's own haze on the low ground
+				// (fwAir.x of its alpha up to fwAir.z over the haze base, falling
+				// off above that, fwAir.y = -log2(e) / the fall), so the
+				// mountains' feet are lost in it and each ridge further back is
+				// paler, the peaks above in the day's air.
+				gl_FragColor.rgb = mix( gl_FragColor.rgb, fwOut, min( fwF.a * fwAir.x * exp2( max( fwMy - fwAir.z, 0.0 ) * fwAir.y ), fwRamp.z ) );
+				// The mist: a bank lying in the low ground, its top fwMistShape.x
+				// over the haze base, rising and falling by up to fwMistShade.a
+				// over the ground (a tiling noise on the world's x and z,
+				// MIST_NOISE_TILE across) and soft over its edge, so the tree
+				// tops and the ridges stand out of it; coming in with distance
+				// (from fwMistShape.y), so the foreground stays crisp. Lit: the
+				// side toward the sun in fwMist.rgb (the sun's glow already in
+				// it), the side turned from it in fwMistShade.rgb, both display
+				// colours, so nothing is converted here.
+				float fwTop = fwMistShape.x + fwMistShade.a * ( texture2D( fwMistNoise, ( cameraPosition.xz + vFwOff.xz ) * ${(1 / MIST_NOISE_TILE).toFixed(8)} ).r * 2.0 - 1.0 );
+				// The top edge's smoothstep written out and the distance a straight
+				// fade, their divisions done once on the CPU (fwMistShape.w =
+				// 1 / (2 x soft), .z = 1 / (far - near)).
+				float fwMt = clamp( ( fwTop - fwMy ) * fwMistShape.w + 0.5, 0.0, 1.0 );
+				float fwMk = fwMt * fwMt * ( 3.0 - 2.0 * fwMt ) * clamp( ( fwD - fwMistShape.y ) * fwMistShape.z, 0.0, 1.0 ) * fwMist.a;
+				gl_FragColor.rgb = mix( gl_FragColor.rgb, mix( fwMistShade.rgb, fwMist.rgb, fwT ), fwMk );
 			}
 		} else {
 			float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
@@ -2122,6 +2264,44 @@ export const FW_FOG_GLSL = {
 /** The live shared ramp and grade uniforms of the scene's light module (null before it installs). */
 export function rampFogUniforms(scene: THREE.Scene): FwUniforms | null {
   return (scene.userData.fwUniforms as FwUniforms | undefined) ?? null;
+}
+
+function buildMistNoise(): THREE.DataTexture {
+  const N = MIST_NOISE_N;
+  const data = new Uint8Array(N * N);
+  const fade = (t: number) => t * t * (3 - 2 * t);
+  // Value noise on a lattice of `cells` that wraps at the tile's edge, so the texture tiles.
+  const octave = (u: number, v: number, cells: number, seed: number) => {
+    const x = u * cells;
+    const y = v * cells;
+    const i = Math.floor(x);
+    const j = Math.floor(y);
+    const fx = fade(x - i);
+    const fy = fade(y - j);
+    const at = (a: number, b: number) => hash1(((a % cells) + cells) % cells + (((b % cells) + cells) % cells) * cells, seed);
+    const top = at(i, j) + (at(i + 1, j) - at(i, j)) * fx;
+    const bot = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * fx;
+    return top + (bot - top) * fy;
+  };
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const u = x / N;
+      const v = y / N;
+      const n = octave(u, v, 4, 31) * 0.68 + octave(u, v, 8, 37) * 0.32;
+      // Stretched toward the ends, so the drifts rise and fall the full amount.
+      const c = Math.min(1, Math.max(0, (n - 0.5) * 1.6 + 0.5));
+      data[y * N + x] = Math.round(c * 255);
+    }
+  }
+  const tex = new THREE.DataTexture(data, N, N, THREE.RedFormat, THREE.UnsignedByteType);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.needsUpdate = true;
+  return tex;
 }
 
 const RAMP_W = 256;
@@ -2183,6 +2363,8 @@ function hermite(xs: readonly number[], ys: readonly number[], ms: readonly numb
 
 const _rc = new THREE.Color();
 const _ra = new THREE.Color();
+const _mistShade = new THREE.Color();
+const _mistLit = new THREE.Color();
 const _stopR: number[] = [];
 const _stopG: number[] = [];
 const _stopB: number[] = [];
@@ -2320,6 +2502,7 @@ export function install(ctx: LightCtx): LightModule {
   // ── Fog ramp and grade (see "The fog ramp and the grade") ──
   const rampSun = newRampTexture();
   const rampAway = newRampTexture();
+  const mistNoise = buildMistNoise();
   const fw: FwUniforms = {
     fwOn: { value: 1 },
     fwRampSun: { value: rampSun },
@@ -2334,7 +2517,10 @@ export function install(ctx: LightCtx): LightModule {
     fwAdd: { value: 0 },
     fwPale: { value: new THREE.Vector2(0, 0) },
     fwMist: { value: new THREE.Vector4(1, 1, 1, 0) },
-    fwMistShape: { value: new THREE.Vector3(1, 0, 1) },
+    fwMistShape: { value: new THREE.Vector4(1, 0, 1, 1) },
+    fwMistShade: { value: new THREE.Vector4(1, 1, 1, 0) },
+    fwAir: { value: new THREE.Vector3(0, -Math.LOG2E, 0) },
+    fwMistNoise: { value: mistNoise },
     fwDew: { value: 0 },
   };
   scene.userData.fwUniforms = fw;
@@ -2975,6 +3161,7 @@ export function install(ctx: LightCtx): LightModule {
       if (gradeOk && renderer.toneMapping === THREE.CustomToneMapping) renderer.toneMapping = toneMappingWas;
       rampSun.dispose();
       rampAway.dispose();
+      mistNoise.dispose();
       if (scene.userData.fwUniforms === fw) delete scene.userData.fwUniforms;
       if (scene.userData.light === handle) delete scene.userData.light;
     },
@@ -3233,9 +3420,16 @@ export function install(ctx: LightCtx): LightModule {
     fw.fwGS.value.set(s.gamma - 1, s.sat - 1);
     fw.fwAdd.value = s.fogAdd;
     fw.fwPale.value.set(NIGHT_PALE.pull * s.night, NIGHT_PALE.grey * s.night);
-    // The morning's mist (0 but in the morning: the fog's mist branch is skipped).
-    fw.fwMist.value.set(s.mistColor.r, s.mistColor.g, s.mistColor.b, s.mist);
-    fw.fwMistShape.value.set(Math.max(1, s.mistDepth), s.mistNear, Math.max(s.mistNear + 1, s.mistFar));
+    // The morning's mist and air (0 but in the morning: the fog's morning branches are skipped).
+    // The mist's two colours go up as display colours (the fog mixes in display space, and this saves the shader a conversion a pixel);
+    // the side toward the sun carries the sun's glow (sunGlow, the ramp's lobe strength, times mistGlow), so the shader adds none.
+    _mistLit.copy(s.sunGlow).multiplyScalar(s.sunLobe * s.mistGlow * smoothstep(-6, 1, s.sunEl)).add(s.mistColor).convertLinearToSRGB();
+    fw.fwMist.value.set(Math.min(1, _mistLit.r), Math.min(1, _mistLit.g), Math.min(1, _mistLit.b), s.mist);
+    // The shape's two ranges as reciprocals (the shader's smoothsteps are written out).
+    fw.fwMistShape.value.set(Math.max(1, s.mistDepth), s.mistNear, 1 / Math.max(1, s.mistFar - s.mistNear), 1 / (2 * Math.max(1, s.mistSoft)));
+    _mistShade.copy(s.mistColor).lerp(s.haze, s.mistCool).convertLinearToSRGB();
+    fw.fwMistShade.value.set(_mistShade.r, _mistShade.g, _mistShade.b, Math.max(0, s.mistWave));
+    fw.fwAir.value.set(Math.max(0, s.air), -Math.LOG2E / Math.max(1, s.airFall), s.airLift);
     fw.fwDew.value = MORNING_DEW.k * s.morning;
     lakeMat.uniforms.uDeep.value.copy(s.water);
     // The lake's colour when it is too far to reflect: the sky a little above the horizon.

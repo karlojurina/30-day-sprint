@@ -8,7 +8,9 @@
  * Whop since it was read, the team asks Whop again for that one student here.
  * The read is the one the request routes and the approve route make
  * (checkMembershipDiscount in src/lib/membership-discount.ts: Whop now, no
- * request started after 6 s and none waited on past 8 s), and Whop's answer
+ * request started after 6 s and none waited on past 8 s; since T-122 the
+ * membership on file, else the course membership found through the
+ * student's Whop user, else the latest real payment), and Whop's answer
  * is written to student_membership_discounts, so the list read after it
  * shows the row as Whop has it now: with the coupon gone, the 30% rule
  * decides the row again and Approve is back. No Whop code is made and the
@@ -22,11 +24,14 @@
  *   400   no requestId
  *   404   no such request
  *   409   the request is no longer pending (the page reads its list again)
- *   422   Whop can't be asked about this membership (none on file, or not a
- *         membership's id), or Whop doesn't know it: nothing changed
- *   500   the request or the student could not be read, no Whop key on this
- *         deployment, or Whop answered and its answer could not be stored
+ *   422   the student has no Whop user on file, so Whop can't be asked (the
+ *         column is NOT NULL, so this should never be seen): nothing changed
+ *   500   the request or the student could not be read, no Whop key or no
+ *         course product (WHOP_PRODUCT_ID) on this deployment, or Whop
+ *         answered and its answer could not be stored
  *   502   Whop gave no answer in time: nothing changed
+ * Until T-122 a Whop id on file that was missing, a payment's, or one Whop
+ * did not know was a 422: Whop is now asked through the student's Whop user.
  *
  * Every error is a sentence the page shows as it is. No answer names a Whop
  * id or Whop's own words.
@@ -74,13 +79,12 @@ export async function POST(request: NextRequest) {
 
   // Whop gave no answer now: the stored row stays as it was. checkMembershipDiscount has logged a failed Whop read.
   switch (coupon.liveFail) {
-    case "no_membership":
-    case "not_a_membership":
-      return fail("The student's Whop membership is not on file, so Whop can't be asked. Check the coupon in Whop.", 422);
-    case "not_found":
-      return fail("Whop doesn't know the membership on file, so nothing changed. Check the student in Whop.", 422);
+    case "no_whop_user":
+      return fail("The student's Whop account is not on file, so Whop can't be asked. Check the coupon in Whop.", 422);
     case "no_api_key":
       return fail("This deployment has no Whop key, so Whop can't be asked.", 500);
+    case "no_course_product":
+      return fail("This deployment doesn't name the course's Whop product, so Whop can't be asked.", 500);
     case "student_unread":
       return fail("Couldn't read the student's Whop membership, so Whop was not asked. Try again.", 500);
     default:

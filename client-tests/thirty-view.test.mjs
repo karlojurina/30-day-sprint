@@ -764,8 +764,9 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
      'C5: approved before the rule, evolve10 on the membership: the coupon on the row for the page to warn about')
   ok(request(C.view, 'r-c6').verdict.text === couponApprovalRefusal('promo_devYear10') && request(C.view, 'r-c6').verdict.text.endsWith('(promo_devYear10).'),
      'C6: no name from Whop: the verdict names the code\'s id')
-  ok(couponOf(undefined, { whop_membership_id: 'mem_x' }) === null && couponOf(stored('s'), { whop_membership_id: null }) === null,
-     'couponOf: no row, or a student with no membership on file: no coupon')
+  ok(couponOf(undefined, { whop_membership_id: 'mem_x' }) === null && couponOf(stored('s'), { whop_membership_id: 'mem_devOther' }) === null
+       && couponOf(stored('s'), { whop_membership_id: null })?.discounted === true && couponOf(stored('s'), { whop_membership_id: 'pay_devX' })?.code === 'evolve10',
+     'couponOf: no row, or a row from another membership: no coupon; with no membership id on file (none, or a payment\'s), the student\'s row counts (T-122: the cron wrote it through the Whop user or a payment)')
 }
 
 // ── Words ──────────────────────────────────────────────────────────────────

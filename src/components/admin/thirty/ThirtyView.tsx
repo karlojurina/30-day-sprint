@@ -859,15 +859,6 @@ function PendingRow({
                 <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>Coupon not checked yet. Approve asks Whop first.</span>
               </p>
             )}
-            {row.couponCheck === "no-membership" && (
-              <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="no-membership">
-                <Dot color="var(--color-warning)" />
-                <span style={{ ...T.body, lineHeight: 1.5 }}>
-                  Coupon not checked: the student&apos;s Whop membership is not on file, so Approve can&apos;t ask Whop. Check
-                  Whop before you approve.
-                </span>
-              </p>
-            )}
             {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
           </>
         }

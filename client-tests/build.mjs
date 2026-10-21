@@ -318,6 +318,8 @@ gen('../src/app/api/student/submit-quiz/route.ts', './_gen/submit-quiz-route.ts'
 gen('../src/app/api/student/data/route.ts', './_gen/student-data-route.ts', [
   GATE,
   ['from "@/lib/streak"', 'from "./streak.ts"'],
+  // Whether the stored coupon counts for the student (T-122): the coupon rule's copy below.
+  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
   ...toStub('next/server', '@supabase/supabase-js', '@/lib/catalog-tables'),
 ])
 gen('../src/lib/pkce.ts', './_gen/pkce.ts')
@@ -428,6 +430,9 @@ gen('../src/lib/membership-discount.ts', './_gen/membership-discount.ts', [
   ['from "@/lib/world/discount"', 'from "./discount.ts"'],
   ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
   ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+  // T-122: the order's status reading and the course's products, for the membership found through the Whop user.
+  ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+  ['from "@/lib/whop-products"', 'from "./whop-products.ts"'],
 ])
 gen('../src/lib/cron-auth.ts', './_gen/cron-auth.stub-server.ts', [
   ['from "@/lib/supabase-server"', 'from "./stub-server.ts"'],

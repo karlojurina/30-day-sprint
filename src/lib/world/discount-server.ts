@@ -342,11 +342,14 @@ export const MEMBERSHIP_UNCHECKED = "We couldn't check your membership just now.
  * granted: the coupon check could not run (the owner's review, 2026-10-21:
  * applying fails closed, so a student whose membership may hold a code never
  * gets a request in). Whop gave no answer and nothing is stored for the membership the
- * student has now (checkMembershipDiscount's source "none": Whop down, no
- * key, no Whop membership on file or a payment's id in its place, the
+ * student has now (checkMembershipDiscount's source "none": Whop down or
+ * refusing the key, no key or no course product on the deployment, the
  * student's row unreadable), so nothing is written and the student is asked
  * to try again. It used to let the request through and leave the coupon to
- * the approve route.
+ * the approve route. Since T-122 a Whop id on file that is missing, a
+ * payment's, or one Whop does not know is no reason any more: the check
+ * finds the membership through the student's Whop user, or judges the
+ * latest real payment.
  */
 export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: false }> {
   return { grant: false, status: 503, state: "read-failed", error: MEMBERSHIP_UNCHECKED };

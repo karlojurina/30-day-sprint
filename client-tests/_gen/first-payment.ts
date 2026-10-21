@@ -48,9 +48,12 @@
  *   walkFirstPayments: every paid payment of the account once, grouped by user
  *     (POST /api/admin/first-paid-repair), in one lane, or in 4 lanes that
  *     split the account's history by created_at and read side by side.
+ *   fetchLatestRealPayment: one user's newest real payment for the course,
+ *     for the coupon check when no renewal price can be read
+ *     (membership-discount.ts, T-122), on that check's key, pace and limits.
  *
- * Neither writes anything. A failure comes back as a kind, never as Whop's
- * message, so no caller can pass a Whop id on by accident.
+ * None of them writes anything. A failure comes back as a kind, never as
+ * Whop's message, so no caller can pass a Whop id on by accident.
  */
 
 import { toIso } from "./whop-members.ts";
@@ -101,6 +104,18 @@ export interface WhopPayment {
   total?: WhopMoney;
   refunded_amount?: WhopMoney;
   user?: { id?: string | null } | null;
+  /**
+   * What the payment was for, read by fetchLatestRealPayment alone: an id in
+   * the pinned shape (`product_id`), an object in the older one (`product:
+   * { id }`); the promo code's name only in the older one (`promo_code:
+   * { id, code }`).
+   */
+  product_id?: string | null;
+  product?: { id?: string | null } | string | null;
+  membership_id?: string | null;
+  membership?: { id?: string | null } | string | null;
+  promo_code_id?: string | null;
+  promo_code?: { id?: string | null; code?: string | null } | string | null;
 }
 
 /** Why a payment read does not count. */
@@ -235,8 +250,8 @@ async function fetchBefore(url: string, init: RequestInit, answerBy: number): Pr
   }
 }
 
-/** The requests one read has made, and when the next may start. A walk's lanes share one. */
-interface Pace {
+/** The requests one read has made, and when the next may start. A walk's lanes share one, and so does a run of coupon checks. */
+export interface Pace {
   nextAt: number;
   requests: number;
   retried429: number;
@@ -358,6 +373,80 @@ export async function fetchFirstPaymentForUser(
     after = got.next;
   }
   return failed("too_many_pages");
+}
+
+/** An id in either shape a payment carries one: "prod_..." or { id: "prod_..." }. */
+function refId(value: unknown): string | null {
+  const id = value !== null && typeof value === "object" ? (value as { id?: unknown }).id : value;
+  return typeof id === "string" && id.trim() !== "" ? id : null;
+}
+
+/** One user's newest real payment, as the coupon check reads it (fetchLatestRealPayment). */
+export interface LatestRealPayment {
+  paidAt: string;
+  /** What the payment charged: `total` under THE RULE, above 0. */
+  total: number;
+  productId: string | null;
+  membershipId: string | null;
+  promoCodeId: string | null;
+  /** The code's name when the payment carries it (the older shape); null otherwise. */
+  promoCode: string | null;
+}
+
+export type LatestRealPaymentRead =
+  | { ok: true; latest: LatestRealPayment | null; seen: number; kept: number }
+  | { ok: false; fail: PaymentReadFail };
+
+/**
+ * One user's newest real payment (THE RULE above), newest by paid_at, among
+ * the payments for `productIds`: a payment naming another product is left
+ * out, one naming none is kept. `latest` is null when there is none. The
+ * coupon check's fallback when no renewal price can be read
+ * (membership-discount.ts, T-122). The same pinned read as
+ * fetchFirstPaymentForUser, GET /api/v1/payments?user_id=<id>&status=paid
+ * &first=100, every page, every row's user checked; on the caller's key, its
+ * pace (shared with its other Whop reads) and its limits: no request starts
+ * after `startBy` and no answer is waited on past `answerBy`.
+ */
+export async function fetchLatestRealPayment(
+  whopUserId: string,
+  opts: { apiKey: string; pace: Pace; startBy: number | null; answerBy: number | null; productIds: ReadonlySet<string> },
+): Promise<LatestRealPaymentRead> {
+  if (!opts.apiKey) return { ok: false, fail: "no_api_key" };
+  let latest: LatestRealPayment | null = null;
+  let seen = 0;
+  let kept = 0;
+  let after: string | null = null;
+  for (let page = 0; page < USER_MAX_PAGES; page++) {
+    const params = new URLSearchParams({ user_id: whopUserId, status: "paid", first: String(PAGE_SIZE) });
+    if (after) params.set("after", after);
+    const got = await readPage(`${WHOP_PAYMENTS_URL}?${params}`, opts.apiKey, opts.pace, opts.startBy, opts.answerBy);
+    if (!got.ok) return { ok: false, fail: got.fail };
+    if (hasOtherUser(got.rows, whopUserId)) return { ok: false, fail: "filter_ignored" };
+    for (const p of got.rows) {
+      seen += 1;
+      // A row naming no buyer is nobody's, as in addFirstPayments.
+      if (!p.user?.id) continue;
+      const judged = judgePayment(p);
+      if (!judged.keep) continue;
+      const productId = refId(p.product_id) ?? refId(p.product);
+      if (productId !== null && !opts.productIds.has(productId)) continue;
+      kept += 1;
+      if (latest && Date.parse(judged.paidAt) <= Date.parse(latest.paidAt)) continue;
+      const code = p.promo_code !== null && typeof p.promo_code === "object" ? p.promo_code.code : null;
+      latest = {
+        paidAt: judged.paidAt,
+        total: moneyAmount(p.total),
+        productId,
+        membershipId: refId(p.membership_id) ?? refId(p.membership),
+        promoCodeId: refId(p.promo_code_id) ?? refId(p.promo_code),
+        promoCode: typeof code === "string" && code.trim() !== "" ? code.trim() : null,
+      };
+    }
+    if (!got.next) return { ok: true, latest, seen, kept };
+    after = got.next;
+  }
+  return { ok: false, fail: "too_many_pages" };
 }
 
 /** The created_after and created_before a lane of a walk sends; null sends none. */

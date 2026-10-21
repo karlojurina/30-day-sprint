@@ -24,12 +24,15 @@ import {
  * until then; never for an earlier one). It grants only on `ready` and fails
  * closed on any read error.
  * Then the coupon (admin rebuild 2, D5): a Whop membership that already has a
- * discount on its next renewal gets no 30%. Whop is asked now; when it does
- * not answer, the stored row decides (checkMembershipDiscount). With neither,
- * since the owner's review (2026-10-21) nothing is written and the student
- * reads "We couldn't check your membership just now. Try again in a minute."
- * (membershipUncheckedRefusal, a 503); the request used to go through and
- * leave the coupon to the approve route.
+ * discount on its next renewal gets no 30%. Whop is asked now (since T-122:
+ * the membership on file, else the course membership found through the
+ * student's Whop user, else the latest real payment, under 97.00 being a
+ * discount); when it does not answer, the stored row decides
+ * (checkMembershipDiscount). With neither, since the owner's review
+ * (2026-10-21) nothing is written and the student reads "We couldn't check
+ * your membership just now. Try again in a minute." (membershipUncheckedRefusal,
+ * a 503); the request used to go through and leave the coupon to the approve
+ * route.
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */

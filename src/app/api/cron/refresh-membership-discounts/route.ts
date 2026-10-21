@@ -18,10 +18,20 @@
  * themselves and fall back to the stored row, and the 30% page's "Check Whop
  * again" asks for one student (POST /api/admin/thirty/check-coupon).
  *
+ * Since T-122 every student ends in a yes or a no unless Whop does not
+ * answer: the membership on file, else the course membership found through
+ * the student's Whop user, else the latest real payment (under 97.00 is a
+ * discount). `by_source` counts the answers by that step, and `failed` holds
+ * only the students Whop gave no answer for (no connection, a 5xx, a 429
+ * after its retries, no answer in time, a refused key, payments it could not
+ * judge, or a deployment that cannot ask). The first dry run on production
+ * (2026-10-21, before T-122) could not read 46 of 290: 22 payment ids where
+ * the membership's belongs, 24 memberships with no plan or no renewal price.
+ *
  * ?mode=dry reads Whop and writes nothing, for the first look after a deploy:
- * it passes when `checked` is above 0 and `failed` is about empty (Whop
- * answered in the shape this code reads), and `discounted` is about the
- * number of students in the window on a code like evolve10.
+ * it passes when `checked` is above 0 and `failed` is empty, and
+ * `discounted` is about the number of students in the window on a code like
+ * evolve10.
  *
  * Auth: CRON_SECRET as a bearer, like every cron (src/lib/cron-auth.ts), with
  * a cron_runs row. Answers 500, ok: false, when who is in the window or who

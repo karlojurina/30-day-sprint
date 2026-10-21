@@ -1,5 +1,6 @@
 /**
- * A discount already on a student's next Whop renewal (admin rebuild 2, D5).
+ * A discount already on a student's next Whop renewal (admin rebuild 2, D5;
+ * every student answered since T-122, 2026-10-21).
  *
  * THE RULE. A student whose current Whop membership has a promo code that
  * still applies to the next renewal cannot get the 30%. Whop says so on the
@@ -16,15 +17,61 @@
  * price went up has no code on the membership, and is not "a discount
  * applied to your account". Prices are compared in cents.
  *
- * THE READS, all pinned, paced at 4 requests a second start to start, a 429
- * waited out (Whop's "Try again in N seconds", or 15 s, at most 30) and
- * retried twice, as first-payment.ts reads payments:
+ * WHICH MEMBERSHIP, AND WHEN NONE CAN BE READ (T-122, 2026-10-21). The first
+ * live dry run of the cron (production, 2026-10-21, read only) could not read
+ * 46 of 290 students: 22 hold a payment's id (pay_...) where the membership's
+ * belongs, written by the webhook before login-1 fixed it, and 24 memberships
+ * came back with no plan or no renewal price. Since the owner's review the
+ * request routes refuse every application whose check gives no answer, so
+ * those students could never have applied. The owner's rule (2026-10-21):
+ * "they should not be able to apply for the code if they have a coupon
+ * already ... If they paid less than 97, most likely they have a coupon."
+ * Now every student ends in a yes or a no (judgeStudentDiscount), in steps:
+ *   1. The membership on file (`students.whop_membership_id`), by THE RULE:
+ *      source "membership".
+ *   2. When the id on file is not a membership's (a payment's, or none) or
+ *      Whop does not know it (a 404, or another 4xx for that one id): the
+ *      student's course membership, found through their Whop user
+ *      (findCourseMembership), by THE RULE: source "user". The one the order
+ *      puts first among the user's course memberships that grant access:
+ *      active before past_due, then the newest. The course is the products
+ *      WHOP_PRODUCT_ID names, less ETfB and Apex (courseProductIds); the
+ *      setting names the course alone since 2026-10-20. The list is v2's, by
+ *      user_id, the read the login's self-heal and the webhook make
+ *      (fetchActiveMembershipForUser in whop-members.ts), with every row's
+ *      user checked; v1's plural user_ids and product_ids filters have never
+ *      been tried here.
+ *   3. When the membership read gives no plan or no renewal price, or no
+ *      course membership is found (none grants access, or the list cannot be
+ *      used: another user's row, another shape, a 404): the student's newest
+ *      real course payment (fetchLatestRealPayment in first-payment.ts: paid,
+ *      above 0, not refunded or lost in a dispute, newest by paid_at), the
+ *      owner's rule of thumb: a total under 97.00 is a discount, 97.00 or
+ *      more is none, and no real course payment at all is none: source
+ *      "payment".
+ *
+ * NO ANSWER. A check gives no yes or no only when Whop does not answer: no
+ * connection, a 5xx, a 429 after its two retries, nothing within the time
+ * limits; or refuses the key (401, 403); or answers the payments in a way
+ * this code cannot judge (another shape, every page of the account, more
+ * pages than one user has). Or when the deployment cannot ask: no key, no
+ * course product in WHOP_PRODUCT_ID, a student with no Whop user (the column
+ * is NOT NULL). Then the caller writes nothing for that student, and the
+ * request routes refuse with "We couldn't check your membership just now.
+ * Try again in a minute." unless a stored row answers.
+ *
+ * THE READS, all paced at 4 requests a second start to start, a 429 waited
+ * out (Whop's "Try again in N seconds", or 15 s, at most 30) and retried
+ * twice, as first-payment.ts reads payments; the v1 reads pinned to
+ * 2026-10-15-1:
  *   GET /api/v1/memberships/{id}   promo_code_id, renewal_price, plan_id
  *   GET /api/v1/plans/{id}         the plan's renewal_price, once per plan
  *                                  per run (the cache)
  *   GET /api/v1/promo_codes/{id}   the code's name (`code`), once per code
  *                                  per run; a failed name read leaves the
  *                                  name out and nothing else
+ *   GET /api/v2/memberships?user_id=&per=50&page=   step 2, at most 4 pages
+ *   GET /api/v1/payments?user_id=&status=paid&first=100   step 3
  * Every field is read in either shape Whop has used: a price as "87.30", a
  * number or { amount }, an id as a string or { id }.
  *
@@ -47,8 +94,18 @@
  *   - "Check Whop again" on the 30% page (POST
  *     /api/admin/thirty/check-coupon), the same live read for one student
  *     whose pending request the stored row refuses.
- * A stored row counts only for the membership it was read from: a student
- * who moved to another membership since has no stored answer.
+ * `whop_membership_id` is the membership judged: the one on file, the one
+ * found through the user, or for a payment the membership whose read gave no
+ * price, else the payment's own (null when it names none). `source` (v113)
+ * is the step that answered; a database without v113 refuses a row that
+ * carries it, so the row is written again without it. On a "payment" row
+ * `renewal_price` is the payment's total and `plan_renewal_price` the 97.00
+ * it was held against (both empty with no real payment), and the code is the
+ * payment's, when it names one.
+ * A stored row counts only for the membership it was read from
+ * (storedRowApplies): a student who moved to another membership since has no
+ * stored answer. When the id on file is not a membership's, there is nothing
+ * on file to compare, and the student's row counts.
  *
  * WHO READS IT. The request routes and the approve route check live, then
  * fall back to the stored row (checkMembershipDiscount). With neither, the
@@ -65,14 +122,21 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { discountWindowOpen, earliestOpenFirstPayment } from "@/lib/world/discount";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
-import { waitAfter429Ms } from "@/lib/first-payment";
+import { fetchLatestRealPayment, waitAfter429Ms } from "@/lib/first-payment";
+import { mapStatus, toIso } from "@/lib/whop-members";
+import { ETFB_PRODUCT_ID, TEAM_SEAT_PRODUCT_ID } from "@/lib/whop-products";
 
 export const WHOP_API_V1 = "https://api.whop.com/api/v1";
+/** v2's membership list, which takes user_id: the login's self-heal reads a user's memberships there (whop-members.ts). */
+export const WHOP_API_V2 = "https://api.whop.com/api/v2";
 /** The membership shape with promo_code_id and renewal_price. Plans and promo codes are read with the same pin. */
 export const WHOP_DISCOUNT_VERSION = "2026-10-15-1";
 export const MEMBERSHIP_DISCOUNTS_TABLE = "student_membership_discounts";
+/** v111's columns. v113's `source` is written, never read, so a database without v113 still answers every read. */
 export const MEMBERSHIP_DISCOUNT_COLUMNS =
   "student_id, whop_membership_id, promo_code_id, promo_code, renewal_price, plan_renewal_price, discounted, checked_at";
+/** The course's monthly price: a real payment under it is most likely on a coupon (the owner's rule of thumb, step 3). */
+export const FULL_PRICE = 97;
 
 /** 4 Whop requests a second, start to start, as the payment reads: the logins share the key. */
 const WHOP_GAP_MS = 250;
@@ -86,6 +150,12 @@ export const REFRESH_ANSWER_BUDGET_MS = 285_000;
 /** The cron writes its rows this many at a time, so a run that stops early keeps what it read. */
 const WRITE_CHUNK = 25;
 const BATCH = 100;
+/** Step 2 reads at most this many pages of one user's memberships (50 a page): more is not one user's list. */
+const USER_PAGES_MAX = 4;
+
+/** The step that answered (WHICH MEMBERSHIP, above): the membership on file, the course membership found through the Whop user, the latest real payment. */
+export type DiscountSource = "membership" | "user" | "payment";
+export const DISCOUNT_SOURCES: readonly DiscountSource[] = ["membership", "user", "payment"];
 
 /** One row of student_membership_discounts. Prices in dollars, as Whop gives them. */
 export interface MembershipDiscountRow {
@@ -98,9 +168,11 @@ export interface MembershipDiscountRow {
   plan_renewal_price: number | null;
   discounted: boolean;
   checked_at: string;
+  /** v113: the step that answered. Left out of a write to a database without v113. */
+  source?: DiscountSource;
 }
 
-/** Why a membership read gave no answer. The caller writes nothing for that student then. */
+/** Why a membership read gave no answer. */
 export type MembershipReadFail =
   | "no_api_key"
   | "not_a_membership"
@@ -108,10 +180,39 @@ export type MembershipReadFail =
   | "rate_limited"
   | "time_budget"
   | "http_401_403"
+  /** Another 4xx for this one id (400, 422, ...): Whop does not take it. */
+  | "http_4xx"
+  /** A 5xx, or any other answer that is not OK. */
   | "http_other"
   | "network"
   | "bad_shape"
   | "no_plan_price";
+
+/**
+ * Why one student's check ended with no yes or no (NO ANSWER, above). The
+ * caller writes nothing for that student then. The payment read's own kinds:
+ * filter_ignored (a payment of another user), bad_page (a page in another
+ * shape), too_many_pages (more than one user has).
+ */
+export type NoAnswer =
+  | "no_api_key"
+  | "no_course_product"
+  | "no_whop_user"
+  | "network"
+  | "http_other"
+  | "rate_limited"
+  | "time_budget"
+  | "http_401_403"
+  | "filter_ignored"
+  | "bad_page"
+  | "too_many_pages";
+
+const READ_NO_ANSWER: ReadonlySet<string> = new Set(["no_api_key", "network", "http_other", "rate_limited", "time_budget", "http_401_403"]);
+
+/** Whether a membership read's failure is Whop not answering (NO ANSWER), where the check stops; any other moves to the next step. */
+export function isNoAnswer(fail: MembershipReadFail): fail is MembershipReadFail & NoAnswer {
+  return READ_NO_ANSWER.has(fail);
+}
 
 export interface MembershipDiscount {
   whopMembershipId: string;
@@ -187,17 +288,41 @@ export function isDiscounted(promoCodeId: string | null, renewalPrice: number, p
   return promoCodeId !== null && cents(renewalPrice) < cents(planRenewalPrice);
 }
 
-/** A stored row counts only for the membership it was read from (the header). */
-export function storedRowApplies(
-  row: Pick<MembershipDiscountRow, "whop_membership_id"> | null | undefined,
-  currentMembershipId: string | null | undefined,
-): boolean {
-  return !!row && !!row.whop_membership_id && row.whop_membership_id === currentMembershipId;
+/** Step 3's rule of thumb (the owner, 2026-10-21): a real payment under the course's 97.00 was most likely on a coupon. */
+export function paidUnderFullPrice(total: number): boolean {
+  return cents(total) < cents(FULL_PRICE);
 }
 
 /** A Whop membership id the v1 read takes. The webhook has been seen to store a payment's id here. */
 export function isMembershipId(id: string | null | undefined): id is string {
   return typeof id === "string" && /^mem_\w+$/.test(id);
+}
+
+/**
+ * A stored row counts only for the membership it was read from (the header):
+ * a student who moved to another membership since has no stored answer. When
+ * the Whop id on file is not a membership's (a payment's id the old webhook
+ * wrote, or none), there is no membership on file to compare: the row was
+ * written for this student through their Whop user or from their payments
+ * (T-122), and it counts.
+ */
+export function storedRowApplies(
+  row: Pick<MembershipDiscountRow, "whop_membership_id"> | null | undefined,
+  currentMembershipId: string | null | undefined,
+): boolean {
+  if (!row) return false;
+  if (!isMembershipId(currentMembershipId)) return true;
+  return row.whop_membership_id === currentMembershipId;
+}
+
+/** The course's Whop products: those WHOP_PRODUCT_ID names, less ETfB and Apex (whop-products.ts). Empty when it names none. */
+export function courseProductIds(setting: string | undefined = process.env.WHOP_PRODUCT_ID): Set<string> {
+  return new Set(
+    (setting ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((id) => id !== "" && id !== ETFB_PRODUCT_ID && id !== TEAM_SEAT_PRODUCT_ID),
+  );
 }
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -218,16 +343,15 @@ async function fetchBefore(url: string, init: RequestInit, answerBy: number): Pr
 
 type GetAnswer = { ok: true; body: Record<string, unknown> } | { ok: false; fail: MembershipReadFail };
 
-/** One pinned GET of one object: paced, a 429 waited out and retried twice, inside the context's limits. */
-async function whopGet(path: string, ctx: WhopReadContext): Promise<GetAnswer> {
-  const url = `${WHOP_API_V1}${path}`;
-  const init: RequestInit = {
-    headers: {
-      Authorization: `Bearer ${ctx.apiKey}`,
-      "Api-Version-Date": WHOP_DISCOUNT_VERSION,
-      Accept: "application/json",
-    },
-  };
+/**
+ * One GET of one Whop answer: paced, a 429 waited out and retried twice,
+ * inside the context's limits. `pinned` sends Api-Version-Date (the v1
+ * reads); v2 takes none.
+ */
+async function whopGetUrl(url: string, ctx: WhopReadContext, pinned: boolean): Promise<GetAnswer> {
+  const headers: Record<string, string> = { Authorization: `Bearer ${ctx.apiKey}`, Accept: "application/json" };
+  if (pinned) headers["Api-Version-Date"] = WHOP_DISCOUNT_VERSION;
+  const init: RequestInit = { headers };
   for (let attempt = 0; ; attempt++) {
     const at = Math.max(Date.now(), ctx.pace.nextAt);
     if (ctx.startBy !== null && at > ctx.startBy) return { ok: false, fail: "time_budget" };
@@ -253,6 +377,7 @@ async function whopGet(path: string, ctx: WhopReadContext): Promise<GetAnswer> {
     }
     if (res.status === 404) return { ok: false, fail: "not_found" };
     if (res.status === 401 || res.status === 403) return { ok: false, fail: "http_401_403" };
+    if (res.status >= 400 && res.status < 500) return { ok: false, fail: "http_4xx" };
     if (!res.ok) return { ok: false, fail: "http_other" };
     let body: unknown;
     try {
@@ -265,6 +390,11 @@ async function whopGet(path: string, ctx: WhopReadContext): Promise<GetAnswer> {
   }
 }
 
+/** One pinned GET of one v1 object. */
+function whopGet(path: string, ctx: WhopReadContext): Promise<GetAnswer> {
+  return whopGetUrl(`${WHOP_API_V1}${path}`, ctx, true);
+}
+
 /** The plan's renewal price, read once per plan per run. Only an answer is kept: a failed read is tried again for the next member. */
 async function planRenewalPrice(planId: string, ctx: WhopReadContext): Promise<PlanAnswer> {
   const had = ctx.plans.get(planId);
@@ -275,7 +405,8 @@ async function planRenewalPrice(planId: string, ctx: WhopReadContext): Promise<P
     const price = priceOf(r.body.renewal_price);
     answer = price === null ? { ok: false, fail: "no_plan_price" } : { ok: true, price };
   } else {
-    answer = { ok: false, fail: r.fail === "not_found" ? "no_plan_price" : r.fail };
+    // Whop does not know the plan, or does not take its id: no price to read.
+    answer = { ok: false, fail: r.fail === "not_found" || r.fail === "http_4xx" ? "no_plan_price" : r.fail };
   }
   if (answer.ok || answer.fail === "no_plan_price") ctx.plans.set(planId, answer);
   return answer;
@@ -321,8 +452,81 @@ export async function readMembershipDiscount(membershipId: string, ctx: WhopRead
   };
 }
 
+export type CourseMembershipFind = { ok: true; membershipId: string | null } | { ok: false; fail: NoAnswer };
+
+/**
+ * Step 2 (the header): the user's course membership the order puts first
+ * among those that grant access: active before past_due (mapStatus, as the
+ * sync and the login read Whop's status), then the newest created_at; a tie,
+ * or a date missing, keeps the one listed first. A row naming no product
+ * counts, as in the login's lookup. `membershipId` is null when none grants
+ * access, or when the list cannot be used (a 404 or another 4xx, an answer in
+ * another shape, a row for another user, which means Whop ignored the user
+ * filter, or more pages than USER_PAGES_MAX); step 3 then judges. A read Whop
+ * does not answer is NO ANSWER.
+ */
+export async function findCourseMembership(
+  whopUserId: string,
+  course: ReadonlySet<string>,
+  ctx: WhopReadContext,
+): Promise<CourseMembershipFind> {
+  let best: { id: string; access: number; created: string | null } | null = null;
+  for (let page = 1; page <= USER_PAGES_MAX; page++) {
+    const r = await whopGetUrl(
+      `${WHOP_API_V2}/memberships?user_id=${encodeURIComponent(whopUserId)}&per=50&page=${page}`,
+      ctx,
+      false,
+    );
+    if (!r.ok) return isNoAnswer(r.fail) ? { ok: false, fail: r.fail } : { ok: true, membershipId: null };
+    const rows = r.body.data;
+    if (!Array.isArray(rows) || !rows.every((m) => m !== null && typeof m === "object" && !Array.isArray(m))) {
+      return { ok: true, membershipId: null };
+    }
+    const list = rows as Record<string, unknown>[];
+    if (list.some((m) => idOf(m.user) !== null && idOf(m.user) !== whopUserId)) return { ok: true, membershipId: null };
+    for (const m of list) {
+      const id = typeof m.id === "string" ? m.id : null;
+      if (!isMembershipId(id)) continue;
+      const product = idOf(m.product);
+      if (product !== null && !course.has(product)) continue;
+      const status = mapStatus({
+        status: typeof m.status === "string" ? m.status : null,
+        valid: typeof m.valid === "boolean" ? m.valid : null,
+      });
+      const access = status === "active" ? 2 : status === "past_due" ? 1 : 0;
+      if (access === 0) continue;
+      const created = typeof m.created_at === "string" || typeof m.created_at === "number" ? toIso(m.created_at) : null;
+      const newer = created !== null && best?.created != null && created > best.created;
+      if (!best || access > best.access || (access === best.access && newer)) best = { id, access, created };
+    }
+    const pagination = (r.body.pagination ?? null) as { current_page?: unknown; total_page?: unknown } | null;
+    const current = typeof pagination?.current_page === "number" ? pagination.current_page : page;
+    const total = typeof pagination?.total_page === "number" ? pagination.total_page : current;
+    if (current >= total) return { ok: true, membershipId: best?.id ?? null };
+  }
+  return { ok: true, membershipId: null };
+}
+
+/** A student as the check reads them: the Whop membership id on file and the Whop user. */
+export interface StudentForCheck {
+  id: string;
+  whop_membership_id: string | null;
+  whop_user_id: string | null;
+}
+
+export type StudentDiscountRead =
+  | {
+      ok: true;
+      source: DiscountSource;
+      /** The row to store, `source` and `checked_at` set. */
+      row: MembershipDiscountRow;
+      /** Step 3 found no real course payment, so no discount. */
+      noRealPayment: boolean;
+    }
+  | { ok: false; fail: NoAnswer };
+
 /** The stored row for a student's membership as read now. */
-export function rowOf(studentId: string, m: MembershipDiscount, checkedAt: string): MembershipDiscountRow {
+export function rowOf(studentId: string, m: MembershipDiscount, checkedAt: string, source: DiscountSource = "membership"): MembershipDiscountRow {
   return {
     student_id: studentId,
     whop_membership_id: m.whopMembershipId,
@@ -332,7 +536,107 @@ export function rowOf(studentId: string, m: MembershipDiscount, checkedAt: strin
     plan_renewal_price: m.planRenewalPrice,
     discounted: m.discounted,
     checked_at: checkedAt,
+    source,
   };
+}
+
+/**
+ * One student, yes or no, in the header's steps (WHICH MEMBERSHIP), or the
+ * kind of NO ANSWER. Writes nothing.
+ */
+export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopReadContext): Promise<StudentDiscountRead> {
+  if (!ctx.apiKey) return { ok: false, fail: "no_api_key" };
+  const now = () => new Date().toISOString();
+  // A membership the check settled on whose read gave no plan or no renewal price: step 3 judges the student.
+  let unpriced: string | null = null;
+
+  // 1. The membership on file.
+  const onFile = student.whop_membership_id;
+  if (isMembershipId(onFile)) {
+    const r = await readMembershipDiscount(onFile, ctx);
+    if (r.ok) return { ok: true, source: "membership", row: rowOf(student.id, r.membership, now(), "membership"), noRealPayment: false };
+    if (isNoAnswer(r.fail)) return { ok: false, fail: r.fail };
+    if (r.fail === "bad_shape" || r.fail === "no_plan_price") unpriced = onFile;
+    // not_found or http_4xx: Whop does not know this id, so step 2.
+  }
+
+  const course = courseProductIds();
+  if (course.size === 0) return { ok: false, fail: "no_course_product" };
+  if (!student.whop_user_id) return { ok: false, fail: "no_whop_user" };
+
+  // 2. Through the Whop user: no membership id on file, a payment's, or one Whop does not know.
+  if (unpriced === null) {
+    const found = await findCourseMembership(student.whop_user_id, course, ctx);
+    if (!found.ok) return found;
+    if (found.membershipId) {
+      const r = await readMembershipDiscount(found.membershipId, ctx);
+      if (r.ok) return { ok: true, source: "user", row: rowOf(student.id, r.membership, now(), "user"), noRealPayment: false };
+      if (isNoAnswer(r.fail)) return { ok: false, fail: r.fail };
+      unpriced = found.membershipId;
+    }
+  }
+
+  // 3. The latest real course payment: under 97.00 is a discount.
+  const paid = await fetchLatestRealPayment(student.whop_user_id, {
+    apiKey: ctx.apiKey,
+    pace: ctx.pace,
+    startBy: ctx.startBy,
+    answerBy: ctx.answerBy,
+    productIds: course,
+  });
+  if (!paid.ok) return { ok: false, fail: paid.fail };
+  const latest = paid.latest;
+  const promoCodeId = latest?.promoCodeId ?? null;
+  const promoCode = latest?.promoCode ?? (promoCodeId ? await promoCodeName(promoCodeId, ctx) : null);
+  return {
+    ok: true,
+    source: "payment",
+    noRealPayment: latest === null,
+    row: {
+      student_id: student.id,
+      whop_membership_id: unpriced ?? latest?.membershipId ?? null,
+      promo_code_id: promoCodeId,
+      promo_code: promoCode,
+      renewal_price: latest ? latest.total : null,
+      plan_renewal_price: latest ? FULL_PRICE : null,
+      discounted: latest !== null && paidUnderFullPrice(latest.total),
+      checked_at: now(),
+      source: "payment",
+    },
+  };
+}
+
+/** A row as a database without v113 takes it: everything but `source`. */
+function withoutSource(row: MembershipDiscountRow): MembershipDiscountRow {
+  const copy = { ...row };
+  delete copy.source;
+  return copy;
+}
+
+/** PostgREST's "Could not find the 'source' column" (PGRST204), or Postgres's undefined column (42703), naming `source`: a database without v113. */
+export function lacksSourceColumn(error: { code?: string | null; message?: string | null } | null | undefined): boolean {
+  return !!error && (error.code === "PGRST204" || error.code === "42703") && /\bsource\b/.test(error.message ?? "");
+}
+
+/**
+ * Writes rows to student_membership_discounts, one per student. A database
+ * without v113 refuses a row that carries `source`: the rows go again
+ * without it, and `run.withoutSource` remembers, so a run asks once. The
+ * error's message, or null.
+ */
+async function upsertDiscountRows(
+  db: SupabaseClient,
+  rows: MembershipDiscountRow[],
+  run: { withoutSource: boolean },
+): Promise<string | null> {
+  if (!run.withoutSource) {
+    const { error } = await db.from(MEMBERSHIP_DISCOUNTS_TABLE).upsert(rows, { onConflict: "student_id" });
+    if (!error) return null;
+    if (!lacksSourceColumn(error)) return error.message;
+    run.withoutSource = true;
+  }
+  const { error } = await db.from(MEMBERSHIP_DISCOUNTS_TABLE).upsert(rows.map(withoutSource), { onConflict: "student_id" });
+  return error ? error.message : null;
 }
 
 /** The code as a sentence names it: its name, or its Whop promo id when the name could not be read. */
@@ -351,8 +655,10 @@ export interface CouponCheck {
    * refuse (the owner's review, 2026-10-21) and the approve route goes on.
    */
   source: "live" | "stored" | "none";
-  /** Why Whop gave no answer now, for the route's log line; null when it did. */
-  liveFail: MembershipReadFail | "no_membership" | "student_unread" | null;
+  /** The step that answered a live check (DiscountSource); null when `source` is not live. */
+  via: DiscountSource | null;
+  /** Why Whop gave no answer now (NO ANSWER), or the student's row could not be read; null when Whop answered. */
+  liveFail: NoAnswer | "student_unread" | null;
   /**
    * Whop's answer now was written to student_membership_discounts. False
    * whenever `source` is not live, and for a live answer whose write failed
@@ -364,11 +670,12 @@ export interface CouponCheck {
 
 /**
  * The request routes, the approve route (D5) and "Check Whop again": Whop
- * now, then the stored row for this membership, then nothing (source "none":
- * the request routes refuse on it, the approve route goes on). A live answer
- * is stored, best effort, so the map and the admin page catch up. Never
- * throws. `apiKey` defaults to WHOP_API_KEY; without one there is no live
- * read.
+ * now, in the header's steps (judgeStudentDiscount), then the stored row for
+ * this membership (storedRowApplies), then nothing (source "none": Whop gave
+ * no answer and nothing is stored; the request routes refuse on it, the
+ * approve route goes on). A live answer is stored, best effort, so the map
+ * and the admin page catch up. Never throws. `apiKey` defaults to
+ * WHOP_API_KEY; without one there is no live read.
  */
 export async function checkMembershipDiscount(
   db: SupabaseClient,
@@ -376,46 +683,40 @@ export async function checkMembershipDiscount(
   opts: { apiKey?: string | null } = {},
 ): Promise<CouponCheck> {
   const apiKey = opts.apiKey === undefined ? (process.env.WHOP_API_KEY ?? null) : opts.apiKey;
-  let membershipId: string | null | undefined;
+  let student: StudentForCheck | undefined;
   try {
-    const { data, error } = await db.from("students").select("whop_membership_id").eq("id", studentId).maybeSingle();
-    membershipId = error ? undefined : ((data as { whop_membership_id?: string | null } | null)?.whop_membership_id ?? null);
+    const { data, error } = await db.from("students").select("whop_membership_id, whop_user_id").eq("id", studentId).maybeSingle();
+    const row = data as { whop_membership_id?: string | null; whop_user_id?: string | null } | null;
+    student = error
+      ? undefined
+      : { id: studentId, whop_membership_id: row?.whop_membership_id ?? null, whop_user_id: row?.whop_user_id ?? null };
   } catch {
-    membershipId = undefined;
+    student = undefined;
   }
 
   let liveFail: CouponCheck["liveFail"] = null;
-  if (membershipId === undefined) liveFail = "student_unread";
-  else if (!membershipId) liveFail = "no_membership";
+  if (student === undefined) liveFail = "student_unread";
   else if (!apiKey) liveFail = "no_api_key";
   else {
     const started = Date.now();
     const ctx = newReadContext(apiKey, started + ROUTE_START_BUDGET_MS, started + ROUTE_ANSWER_BUDGET_MS);
-    const live = await readMembershipDiscount(membershipId, ctx);
+    const live = await judgeStudentDiscount(student, ctx);
     if (live.ok) {
       let saved = false;
       try {
-        const { error } = await db
-          .from(MEMBERSHIP_DISCOUNTS_TABLE)
-          .upsert(rowOf(studentId, live.membership, new Date().toISOString()), { onConflict: "student_id" });
-        if (error) console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${error.message}`);
+        const error = await upsertDiscountRows(db, [live.row], { withoutSource: false });
+        if (error) console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${error}`);
         else saved = true;
       } catch (e) {
         console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${e instanceof Error ? e.message : String(e)}`);
       }
-      return {
-        discounted: live.membership.discounted,
-        code: live.membership.promoCode ?? live.membership.promoCodeId,
-        source: "live",
-        liveFail: null,
-        saved,
-      };
+      return { discounted: live.row.discounted, code: codeOf(live.row), source: "live", via: live.source, liveFail: null, saved };
     }
     liveFail = live.fail;
   }
 
   // The stored row, when it was read from the membership the student has now (or when that could not be read).
-  let answer: CouponCheck = { discounted: false, code: null, source: "none", liveFail, saved: false };
+  let answer: CouponCheck = { discounted: false, code: null, source: "none", via: null, liveFail, saved: false };
   try {
     const { data, error } = await db
       .from(MEMBERSHIP_DISCOUNTS_TABLE)
@@ -423,25 +724,22 @@ export async function checkMembershipDiscount(
       .eq("student_id", studentId)
       .maybeSingle();
     const row = error ? null : (data as Pick<MembershipDiscountRow, "whop_membership_id" | "promo_code_id" | "promo_code" | "discounted"> | null);
-    if (row && (membershipId === undefined || storedRowApplies(row, membershipId))) {
-      answer = { discounted: row.discounted === true, code: codeOf(row), source: "stored", liveFail, saved: false };
+    if (row && storedRowApplies(row, student?.whop_membership_id)) {
+      answer = { discounted: row.discounted === true, code: codeOf(row), source: "stored", via: null, liveFail, saved: false };
     }
   } catch {
     // No stored answer: source "none", and the caller decides (the request
     // routes refuse since the owner's review of 2026-10-21; the approve route
     // goes on, as the PRD's fallback had it).
   }
-  // A Whop read that was tried and gave no answer is worth a line, and so is a
-  // stored Whop id that is not a membership's (the webhook has stored a
-  // payment's id there): Whop is never asked then and nothing is stored for
-  // it, so without this line an approval that went on, or an application
-  // refused, would be unexplained. With no key or no membership there was
-  // nothing to try.
-  if (liveFail === "not_a_membership") {
+  // A check that was tried and gave no answer is worth a line: without it an
+  // approval that went on, or an application refused, would be unexplained.
+  // With no key or no student row there was nothing to try.
+  if (liveFail === "no_course_product" || liveFail === "no_whop_user") {
     console.warn(
-      `[membership discount] student ${studentId}: the stored Whop id is not a membership id, so Whop was not asked and ${answer.source === "stored" ? "the stored row decides" : "no answer is on file"}`,
+      `[membership discount] student ${studentId}: Whop could not be asked (${liveFail}), so ${answer.source === "stored" ? "the stored row decides" : "no answer is on file"}`,
     );
-  } else if (liveFail !== null && liveFail !== "no_membership" && liveFail !== "no_api_key" && liveFail !== "student_unread") {
+  } else if (liveFail !== null && liveFail !== "no_api_key" && liveFail !== "student_unread") {
     console.warn(
       `[membership discount] student ${studentId}: Whop gave no answer (${liveFail}), so ${answer.source === "stored" ? "the stored row decides" : "no answer is on file"}`,
     );
@@ -467,15 +765,21 @@ export interface RefreshAnswer {
   have_the_30: number;
   /** The students this run had to check. */
   candidates: number;
-  /** Read from Whop this run. */
+  /** Answered this run, yes or no. */
   checked: number;
+  /**
+   * Of `checked`, by the step that answered (the header's WHICH MEMBERSHIP):
+   * the membership on file, the course membership found through the Whop
+   * user, the latest real payment.
+   */
+  by_source: Record<DiscountSource, number>;
+  /** Of by_source.payment: no real course payment at all, so no discount. */
+  no_real_payment: number;
   discounted: number;
   /** Rows written (0 on a dry run). */
   written: number;
-  /** No membership id, or one that is not a membership's. */
-  skipped: { no_membership: number; not_a_membership: number };
-  /** Reads that gave no answer, by kind. The stored row stays as it was. */
-  failed: Partial<Record<MembershipReadFail, number>>;
+  /** Students Whop gave no answer for (NO ANSWER), by kind. Their stored row stays as it was. */
+  failed: Partial<Record<NoAnswer, number>>;
   /** Not reached before the time ran out: the next run starts with them. */
   left: number;
   whop_requests: number;
@@ -490,15 +794,15 @@ export interface RefreshAnswer {
  * whose 30% window is still open at the run's start (discountWindowOpen),
  * active or past_due, and every student holding a pending request, whatever
  * their window or membership; of those, the ones with no approved or applied
- * request; those never checked first, then the longest unchecked; each read
- * live and stored, 25 rows at a time. A student whose window has closed can
- * make no request, so is read again only while a request of theirs waits:
- * the 30% page judges that row by the stored answer, and a row whose answer
- * says a discount is on the renewal offers only Reject, so the approve
- * route's own live read never runs for it (the render review's second
- * round). "dry" reads and writes nothing. A run that cannot read who is in
- * the window or who holds a pending request, or whose every read failed,
- * answers ok: false.
+ * request; those never checked first, then the longest unchecked; each
+ * judged live (judgeStudentDiscount) and stored, 25 rows at a time. A student
+ * whose window has closed can make no request, so is read again only while a
+ * request of theirs waits: the 30% page judges that row by the stored answer,
+ * and a row whose answer says a discount is on the renewal offers only
+ * Reject, so the approve route's own live read never runs for it (the render
+ * review's second round). "dry" reads and writes nothing. A run that cannot
+ * read who is in the window or who holds a pending request, or for which
+ * Whop answered nothing, answers ok: false.
  */
 export async function refreshMembershipDiscounts(
   db: SupabaseClient,
@@ -514,9 +818,10 @@ export async function refreshMembershipDiscounts(
     have_the_30: 0,
     candidates: 0,
     checked: 0,
+    by_source: { membership: 0, user: 0, payment: 0 },
+    no_real_payment: 0,
     discounted: 0,
     written: 0,
-    skipped: { no_membership: 0, not_a_membership: 0 },
     failed: {},
     left: 0,
     whop_requests: 0,
@@ -525,13 +830,14 @@ export async function refreshMembershipDiscounts(
   };
   const done = (more: Partial<RefreshAnswer> = {}): RefreshAnswer => ({ ...answer, ...more, ms: Date.now() - startedAtMs });
 
-  type Member = { id: string; whop_membership_id: string | null; first_paid_at: string | null };
+  type Member = { id: string; whop_membership_id: string | null; whop_user_id: string | null; first_paid_at: string | null };
+  const MEMBER_COLUMNS = "id, whop_membership_id, whop_user_id, first_paid_at";
   // The read starts at the earliest first payment whose window can still be open, so it stays as short as the
   // window; the window's own rule (discount.ts) then decides each student it holds.
   const inWindow = await fetchAllRowsPaginated<Member>(() =>
     db
       .from("students")
-      .select("id, whop_membership_id, first_paid_at")
+      .select(MEMBER_COLUMNS)
       .gte("first_paid_at", earliestOpenFirstPayment(startedAtMs))
       .in("membership_status", ["active", "past_due"])
       .order("id"),
@@ -554,7 +860,7 @@ export async function refreshMembershipDiscounts(
   for (let i = 0; i < outside.length; i += BATCH) {
     const batch = outside.slice(i, i + BATCH);
     const r = await fetchAllRowsPaginated<Member>(() =>
-      db.from("students").select("id, whop_membership_id, first_paid_at").in("id", batch).order("id"),
+      db.from("students").select(MEMBER_COLUMNS).in("id", batch).order("id"),
     );
     if (r.error) return done({ error: `students (holding a pending request): ${r.error.message}` });
     for (const s of r.data) byId.set(s.id, s);
@@ -599,6 +905,7 @@ export async function refreshMembershipDiscounts(
   answer.candidates = candidates.length;
 
   const ctx = newReadContext(apiKey, startedAtMs + REFRESH_START_BUDGET_MS, startedAtMs + REFRESH_ANSWER_BUDGET_MS);
+  const writes = { withoutSource: false };
   let pending: MembershipDiscountRow[] = [];
   let writeError: string | null = null;
   const flush = async () => {
@@ -608,22 +915,13 @@ export async function refreshMembershipDiscounts(
     }
     const rows = pending;
     pending = [];
-    const { error } = await db.from(MEMBERSHIP_DISCOUNTS_TABLE).upsert(rows, { onConflict: "student_id" });
-    if (error) writeError = `${MEMBERSHIP_DISCOUNTS_TABLE}: ${error.message}`;
+    const error = await upsertDiscountRows(db, rows, writes);
+    if (error) writeError = `${MEMBERSHIP_DISCOUNTS_TABLE}: ${error}`;
     else answer.written += rows.length;
   };
 
   for (let i = 0; i < candidates.length; i++) {
-    const m = candidates[i];
-    if (!m.whop_membership_id) {
-      answer.skipped.no_membership++;
-      continue;
-    }
-    if (!isMembershipId(m.whop_membership_id)) {
-      answer.skipped.not_a_membership++;
-      continue;
-    }
-    const r = await readMembershipDiscount(m.whop_membership_id, ctx);
+    const r = await judgeStudentDiscount(candidates[i], ctx);
     if (!r.ok) {
       if (r.fail === "time_budget") {
         answer.left = candidates.length - i;
@@ -633,8 +931,10 @@ export async function refreshMembershipDiscounts(
       continue;
     }
     answer.checked++;
-    if (r.membership.discounted) answer.discounted++;
-    pending.push(rowOf(m.id, r.membership, new Date().toISOString()));
+    answer.by_source[r.source]++;
+    if (r.noRealPayment) answer.no_real_payment++;
+    if (r.row.discounted) answer.discounted++;
+    pending.push(r.row);
     if (pending.length >= WRITE_CHUNK) await flush();
     if (writeError) break;
   }
@@ -644,7 +944,7 @@ export async function refreshMembershipDiscounts(
   answer.retried_429 = ctx.pace.retried429;
   const failedReads = Object.values(answer.failed).reduce((s, n) => s + (n ?? 0), 0);
   if (writeError) return done({ error: writeError });
-  // Every read failed: the shape or the key is wrong, and a run that wrote nothing must say so out loud.
+  // Whop answered no student: the shape or the key is wrong, and a run that wrote nothing must say so out loud.
   const allFailed = answer.checked === 0 && failedReads > 0;
   // Whop answered nothing before the time ran out (it hangs): no read failed, none was checked, every candidate is left.
   // That run read nothing either, so it says so too (the review's fix round: it answered ok).

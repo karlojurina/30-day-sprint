@@ -19,9 +19,10 @@
  * again" asks for one student (POST /api/admin/thirty/check-coupon).
  *
  * Since T-122 every student ends in a yes or a no unless Whop does not
- * answer: the membership on file, else the course membership found through
- * the student's Whop user, else the latest real payment (under 97.00 is a
- * discount). `by_source` counts the answers by that step, and `failed` holds
+ * answer: the membership on file, else every course membership found through
+ * the student's Whop user, else the latest real payment (a code on it that
+ * took money off, or a price under 97.00, is a discount; since T-122's fix
+ * round). `by_source` counts the answers by that step, and `failed` holds
  * only the students Whop gave no answer for (no connection, a 5xx, a 429
  * after its retries, no answer in time, a refused key, payments it could not
  * judge, or a deployment that cannot ask). The first dry run on production

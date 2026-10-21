@@ -591,6 +591,31 @@ counting, the Approved row's read still asking by the membership on file
 alone, and the payment's-id check run on a stand-in fetch (it was logged and
 never asked); `thirty-view` (98) `couponOf` with no membership id on file.
 
+T-122's fix round (2026-10-21, `night/admin3`): an adversarial check on a
+stand-in Whop found coupon holders the check let apply. `membership-discount`
+(309, +54) gives its stand-in's payments the `subtotal`, `tax_amount` and
+`tax_behavior` every payment carries in the pinned shape, and proves
+`taxOnTopOf` (null tax is none, `inclusive` is none on top, any other word or
+none is on top, a missing field is not known) and `paymentCoupon` (a code that
+took money off at any price, a code with a subtotal or tax that does not read,
+a price under 97.00, the total less any tax added on top, in cents). Then the
+adversarial cases, each through `judgeStudentDiscount`, both request routes
+(400 and the student's line, nothing written) and the cron: a $970 yearly
+member on a 10% code with no renewal price (873.00, none until then); evolve10
+with 20% tax added on top (104.76); a payment's id on file and a list that
+cannot be used, the latest payment naming a code; evolve10 on a monthly
+membership beside a newer free one, with a payment's id on file and with the
+free one on file (step 2 reads every course membership, the paid plans first,
+and the row names the one that carried the code). The controls stay none and
+go in: 97.00, 116.40 (97.00 and 20% tax on top) and a yearly 970.00, none
+naming a code, a 97.00 with the tax inside the price, a used code that took
+nothing off, a full-price membership beside a free one (the paid one named).
+Whop down or hanging on the second of two memberships is no answer and the
+routes' 503 within their 8 s, never "none" from the first alone. The
+probes the check ran (`step3-probe.mjs`, `step2-probe.mjs`, outside the
+repository) print a discount for each of its four coupon cases now; their
+$1 plan with no code read as one before and still does (a known limit).
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

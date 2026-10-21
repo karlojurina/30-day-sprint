@@ -387,6 +387,9 @@ gen('../src/lib/world-v6/terrain.ts', './_gen/terrain.ts', [['from "./layout"', 
 // (client-tests/.gitignore), as the terrain is not: 2,900 lines every run
 // writes again.
 gen('../src/lib/world-v6/clock.ts', './_gen/clock.ts')
+// The posters' files, day and night (2026-10-21, night-posters.test.mjs):
+// poster.ts has no imports and copies across untouched.
+gen('../src/lib/world-v6/poster.ts', './_gen/poster.ts')
 gen('../src/lib/world-v6/light.ts', './_gen/world-light.ts', [
   ['from "./layout"', 'from "./world-layout.ts"'],
   ['from "./terrain"', 'from "./terrain.ts"'],

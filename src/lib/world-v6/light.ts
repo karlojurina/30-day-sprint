@@ -55,7 +55,17 @@ import { LAKE_PAD, lakeShoreR, terrainHeight } from "./terrain";
  * railU value at each of the eight stops, in order.
  *
  * Nothing animates on its own: update() only does work when railU or the
- * camera moved, and the idle loop keeps sleeping.
+ * camera moved, and the idle loop keeps sleeping. The one exception is the
+ * night layer's ease (below), 1.5 s at a time.
+ *
+ * The night layer (2026-10-20 night; option D of
+ * _admin/prds/map-review-2026-10-15/real_time_light.md): the light still
+ * follows the place, and on top of it the student's own clock (clock.ts,
+ * through the scene's setNight) blends each key from the opening to the
+ * forest toward a night of its own (NIGHT_ROWS). From Creative Strategy on
+ * nothing changes. By day the light is the old light value for value
+ * (client-tests/night-clock.test.mjs). state.night is the night's weight
+ * where the camera is; the modules that darken for the night read it.
  *
  * Draw calls: the reflection pass redraws whatever the mirrored camera sees.
  * Objects that should not appear in the lake (markers, tiny props) can go on
@@ -90,6 +100,8 @@ export interface LightKeyframe {
   moonIntensity: number;
   /** 0..1: how much of the moon disc and its halo show. */
   moonVis: number;
+  /** The moon disc's radius, degrees. Omitted = MOON_RADIUS_DEG (the island's big moon); the night layer's ground rows draw a smaller one (NIGHT_MOON_RADIUS_DEG). */
+  moonRadius?: number;
   rimColor: number;
   rimIntensity: number;
   /** Sky: top of the dome, a band a few degrees up, the horizon away from the sun, the horizon toward it. */
@@ -118,6 +130,12 @@ export interface LightKeyframe {
   lampGlow: number;
   /** Multiplier on the forest's magic glow (teal, violet): 0.15 in daylight (dark teal paint), 0.9-0.95 at dusk and night (higher bleaches the hue to white under ACES). */
   magicGlow: number;
+  /** 0..1: how much aurora the sky may show here (nightsky.ts). Omitted = `stars`, as it always was; the night layer keeps it to the forest and the island. */
+  aurora?: number;
+  /** 0..1: the Milky Way's level (the sky's uBand, times STAR_BAND_GLOW). Omitted = `stars`, as it always was; the night layer keeps it to the forest and the island. */
+  band?: number;
+  /** 0..1: how much of this key is the night layer (NIGHT below). 0 on every authored key; 1 on a night key. Blended, it is LightState.night. */
+  night?: number;
 }
 
 /**
@@ -648,6 +666,255 @@ export const LIGHT_HOLD = 0.08;
  */
 const FOREST_DIM = { fill: 0.7, ambient: 0.6, moon: 0.5, exposure: 0.45 } as const;
 
+// ── Tuning: the night layer (real_time_light.md, option D) ──────────────────
+
+/**
+ * Night on the student's clock (clock.ts, Lovro 2026-10-20 night). The light
+ * still follows the PLACE: each key from the opening to the Glowing Forest
+ * has a night of its own (nightKeyframe, nightLook, NIGHT_ROWS) and blends
+ * toward it by the night factor (setNight) times its dial. The Sky Island is
+ * night already and the arch keeps its sunrise, so no key from a7 on has a
+ * row: after dark the airship flies out of the night into the morning, as the
+ * design file means the arch ("walking through the door into your own
+ * morning").
+ *
+ * A night key is its day key with:
+ *   - the sun gone: under the horizon at its own azimuth, no light, no glow;
+ *   - the moonlight from where the day's sun lights the view (its azimuth,
+ *     a little higher), so the faces lit by day are the faces lit by the moon
+ *     and the rock faces and tree shadows painted at load for the day's sun
+ *     still agree with the light;
+ *   - the moon's disc where the row puts it in that view's sky;
+ *   - NIGHT_BASE's sky, haze, fill, clouds, water, stars and lamp levels,
+ *     and NIGHT_LOOK's grade, halo and near shade;
+ *   - the day's fog ramp distances and haze shape (the ramp's end is also
+ *     the camera's far plane, so the night draws what the day draws);
+ *   - no aurora but in the forest (the island keeps its own).
+ * By day (factor 0) every key is its authored one, value for value.
+ */
+export interface NightRow {
+  /** How far toward its night this key goes at a night factor of 1 (readability: the opening stops short). */
+  dial: number;
+  /** The moon's disc in this view's sky: compass azimuth and elevation. */
+  moonAz: number;
+  moonEl: number;
+  /** Where the moonlight comes from, if not from the day sun's azimuth, NIGHT_MOONLIGHT_LIFT higher. */
+  moonLightAz?: number;
+  moonLightEl?: number;
+  /** Row overrides on NIGHT_BASE and NIGHT_LOOK. */
+  light?: Partial<LightKeyframe>;
+  look?: Partial<LookKey>;
+}
+
+/**
+ * The keys blend in linear light, where the day is 10 to 30 times the night:
+ * a straight blend stays near day for most of the clock's fade and drops at
+ * its end (at a weight of 0.8 the opening still read as blue hour, 5 percent
+ * of it very dark; at 1, 51). The clock's factor f goes through
+ * 1 - (1 - f)^NIGHT_EASE_POWER first, so each step of the fade looks about
+ * as big as the last.
+ */
+export const NIGHT_EASE_POWER = 2.5;
+/** The blend weight the night layer uses for a night factor f (0..1). */
+export function nightWeight(f: number): number {
+  const n = Math.min(1, Math.max(0, Number.isFinite(f) ? f : 0));
+  return 1 - Math.pow(1 - n, NIGHT_EASE_POWER);
+}
+
+/**
+ * What a lamp material's colour is multiplied by at night 1 (linear): lit
+ * windows and the campfire stay warm under the night's exposure instead of
+ * going white. The lesson lanterns' glass takes it too (progress-world.ts).
+ * Tune pass (the critique of 2026-10-20 night): at (1, 0.74, 0.46) a window
+ * at the night's lamp level (1.1) and exposure (1.35) still sat in ACES's
+ * shoulder, where every channel runs to 1: it came out cream white (sat
+ * 0.06 to 0.2), the campfire a pale cone. Half the red and far less green and
+ * blue put the lamps in the curve's middle, where the hue holds: a window
+ * comes out about #e9b066 (hue 34, sat 0.56), the fire #eaa45c (hue 30),
+ * the sand of the brand (#E8A86A) and still the brightest thing in frame.
+ */
+export const NIGHT_LAMP_TINT: readonly [number, number, number] = [0.5, 0.15, 0.025];
+const _nightLampTint = new THREE.Color(...NIGHT_LAMP_TINT);
+const _lampTint = new THREE.Color();
+
+/**
+ * The moon disc on the ground rows, degrees of radius. The island's big moon
+ * (MOON_RADIUS_DEG, 5 across, bible 1.17) took the opening's first look away
+ * from the plume and stood over a1's card (190 px across at 1691 x 1278); the
+ * sky frame at a7 keeps it.
+ */
+const NIGHT_MOON_RADIUS_DEG = 1.75;
+
+/** The night's sun: this far under the horizon (nothing of it shows or lights). */
+const NIGHT_SUN_EL = -24;
+/** The moonlight stands this much higher than the day's sun at that view, and at least NIGHT_MOONLIGHT_MIN. */
+const NIGHT_MOONLIGHT_LIFT = 8;
+const NIGHT_MOONLIGHT_MIN = 18;
+
+/** The night every row starts from: LIGHTS.night's colours, for land seen from the ground. */
+export const NIGHT_BASE = {
+  sunColor: 0xff7040, sunIntensity: 0, sunGlow: 0x000000, sunHero: 0,
+  // Tune pass (the critique of 2026-10-20 night): more of the light from the
+  // moon (1.5 -> 1.8) and less from the fill, so the faces turned to the moon
+  // and the faces turned away differ in value, not in hue.
+  moonColor: 0xc8d4ff, moonIntensity: 1.8, moonVis: 1, moonRadius: NIGHT_MOON_RADIUS_DEG,
+  // Tune pass: a stronger rim (0.8), a silver edge on the near trees, so the
+  // opening's near forest reads as trees and not one black band.
+  rimColor: 0x8fa6ff, rimIntensity: 1.1,
+  // A moonlit sky, a step lighter than the island's (0x0a1036 / 0x18224e /
+  // 0x2e3c70 / 0x3a4a80): with the Milky Way kept off the ground skies the
+  // falls' frame went to 69% very dark on SwiftShader; with this, 61.
+  skyTop: 0x101848, skyMid: 0x222e64, skyHorizon: 0x38487e, skyGlow: 0x44558c,
+  // Tune pass: a lighter haze (0x202a50), so the far layers step up toward
+  // the sky (bible 1.3, 2.6): at Video Ads II the far range was the darkest
+  // mass, under the near wall; at the opening the near forest was one black
+  // band (treeline 27 -> 30).
+  haze: 0x2e3866,
+  // A little less fill and moonlight than the island's night (2.2, 0.9, 1.6):
+  // seen from the ground the meadows read as day lit grass under it.
+  // Tune pass: the fill a third less saturated and a fifth weaker (hemi
+  // 0x5a6ca8 at 1.9, ambient 0x56649a at 0.75). At full blue the fill did the
+  // work value should do: the shade planes of the falls' cliff went saturated
+  // blue beside grey violet lit planes, the signpost's arms pastel blue.
+  hemiSky: 0x727ba8, hemiGround: 0x1a1e30, hemiIntensity: 1.55,
+  ambient: 0x6c749a, ambientIntensity: 0.65, exposure: 1.35, stars: 1,
+  cloudTop: 0x7280b0, cloudBase: 0x262e50, water: 0x141a30,
+  lampGlow: 1.1, magicGlow: 0.95,
+} satisfies Partial<LightKeyframe>;
+
+/** The night's look: LOOKS.night's grade and halo; the ramp's distances stay the day's. */
+export const NIGHT_LOOK = {
+  nearShade: 0x0e1226, sunLobe: 0,
+  // sat 0.8 (the island's 0.9): moonlight takes the colour out of the ground.
+  lift: [0, 0.005, 0.03], gain: [0.98, 1.0, 1.05], gamma: 0.95, sat: 0.8,
+  // A cool halo: LOOKS.night's violet one (0x7a5c84) turned every horizon from the ground mauve.
+  halo: 0x3a4c86, haloAmt: 0.4, haloDeg: 0, haloHalf: 7, haloFog: 1, fogAdd: 0.15,
+} satisfies Partial<LookKey>;
+
+/**
+ * One row per light key the opening and the first six places use (the keys
+ * between them included). The views (layout.ts KEYS, compass bearing, how far
+ * the camera looks up, vertical lens): the opening 328 / 9 / 34, a1 333.5 /
+ * 9.5 / 38, a2 359 / 18 / 42, a3 128 / 13 / 58, a4 232.6 / 8 / 48, a5 297 /
+ * -9 / 31 (it looks down: its sky is in the lake), a6 281 / 12. The keys
+ * between places ("sunset-cliff" for the gully and the burst) take the
+ * stretch's own.
+ */
+export const NIGHT_ROWS: Partial<Record<LightWaypointKey, NightRow>> = {
+  "opening-gold": { dial: 1, moonAz: 344, moonEl: 19 },
+  // Tune pass: at 350 / 21 the disc stood right over a1's place card and was
+  // the brightest thing on screen; at 345 / 22 it hangs left of the card's
+  // column, and from the opening (344 / 19) it stays put in the sky as the
+  // camera turns.
+  "afternoon-gold": { dial: 1, moonAz: 345, moonEl: 22 },
+  // Tune pass: at Base Camp the moonlight came from the day sun's side (245,
+  // behind the camera's left), so the meadow facing the camera was one flat
+  // lit pad, lighter than the sky (50 against 34 with the page's scrim). From
+  // due west and low (270 / 14) it rakes across: the near meadow 41, the crest
+  // the tower stands on 54, the tower's west faces still lit. Further round
+  // (280 to 300) the meadow went darker still but the stop's readable gate
+  // (65% very dark) came within a point.
+  afternoon: { dial: 1, moonAz: 340, moonEl: 31, moonLightAz: 270, moonLightEl: 14 },
+  "late-afternoon": { dial: 1, moonAz: 104, moonEl: 30 },
+  // Tune pass: at Video Ads II the near wall stood lighter than the range
+  // behind it (47 against 32), the bible's layer ladder upside down. The
+  // moonlight from the south (170 / 18) leaves the near wall in shade (25)
+  // and lights the far gorge wall behind the hut; the haze's lift (fogAdd)
+  // brings the range up to 46, so the falls stand bright on a dark wall.
+  "gorge-sunset": { dial: 1, moonAz: 214, moonEl: 20, moonLightAz: 170, moonLightEl: 18, look: { fogAdd: 0.3 } },
+  "sunset-cliff": { dial: 1, moonAz: 300, moonEl: 20 },
+  // The lake keeps the Milky Way: it lies in the water, most of the lake's
+  // light at night (78.7% of the frame very dark without it, 69 with), and
+  // costs 0.04 to 0.1 ms there (it looks down; little sky to run on).
+  // Tune pass: the view's bearing is 297, so at 296 the moon's reflection
+  // sat behind the island's as a grey crescent; at 278 a whole disc lies in
+  // open water left of it, clear of the black firs (282 and 284 put it
+  // behind the fir, 288 behind the island).
+  sunset: { dial: 1, moonAz: 278, moonEl: 13, light: { band: 1 } },
+  // The forest's dusk already shows the moon (MOON_AZ / MOON_EL) and lights by
+  // it (MOONLIGHT_AZ / _EL): the night keeps both where they are.
+  dusk: { dial: 1, moonAz: MOON_AZ, moonEl: MOON_EL, moonLightAz: MOONLIGHT_AZ, moonLightEl: MOONLIGHT_EL, light: { aurora: 1, band: 1 } },
+};
+
+// ── The morning probe (dev only, NOT SHIPPED) ───────────────────────────────
+
+/**
+ * NOT SHIPPED. A throwaway probe of option B's morning (real_time_light.md),
+ * so Lovro can see whether a morning reads differently from the route's
+ * sunset: /dev/world-app?mood=morning&hour=8 (scene.ts passes ?mood on only in
+ * development). Over the blended light, k of the way, a cooler, pinker,
+ * brighter morning: a clear blue top, a pink and peach horizon, a pale lilac
+ * haze (morning mist), a pink-white sun, cooler shade, a touch more exposure
+ * and less saturation. Each place keeps its own sun and view. It fades out
+ * from the forest to the island (night) and never reaches the arch. Remove
+ * with its commit.
+ */
+export const MORNING_PROBE = {
+  k: 0.6,
+  colors: {
+    skyTop: 0x6c9ad6, skyMid: 0xd2c8de, skyHorizon: 0xf6d0c6, skyGlow: 0xffcab2,
+    sunColor: 0xffd8cc, sunGlow: 0xffbaa8, haze: 0xcfcce2,
+    hemiSky: 0xaabfe4, ambient: 0xa6b0cc, cloudTop: 0xfff2f0, cloudBase: 0xbcb8ce,
+    water: 0x4a6278, nearShade: 0x3a4862, halo: 0xffd4cc,
+  },
+  exposure: 1.1,
+  sat: 0.9,
+  fogAdd: 0.15,
+} as const;
+let _morning: Record<keyof typeof MORNING_PROBE.colors, THREE.Color> | null = null;
+/** MORNING_PROBE over a blended light, w of the way (in place). */
+function applyMorningProbe(s: LightState, w: number): void {
+  if (!(w > 0)) return;
+  if (!_morning) {
+    const m = {} as Record<keyof typeof MORNING_PROBE.colors, THREE.Color>;
+    for (const [k, hex] of Object.entries(MORNING_PROBE.colors)) m[k as keyof typeof MORNING_PROBE.colors] = new THREE.Color().setHex(hex);
+    _morning = m;
+  }
+  for (const k of Object.keys(_morning) as Array<keyof typeof MORNING_PROBE.colors>) (s[k] as THREE.Color).lerp(_morning[k], w);
+  s.exposure *= 1 + (MORNING_PROBE.exposure - 1) * w;
+  s.sat *= 1 + (MORNING_PROBE.sat - 1) * w;
+  s.fogAdd += MORNING_PROBE.fogAdd * w;
+  s.gainB += 0.05 * w;
+  s.liftB += 0.012 * w;
+}
+
+/** A day key's night (NIGHT_ROWS' header). */
+export function nightKeyframe(day: LightKeyframe, row: NightRow): LightKeyframe {
+  return {
+    ...day,
+    ...NIGHT_BASE,
+    sunAz: day.sunAz,
+    sunEl: NIGHT_SUN_EL,
+    moonAz: row.moonAz,
+    moonEl: row.moonEl,
+    moonLightAz: row.moonLightAz ?? day.sunAz,
+    moonLightEl: row.moonLightEl ?? Math.max(NIGHT_MOONLIGHT_MIN, day.sunEl + NIGHT_MOONLIGHT_LIFT),
+    // No aurora and no Milky Way where the day had none: the forest's row asks
+    // for both (and the island has its own key). Seen from the ground the Milky
+    // Way was a faint violet wash whose noise cost 0.45 to 0.7 ms at a1, a2
+    // and a4 (2 runs, 2026-10-20 night); the stars stay.
+    aurora: day.aurora ?? day.stars,
+    band: day.band ?? day.stars,
+    ...row.light,
+    night: 1,
+  };
+}
+
+/** A day look's night: NIGHT_LOOK over it, the ramp's distances and the haze's shape kept. */
+export function nightLook(day: LookKey, row: NightRow): LookKey {
+  return {
+    ...day,
+    ...NIGHT_LOOK,
+    rampStart: day.rampStart,
+    rampEnd: day.rampEnd,
+    hazeBase: day.hazeBase,
+    hazeFall: day.hazeFall,
+    hazeOn: day.hazeOn,
+    fogCap: day.fogCap,
+    ...row.look,
+  };
+}
+
 // The cave behind the falls had a light of its own here (a key that took over
 // the fill, the haze, the fog and the exposure inside it and put the sun out,
 // blended in by the route's "cave" keys). It went with the cave on 2026-10-13
@@ -660,6 +927,24 @@ const SKY_SHAPE = { midFrom: 1.2, midTo: 7, topFrom: 5, topTo: 30 };
 const SUN_RADIUS_DEG = 1.35;
 /** v6: a big moon, about 5 degrees across (bible 1.17). */
 const MOON_RADIUS_DEG = 2.5;
+/**
+ * The moon disc's look, the island's (day) and the night layer's (night),
+ * blended by state.night, so the island, the flight and every day key draw
+ * the disc they always drew. The night layer's (the critique of 2026-10-20
+ * night: a soft edged disc like an upscaled photo, the first thing the eye
+ * hit at the opening): a crisp limb (a clear hero shape, bible 1.17), flat
+ * painted seas, a warm ivory in the ink family (the cool white read as a
+ * lamp), and a quieter tight glow so the halo stops smearing the limb.
+ *   edge   the limb's smoothstep, in radii
+ *   seas   the grey patches' smoothstep over the noise
+ *   halo   the glow's wide, mid and tight terms (SKY_GLSL)
+ */
+const MOON_LOOK = {
+  day: { edge: [0.85, 1.04], seas: [0.42, 0.68], disc: 0xeef0f6 },
+  night: { edge: [0.97, 1.01], seas: [0.52, 0.58], disc: 0xe8e0d0 },
+} as const;
+const MOON_HALO = { day: [0.1, 0.3, 0.5], night: [0.1, 0.3, 0.2] } as const;
+const _moonHalo = new THREE.Vector3();
 /** The sun light never comes from below this elevation (a light from under the horizon lights the undersides). */
 const SUN_LIGHT_MIN_EL = 3;
 /** update() re-walks the scene's materials at least every this many frames. */
@@ -806,6 +1091,22 @@ export interface LightState {
   /** Live multipliers on the tagged glow materials (see the header). */
   lampGlow: number;
   magicGlow: number;
+  /** The aurora's level here, 0..1 (nightsky.ts): the star level by day, the forest and the island's only at night. */
+  aurora: number;
+  /** The Milky Way's level here, 0..1: the star level by day, the forest and the island's only at night. */
+  band: number;
+  /**
+   * How much of the night layer is in this light, 0..1: the night factor
+   * (setNight) times the place's dial. 0 by day everywhere, and always 0 from
+   * Creative Strategy on. What a module darkens for the night (the smoke,
+   * the mist, the gulls, the beach) it darkens by this, so by day and at the
+   * island and the arch nothing it draws changes.
+   */
+  night: number;
+  /** The moon disc's radius here, degrees (LightKeyframe.moonRadius). */
+  moonRadius: number;
+  /** Counts every time the module applies a new light (a scroll or a night change), for modules that cache what they read from it. */
+  rev: number;
   /** How far underground the light is. Always 0 since the cave went (2026-10-13): no place is
    *  underground. clouds.ts, nightsky.ts and life.ts still multiply by 1 - under; it goes with their reads. */
   under: number;
@@ -856,6 +1157,17 @@ export interface LightModule {
   setQuality?(tier: { reflection: { scale: number; maxWidth: number; mode?: "full" | "skyIsland" | "frozen" } }): void;
   /** C1: once every module is in, tag what the lake may reflect (REFLECT_NAMES). */
   afterAll?(): void;
+  /**
+   * The night factor from the student's clock (clock.ts), 0 day .. 1 night.
+   * With easeMs it eases in over that long (the scene passes 0 while it
+   * sleeps, so the one frame it wakes shows the new light). The light is
+   * re-applied on the next update.
+   */
+  setNight(f: number, easeMs?: number): void;
+  /** The night factor being shown (mid ease: between the old and the new). */
+  readonly nightFactor: number;
+  /** NOT SHIPPED, dev only: the morning probe (MORNING_PROBE) on or off. */
+  setMood?(mood: "morning" | null): void;
 }
 
 /**
@@ -893,6 +1205,7 @@ const COLOR_FIELDS = [
 const NUMBER_FIELDS = [
   "sunHero", "sunIntensity", "moonIntensity", "moonVis", "rimIntensity",
   "hemiIntensity", "ambientIntensity", "exposure", "stars", "lampGlow", "magicGlow",
+  "aurora", "band", "night", "moonRadius",
 ] as const;
 type ColorField = (typeof COLOR_FIELDS)[number];
 const LOOK_COLORS = ["nearShade", "halo"] as const;
@@ -939,6 +1252,9 @@ function linearKey(k: LightKeyframe, look: LookKey): LinearKey {
   for (const f of COLOR_FIELDS) colors[f] = new THREE.Color().setHex(k[f]);
   const numbers = {} as LinearKey["numbers"];
   for (const f of NUMBER_FIELDS) numbers[f] = k[f] ?? 0;
+  numbers.aurora = k.aurora ?? k.stars;
+  numbers.band = k.band ?? k.stars;
+  numbers.moonRadius = k.moonRadius ?? MOON_RADIUS_DEG;
   return {
     colors, numbers, look: linearLook(look, k.skyHorizon), sunAz: k.sunAz, sunEl: k.sunEl, moonAz: k.moonAz, moonEl: k.moonEl,
     moonLightAz: k.moonLightAz, moonLightEl: k.moonLightEl,
@@ -963,6 +1279,21 @@ function mixLinearKey(a: LinearKey, b: LinearKey, k: number): LinearKey {
   };
 }
 
+/** mixLinearKey written into `out` (a key of the same shape), so a repeated blend allocates nothing. */
+function mixLinearKeyInto(out: LinearKey, a: LinearKey, b: LinearKey, k: number): LinearKey {
+  for (const f of COLOR_FIELDS) out.colors[f].copy(a.colors[f]).lerp(b.colors[f], k);
+  for (const f of NUMBER_FIELDS) out.numbers[f] = a.numbers[f] + (b.numbers[f] - a.numbers[f]) * k;
+  for (const f of LOOK_COLORS) out.look.colors[f].copy(a.look.colors[f]).lerp(b.look.colors[f], k);
+  for (const f of LOOK_NUMBERS) out.look.numbers[f] = a.look.numbers[f] + (b.look.numbers[f] - a.look.numbers[f]) * k;
+  out.sunAz = lerpAz(a.sunAz, b.sunAz, k);
+  out.sunEl = a.sunEl + (b.sunEl - a.sunEl) * k;
+  out.moonAz = lerpAz(a.moonAz, b.moonAz, k);
+  out.moonEl = a.moonEl + (b.moonEl - a.moonEl) * k;
+  out.moonLightAz = lerpAz(a.moonLightAz, b.moonLightAz, k);
+  out.moonLightEl = a.moonLightEl + (b.moonLightEl - a.moonLightEl) * k;
+  return out;
+}
+
 function newState(): LightState {
   const c = () => new THREE.Color();
   return {
@@ -972,7 +1303,7 @@ function newState(): LightState {
     rimColor: c(), rimIntensity: 0, skyTop: c(), skyMid: c(), skyHorizon: c(), skyGlow: c(),
     haze: c(), fogNear: 0, fogFar: 0, hemiSky: c(), hemiGround: c(), hemiIntensity: 0,
     ambient: c(), ambientIntensity: 0, exposure: 1, stars: 0, cloudTop: c(), cloudBase: c(), water: c(),
-    lampGlow: 1, magicGlow: 1, under: 0,
+    lampGlow: 1, magicGlow: 1, aurora: 0, band: 0, night: 0, moonRadius: MOON_RADIUS_DEG, rev: 0, under: 0,
     nearShade: c(), halo: c(), hazeBase: 0, hazeFall: 1, hazeOn: 0, sunLobe: 0, fogCap: 0.92,
     liftR: 0, liftG: 0, liftB: 0, gainR: 1, gainG: 1, gainB: 1, gamma: 1, sat: 1, haloAmt: 0, haloDeg: 0, haloHalf: 1, haloFog: 0, fogAdd: 0,
   };
@@ -1011,10 +1342,26 @@ export function defaultPlaceU(): number[] {
 /** One stop of the light's track: a place, or a LIGHT_WAYPOINTS key. */
 export interface LightTrackStop {
   u: number;
+  /** The key the light blends: `day` at a night factor of 0, toward `night` above it (setTrackNight). */
   key: LinearKey;
   hold: boolean;
   /** For a pass-through stop: d(blend)/d(railU), the same on both sides. */
   rate: number;
+  /** The authored key, and its night (NIGHT_ROWS; the authored key itself where the light has no row). */
+  day: LinearKey;
+  night: LinearKey;
+  /**
+   * The day side of the night's blend: `day`, with the moon's disc and its
+   * light where the night puts them when the day key shows neither (its moon
+   * is drawn at 0 and lights at 0, so the picture is the day's). Without it
+   * the hidden day moon (azimuth 120 at the opening) was blended in and the
+   * disc came out of the frame at a dial under 1.
+   */
+  from: LinearKey;
+  /** The row's dial (0 without a row: the key never changes). */
+  dial: number;
+  /** The light rows the stop was built from, so the night can be rebuilt from changed rows (harness). */
+  src: { light: string; mix?: { to: string; k: number } };
 }
 
 /** railU of a (fractional) TRAIL key, between the stops it falls between. */
@@ -1050,17 +1397,52 @@ function lookOf(name: string): LookKey {
  * in railU order. A waypoint that falls on a place or outside the route is
  * left out.
  */
+/** A light row's day key, its night key and its dial (NIGHT_ROWS). */
+function keysOf(name: string): { day: LinearKey; night: LinearKey; dial: number } {
+  const kf = keyframeOf(name);
+  const lk = lookOf(name);
+  const day = linearKey(kf, lk);
+  const row = (NIGHT_ROWS as Record<string, NightRow | undefined>)[name];
+  if (!row) return { day, night: day, dial: 0 };
+  return { day, night: linearKey(nightKeyframe(kf, row), nightLook(lk, row)), dial: Math.min(1, Math.max(0, row.dial)) };
+}
+
+/** A track stop's day and night keys and dial from its rows (a waypoint's mix blends the two rows' keys and dials). */
+function stopKeys(src: LightTrackStop["src"]): Pick<LightTrackStop, "day" | "night" | "from" | "dial"> {
+  const a = keysOf(src.light);
+  const b = src.mix ? keysOf(src.mix.to) : null;
+  const k = src.mix ? src.mix.k : 0;
+  const day = b ? mixLinearKey(a.day, b.day, k) : a.day;
+  const night = b ? mixLinearKey(a.night, b.night, k) : a.night;
+  const dial = b ? a.dial + (b.dial - a.dial) * k : a.dial;
+  let from = day;
+  if (night !== day) {
+    const hideDisc = day.numbers.moonVis <= 0;
+    const hideLight = day.numbers.moonIntensity <= 0;
+    if (hideDisc || hideLight) {
+      from = {
+        ...day,
+        ...(hideDisc ? { moonAz: night.moonAz, moonEl: night.moonEl, numbers: { ...day.numbers, moonRadius: night.numbers.moonRadius } } : {}),
+        ...(hideLight ? { moonLightAz: night.moonLightAz, moonLightEl: night.moonLightEl } : {}),
+      };
+    }
+  }
+  return { day, night, from, dial };
+}
+
 export function buildTrack(placeU: readonly number[]): LightTrackStop[] {
-  const track: LightTrackStop[] = PLACES.map((p, i) => ({ u: placeU[i], key: linearKey(keyframeOf(p.light), lookOf(p.light)), hold: true, rate: 0 }));
+  const stop = (u: number, hold: boolean, src: LightTrackStop["src"]): LightTrackStop => {
+    const k = stopKeys(src);
+    return { u, key: k.day, hold, rate: 0, ...k, src };
+  };
+  const track: LightTrackStop[] = PLACES.map((p, i) => stop(placeU[i], true, { light: p.light }));
   for (const w of LIGHT_WAYPOINTS) {
     const u = keyToU(w.key, placeU);
     // Fix round 1: a hold before the first place (the opening) is kept too.
     const beforeFirst = w.hold && u >= 0 && u < placeU[0];
     if (!beforeFirst && !(u > placeU[0] && u < placeU[placeU.length - 1])) continue;
     if (track.some((t) => Math.abs(t.u - u) < 1e-7)) continue;
-    let key = linearKey(keyframeOf(w.light), lookOf(w.light));
-    if (w.mix) key = mixLinearKey(key, linearKey(keyframeOf(w.mix.to), lookOf(w.mix.to)), w.mix.k);
-    track.push({ u, key, hold: w.hold, rate: 0 });
+    track.push(stop(u, w.hold, w.mix ? { light: w.light, mix: { to: w.mix.to, k: w.mix.k } } : { light: w.light }));
   }
   track.sort((a, b) => a.u - b.u);
   // A pass-through stop's rate: its two stretches (less their holds) meet at
@@ -1071,6 +1453,47 @@ export function buildTrack(placeU: readonly number[]): LightTrackStop[] {
     track[i].rate = 2 / Math.max(1e-9, eff(i - 1) + eff(i));
   }
   return track;
+}
+
+/** Each stop's blended key, kept between calls so laying the night allocates nothing. */
+const _nightKeys = new WeakMap<LightTrackStop, LinearKey>();
+
+/**
+ * Lays the night layer on a track at night factor f (0..1), in place: each
+ * stop's key is its day key blended toward its night by f times its dial. At
+ * f 0 every key is its day key (the same object). The stops' places, holds
+ * and rates never change, so the blend along the route is the day's.
+ */
+export function setTrackNight(track: readonly LightTrackStop[], f: number): void {
+  const n = nightWeight(f);
+  for (const t of track) {
+    const w = n * t.dial;
+    if (w <= 0) {
+      t.key = t.day;
+      continue;
+    }
+    if (w >= 1) {
+      t.key = t.night;
+      continue;
+    }
+    let out = _nightKeys.get(t);
+    if (!out) {
+      out = mixLinearKey(t.from, t.night, 0);
+      _nightKeys.set(t, out);
+    }
+    t.key = mixLinearKeyInto(out, t.from, t.night, w);
+  }
+}
+
+/** Rebuilds every stop's night key and dial from the rows as they are now (the harness tries rows in the page). */
+export function rebuildTrackNight(track: readonly LightTrackStop[]): void {
+  for (const t of track) {
+    const k = stopKeys(t.src);
+    t.night = k.night;
+    t.from = k.from;
+    t.dial = k.dial;
+    _nightKeys.delete(t);
+  }
 }
 
 /** Blend (0..1) across stretch i of the track at u. */
@@ -1205,6 +1628,7 @@ uniform vec3 uSunDir;
 uniform vec3 uSunGlow;
 uniform vec3 uMoonDir;
 uniform vec3 uMoonGlow;
+uniform vec3 uMoonHalo; // the moon glow's three terms: wide, mid, tight (MOON_HALO; the night layer's own tight term is quieter)
 uniform vec4 uSkyShape; // midFrom, midTo, topFrom, topTo (degrees)
 uniform vec4 uHalo;     // v5 horizon halo: rgb, amount
 uniform vec3 uHaloBand; // its centre and half height, degrees above the horizon; how much it holds under the horizon (haloFog)
@@ -1231,7 +1655,7 @@ vec3 lightSky(vec3 d) {
   float ca = max(dot(d, uSunDir), 0.0);
   c += uSunGlow * (0.22 * pow(ca, 5.0) + 0.55 * pow(ca, 90.0));
   float cm = max(dot(d, uMoonDir), 0.0);
-  c += uMoonGlow * (0.10 * pow(cm, 8.0) + 0.3 * pow(cm, 120.0) + 0.5 * pow(cm, 900.0));
+  c += uMoonGlow * (uMoonHalo.x * pow(cm, 8.0) + uMoonHalo.y * pow(cm, 120.0) + uMoonHalo.z * pow(cm, 900.0));
   // Below the horizon it stays the horizon colour (the ramp's far end).
   return c;
 }
@@ -1310,6 +1734,48 @@ export interface FwUniforms {
   fwGS: { value: THREE.Vector2 };
   /** v6: the additive fog term k (bible 2.6). */
   fwAdd: { value: number };
+  /** The night layer's pale rule (NIGHT_PALE x state.night): how much a pale albedo comes down, how much any albedo greys. Read only by the materials nightPale() hooks. */
+  fwPale: { value: THREE.Vector2 };
+}
+
+/**
+ * The night layer's pale rule (the critique of 2026-10-20 night): under the
+ * moon a pale albedo reads lit from inside or frosted. The tent canvas and
+ * the rock tops at Base Camp, the lookout's cream cab, the falls' boulder,
+ * the dry grass at the Landing (tips at luma 105), the signpost's painted
+ * arms (pastel blue and lavender plastic). At night 1 every albedo greys by
+ * `grey` and the palest come down by up to `pull` (linear albedo luma 0.12
+ * to 0.45, about sRGB 97 to 178), the way SAND_NIGHT does for the beach, and
+ * the cream paints and canvas by `top` more (luma 0.45 to 0.7): at `pull`
+ * alone the lookout's cream band and header still drew a pale frame round its
+ * dark glass (p90 89 at Base Camp, the critique's target about 70). By day
+ * all three are 0 and the materials draw exactly as before.
+ */
+export const NIGHT_PALE = { pull: 0.5, top: 0.25, grey: 0.3 } as const;
+const NIGHT_PALE_PARS = /* glsl */ `uniform vec2 fwPale;`;
+const NIGHT_PALE_FRAGMENT = /* glsl */ `
+	{
+		// The night layer's pale rule (light.ts NIGHT_PALE; fwPale is 0 by day).
+		float fwPl = dot( diffuseColor.rgb, vec3( 0.2126, 0.7152, 0.0722 ) );
+		diffuseColor.rgb = mix( diffuseColor.rgb, vec3( fwPl ), fwPale.y );
+		diffuseColor.rgb *= 1.0 - fwPale.x * ( smoothstep( 0.12, 0.45, fwPl ) + ${(NIGHT_PALE.top / NIGHT_PALE.pull).toFixed(3)} * smoothstep( 0.45, 0.7, fwPl ) );
+	}
+`;
+/** The pale rule's GLSL, for a module whose own hook already rewrites <color_fragment> (rocks, cover cards): `pars` after <common>, `fragment` after its albedo. */
+export const NIGHT_PALE_GLSL = { pars: NIGHT_PALE_PARS, fragment: NIGHT_PALE_FRAGMENT } as const;
+const nightPaleHook = (shader: THREE.WebGLProgramParametersWithUniforms) => {
+  shader.fragmentShader = shader.fragmentShader
+    .replace("#include <common>", `#include <common>\n${NIGHT_PALE_PARS}`)
+    .replace("#include <color_fragment>", `#include <color_fragment>\n${NIGHT_PALE_FRAGMENT}`);
+};
+/**
+ * Gives a plain built-in lit material (no shader hook of its own) the pale
+ * rule. Call it when the material is made, before light.ts's walk chains the
+ * fog ramp after it; the uniform comes from that walk (FwUniforms.fwPale).
+ */
+export function nightPale(mat: THREE.Material): void {
+  mat.onBeforeCompile = nightPaleHook;
+  mat.customProgramCacheKey = () => "v6-night-pale";
 }
 
 const FW_FOG_PARS_VERTEX = /* glsl */ `
@@ -1580,6 +2046,11 @@ export function install(ctx: LightCtx): LightModule {
   const owned: THREE.Object3D[] = [];
   const disposables: { dispose(): void }[] = [];
   let forcedU: number | null = null;
+  // The night layer (setNight): the factor shown, and the ease toward a new one.
+  let nightNow = 0;
+  const nightEase = { from: 0, to: 0, t0: 0, ms: 0 };
+  /** NOT SHIPPED: the morning probe's strength (setMood), 0 off. */
+  let moodK = 0;
 
   const skyUniforms = {
     uHaze: { value: new THREE.Color() },
@@ -1591,6 +2062,7 @@ export function install(ctx: LightCtx): LightModule {
     uSunGlow: { value: new THREE.Color() },
     uMoonDir: { value: new THREE.Vector3(0, 1, 0) },
     uMoonGlow: { value: new THREE.Color() },
+    uMoonHalo: { value: new THREE.Vector3(...MOON_HALO.day) },
     uSkyShape: { value: new THREE.Vector4(SKY_SHAPE.midFrom, SKY_SHAPE.midTo, SKY_SHAPE.topFrom, SKY_SHAPE.topTo) },
     uHalo: { value: new THREE.Vector4(1, 1, 1, 0) },
     uHaloBand: { value: new THREE.Vector3(1.6, 3.2, 0) },
@@ -1611,6 +2083,7 @@ export function install(ctx: LightCtx): LightModule {
     fwGain: { value: new THREE.Vector3() },
     fwGS: { value: new THREE.Vector2() },
     fwAdd: { value: 0 },
+    fwPale: { value: new THREE.Vector2(0, 0) },
   };
   scene.userData.fwUniforms = fw;
   const chunks = THREE.ShaderChunk as unknown as Record<string, string>;
@@ -1685,9 +2158,11 @@ export function install(ctx: LightCtx): LightModule {
       uSunRadius: { value: THREE.MathUtils.degToRad(SUN_RADIUS_DEG) },
       uSunBands: { value: 0 },
       uSunHero: { value: 0 },
-      uMoonDisc: { value: new THREE.Color(0xeef0f6) },
+      uMoonDisc: { value: new THREE.Color(MOON_LOOK.day.disc) },
+      uMoonDiscNight: { value: new THREE.Color(MOON_LOOK.night.disc) },
       uMoonVis: { value: 0 },
       uMoonRadius: { value: THREE.MathUtils.degToRad(MOON_RADIUS_DEG) },
+      uMoonLook: { value: 0 },
       uBandN: { value: starBandNormal(new THREE.Vector3()) },
       uBand: { value: 0 },
     },
@@ -1709,8 +2184,10 @@ export function install(ctx: LightCtx): LightModule {
       uniform float uSunBands;
       uniform float uSunHero;
       uniform vec3 uMoonDisc;
+      uniform vec3 uMoonDiscNight;
       uniform float uMoonVis;
       uniform float uMoonRadius;
+      uniform float uMoonLook;
       uniform vec3 uBandN;
       uniform float uBand;
       varying vec3 vDir;
@@ -1787,15 +2264,16 @@ export function install(ctx: LightCtx): LightModule {
         vec3 disc = mix(uSunDisc, vec3(1.0, 0.985, 0.93), uSunHero);
         c = mix(c, disc, (1.0 - smoothstep(sR * 0.9, sR * 1.02, sa)) * uSunVis * horizon);
         float ma = acos(clamp(dot(d, uMoonDir), -1.0, 1.0));
-        float mm = (1.0 - smoothstep(uMoonRadius * 0.85, uMoonRadius * 1.04, ma)) * uMoonVis * horizon;
+        // MOON_LOOK: the island's soft disc (uMoonLook 0) or the night layer's crisp one (1).
+        float mm = (1.0 - smoothstep(uMoonRadius * mix(${MOON_LOOK.day.edge[0].toFixed(2)}, ${MOON_LOOK.night.edge[0].toFixed(2)}, uMoonLook), uMoonRadius * mix(${MOON_LOOK.day.edge[1].toFixed(2)}, ${MOON_LOOK.night.edge[1].toFixed(2)}, uMoonLook), ma)) * uMoonVis * horizon;
         if (mm > 0.0) {
-          // A face: soft grey seas and a darker limb, so the disc reads as the moon.
+          // A face: grey seas and a darker limb, so the disc reads as the moon.
           vec3 t1 = normalize(cross(uMoonDir, vec3(0.0, 1.0, 0.0)) + vec3(1e-5, 0.0, 0.0));
           vec3 t2 = cross(t1, uMoonDir);
           vec2 mq = vec2(dot(d, t1), dot(d, t2)) / uMoonRadius;
-          float seas = smoothstep(0.42, 0.68, lfbm(mq * 1.4 + 4.0));
+          float seas = smoothstep(mix(${MOON_LOOK.day.seas[0].toFixed(2)}, ${MOON_LOOK.night.seas[0].toFixed(2)}, uMoonLook), mix(${MOON_LOOK.day.seas[1].toFixed(2)}, ${MOON_LOOK.night.seas[1].toFixed(2)}, uMoonLook), lfbm(mq * 1.4 + 4.0));
           float limb = sqrt(max(0.0, 1.0 - min(1.0, dot(mq, mq))));
-          c = mix(c, uMoonDisc * (1.0 - 0.24 * seas) * (0.8 + 0.2 * limb), mm);
+          c = mix(c, mix(uMoonDisc, uMoonDiscNight, uMoonLook) * (1.0 - 0.24 * seas) * (0.8 + 0.2 * limb), mm);
         }
         gl_FragColor = vec4(c, 1.0);
         #include <colorspace_fragment>
@@ -1822,13 +2300,19 @@ export function install(ctx: LightCtx): LightModule {
     fog: false,
     toneMapped: false,
     blending: THREE.AdditiveBlending,
-    uniforms: { uStars: { value: 0 }, uPx: { value: 1 } },
+    // uMoonCut: the moon's radius (radians), how much of it shows, and the
+    // night layer's share (state.night): the stars are drawn over the dome,
+    // so at night they went out where they cross the disc (two of them
+    // clipped it to white at the opening). 0 on the island: unchanged there.
+    uniforms: { uStars: { value: 0 }, uPx: { value: 1 }, uMoonDir: skyUniforms.uMoonDir, uMoonCut: { value: new THREE.Vector3(0, 0, 0) } },
     vertexShader: /* glsl */ `
       attribute float aBright;
       attribute float aSize;
       attribute float aTint;
       uniform float uStars;
       uniform float uPx;
+      uniform vec3 uMoonDir;
+      uniform vec3 uMoonCut;
       varying float vA;
       varying float vTint;
       varying float vCross;
@@ -1838,6 +2322,7 @@ export function install(ctx: LightCtx): LightModule {
         vec4 p = projectionMatrix * viewMatrix * vec4(d * 1000.0 + cameraPosition, 1.0);
         gl_Position = vec4(p.xy, p.w * 0.99999, p.w);
         vA = aBright * uStars * smoothstep(-0.01, 0.05, d.y); // fix pass 3: full by ~3 up (was ~7), so a7's low sky has stars
+        vA *= 1.0 - uMoonCut.z * uMoonCut.y * (1.0 - smoothstep(uMoonCut.x * 1.05, uMoonCut.x * 1.7, acos(clamp(dot(d, uMoonDir), -1.0, 1.0))));
         vTint = aTint;
         // The brightest (aSize over 6) are drawn as soft crosses in a bigger sprite.
         vCross = step(6.0, aSize);
@@ -2157,7 +2642,37 @@ export function install(ctx: LightCtx): LightModule {
       if (mode !== reflectMode) reflectFrozen = false;
       reflectMode = mode;
     },
+    setNight(f: number, easeMs = 0) {
+      const to = Math.min(1, Math.max(0, Number.isFinite(f) ? f : 0));
+      if (!(easeMs > 0)) {
+        nightEase.ms = 0;
+        nightEase.to = to;
+        layNight(to);
+        return;
+      }
+      if (nightEase.ms > 0 && nightEase.to === to) return;
+      if (nightEase.ms <= 0 && to === nightNow) return;
+      nightEase.from = nightNow;
+      nightEase.to = to;
+      nightEase.t0 = performance.now();
+      nightEase.ms = easeMs;
+    },
+    get nightFactor() {
+      return nightNow;
+    },
+    setMood(mood) {
+      moodK = mood === "morning" ? MORNING_PROBE.k : 0;
+      lastU = NaN;
+    },
     update() {
+      // The night's ease, by the wall clock: a frame drawn late (the map woke
+      // after a sleep) lands on the light the ease would have reached.
+      if (nightEase.ms > 0) {
+        const t = Math.min(1, (performance.now() - nightEase.t0) / nightEase.ms);
+        const f = nightEase.from + (nightEase.to - nightEase.from) * (t * t * (3 - 2 * t));
+        if (t >= 1) nightEase.ms = 0;
+        layNight(t >= 1 ? nightEase.to : f, t >= 1);
+      }
       const u = forcedU ?? ctx.railU();
       const cam = ctx.camera;
       const camMoved = !cam.position.equals(lastCam) || !cam.quaternion.equals(lastQuat);
@@ -2173,6 +2688,9 @@ export function install(ctx: LightCtx): LightModule {
       if (uChanged) {
         lastU = u;
         blendTrack(u, track, placeU, state);
+        // NOT SHIPPED: the morning probe, full to the forest, gone by the island.
+        if (moodK > 0) applyMorningProbe(state, moodK * (1 - smoothstep(placeU[5], placeU[6], u)));
+        state.rev++;
         applyState();
         walkMaterials();
       }
@@ -2183,7 +2701,8 @@ export function install(ctx: LightCtx): LightModule {
       return uChanged;
     },
     isAnimating() {
-      return false;
+      // Only while the night eases in: nothing in the light moves on its own.
+      return nightEase.ms > 0;
     },
     dispose() {
       for (const o of owned) o.parent?.remove(o);
@@ -2238,6 +2757,11 @@ export function install(ctx: LightCtx): LightModule {
         rampEnd: Math.round(fw.fwRamp.value.y),
         lampGlow: Math.round(state.lampGlow * 1e3) / 1e3,
         magicGlow: Math.round(state.magicGlow * 1e3) / 1e3,
+        // The night layer: the clock's factor (mid ease: the one shown), and how much of it is here.
+        night: Math.round(nightNow * 1e3) / 1e3,
+        nightHere: Math.round(state.night * 1e3) / 1e3,
+        nightEasing: nightEase.ms > 0 ? 1 : 0,
+        aurora: Math.round(state.aurora * 1e3) / 1e3,
         forestDim: Math.round(forestNow * 1e3) / 1e3,
         cloudTriangles: cloudIndexUp.count / 3,
         u: Math.round(state.u * 1e4) / 1e4,
@@ -2247,6 +2771,24 @@ export function install(ctx: LightCtx): LightModule {
       };
     },
   };
+
+  /**
+   * The night layer at factor f: the track's keys blended (setTrackNight), the
+   * light re-applied on the next update (as a scroll would), and the lowest
+   * tier's kept reflection drawn again, or a student parked at the lake would
+   * see the old sky in the water.
+   */
+  function layNight(f: number, redrawFrozen = true) {
+    if (f === nightNow) {
+      if (redrawFrozen) reflectFrozen = false;
+      return;
+    }
+    nightNow = f;
+    setTrackNight(track, f);
+    lastU = NaN;
+    // Mid ease the kept reflection waits for the ease to land (one redraw, not one a frame on the slowest machines).
+    if (redrawFrozen) reflectFrozen = false;
+  }
 
   /**
    * Glow materials follow the darkness. A walk over the scene (a few hundred
@@ -2324,10 +2866,15 @@ export function install(ctx: LightCtx): LightModule {
         // The forest's magic species (read back through forest.ts's probe) dim
         // with the forest: in a6 only the floor glow and the Great Tree carry light.
         const level = kind === "magic" ? (o.name === "ForestMagicProbe" ? state.magicGlow : magicLevel) : state.lampGlow;
-        if (mat.userData.lightGlowLevel === level) continue;
+        // The night layer: a lamp warms toward NIGHT_LAMP_TINT (at 1.1 under the
+        // night's exposure ACES took a lit window to white). Magic keeps its hue.
+        const warm = kind === "lamp" ? state.night : 0;
+        if (mat.userData.lightGlowLevel === level && (mat.userData.lightGlowWarm ?? 0) === warm) continue;
         if (!mat.userData.lightGlowBase) mat.userData.lightGlowBase = colored.color.clone();
         colored.color.copy(mat.userData.lightGlowBase as THREE.Color).multiplyScalar(level);
+        if (warm > 0) colored.color.multiply(_lampTint.setRGB(1, 1, 1).lerp(_nightLampTint, warm));
         mat.userData.lightGlowLevel = level;
+        mat.userData.lightGlowWarm = warm;
       }
     });
     glowMaterials = found;
@@ -2364,9 +2911,17 @@ export function install(ctx: LightCtx): LightModule {
     skyMat.uniforms.uSunBands.value = smoothstep(16, 5, s.sunEl);
     skyMat.uniforms.uSunHero.value = s.sunHero;
     skyMat.uniforms.uMoonVis.value = s.moonVis;
-    // Stars: skip the draw call entirely in daylight.
+    // The moon's size and look (MOON_LOOK, MOON_HALO): the night layer's crisp ivory disc where state.night is.
+    const moonR = THREE.MathUtils.degToRad(s.moonRadius);
+    skyMat.uniforms.uMoonRadius.value = moonR;
+    skyMat.uniforms.uMoonLook.value = s.night;
+    skyUniforms.uMoonHalo.value.set(...MOON_HALO.day).lerp(_moonHalo.set(...MOON_HALO.night), s.night);
+    starMat.uniforms.uMoonCut.value.set(moonR, s.moonVis, s.night);
+    // Stars: skip the draw call entirely in daylight. The Milky Way follows its
+    // own level (the star level, but at night only the forest and the island
+    // have one: where it shows, its noise was nearly all of night's cost).
     starMat.uniforms.uStars.value = s.stars;
-    skyMat.uniforms.uBand.value = STAR_BAND_GLOW * s.stars;
+    skyMat.uniforms.uBand.value = STAR_BAND_GLOW * s.band;
     stars.visible = s.stars > 0.01;
     // Clouds take their light from the sun and the moon, weighted by strength.
     cloudMat.uniforms.uCloudTop.value.copy(s.cloudTop);
@@ -2415,6 +2970,7 @@ export function install(ctx: LightCtx): LightModule {
     fw.fwGain.value.set(s.gainR - 1, s.gainG - 1, s.gainB - 1);
     fw.fwGS.value.set(s.gamma - 1, s.sat - 1);
     fw.fwAdd.value = s.fogAdd;
+    fw.fwPale.value.set(NIGHT_PALE.pull * s.night, NIGHT_PALE.grey * s.night);
     lakeMat.uniforms.uDeep.value.copy(s.water);
     // The lake's colour when it is too far to reflect: the sky a little above the horizon.
     skyCpu(s, tmpDir.set(0, 0.18, -1).normalize(), lakeMat.uniforms.uSkyTint.value);
@@ -2489,6 +3045,19 @@ export function install(ctx: LightCtx): LightModule {
   Object.assign(handle, {
     debugKey: (k: LightKeyframe, look: LookKey) => linearKey(k, look),
     debugRows: () => ({ LIGHTS, LIGHTS_BETWEEN, LOOKS }),
+    // Harness only: the night layer's rows, live. Change NIGHT_ROWS, NIGHT_BASE
+    // or NIGHT_LOOK in the page, then debugNight().rebuild() lays them.
+    debugNight: () => ({
+      NIGHT_ROWS,
+      NIGHT_BASE,
+      NIGHT_LOOK,
+      rebuild() {
+        rebuildTrackNight(track);
+        const f = nightNow;
+        nightNow = -1;
+        layNight(f);
+      },
+    }),
   });
   if (ctx.quality) handle.setQuality?.(ctx.quality);
   // First frame: apply the light at the current railU right away.

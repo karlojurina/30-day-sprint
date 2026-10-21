@@ -189,7 +189,25 @@ interface LightStateLike {
   cloudBase: THREE.Color;
   skyHorizon: THREE.Color;
   haze: THREE.Color;
+  /** The night layer here, 0..1 (light.ts state.night); 0 by day and from the Sky Island on. */
+  night?: number;
 }
+
+/**
+ * The night layer (light.ts NIGHT_ROWS): the gulls and the smoke take the
+ * moon's light. Both kept their day colour at full strength at every hour, so
+ * at night a gull and the campfire's smoke read white, lit from inside. At
+ * night 1 the gulls' tint is `gull` times the moonlight's colour, the smoke's
+ * lit side `smokeLit` and its shade `smokeShade` (linear). By day, at the
+ * island and at the arch (night 0) nothing changes.
+ */
+const NIGHT_LIFE = { tint: 0x9aaad8, gull: 0.32, smokeLit: 0.24, smokeShade: 0.1, fire: [0.42, 0.15, 0.04] as const, fireMix: 0.85, fireAge: 0.14 } as const;
+// Tune pass (the critique of 2026-10-20 night): the bottom fifth of a
+// campfire's column (puffs younger than `fireAge` of their life) takes up to
+// `fireMix` of the fire's light at night, `fire` (linear), on each puff's
+// underside, so the fire glows up into its own smoke. Taken evenly across the
+// puffs (0.8, 0.34, 0.09 at 0.55, over a fifth of their life) the second puff
+// came out a tan ball brighter than the flame at a1.
 
 // ── Birds ───────────────────────────────────────────────────────────────────
 
@@ -563,6 +581,8 @@ function softMaterial(sunDir: THREE.Vector3, noise: THREE.Texture, atlas: THREE.
       uCells: { value: cellRow },
       uCellN: { value: cells.length },
       uShare: { value: 1 },
+      uFire: { value: 0 },
+      uFireCol: { value: new THREE.Color(...NIGHT_LIFE.fire) },
     },
     vertexShader: /* glsl */ `
       uniform float uTime;
@@ -581,6 +601,8 @@ function softMaterial(sunDir: THREE.Vector3, noise: THREE.Texture, atlas: THREE.
       varying vec2 vSun;
       varying float vAge;
       varying float vUp;
+      varying float vFireK;
+      varying vec2 vUpDir;
       #include <fog_pars_vertex>
       void main() {
         if (uOn[int(aGroup + 0.5)] < 0.5 || (aMisc.w < 0.5 && fract(aMisc.x * 7.13) > uShare)) {
@@ -604,6 +626,10 @@ function softMaterial(sunDir: THREE.Vector3, noise: THREE.Texture, atlas: THREE.
           ang = aMisc.x * 6.2831 + t * 0.12;
           vAlpha = smoothstep(0.0, 0.04, age) * (1.0 - smoothstep(0.35, 1.0, age)) * aMisc.z;
           vAge = age;
+          // A campfire's column (pairs 0 and 1): its bottom fifth catches the
+          // fire (rise is quick: about the first tenth of life puts a puff 15%
+          // up the column).
+          vFireK = (1.0 - step(1.5, aMisc.y)) * (1.0 - smoothstep(0.0, ${NIGHT_LIFE.fireAge.toFixed(3)}, age));
           // SMOKE_THIN: above the root, one puff of each pair fades out, its partner takes both.
           float chim = step(1.5, aMisc.y);
           float cab = step(3.5, aMisc.y);
@@ -623,6 +649,7 @@ function softMaterial(sunDir: THREE.Vector3, noise: THREE.Texture, atlas: THREE.
           }
         } else {
           vUp = 0.0;
+          vFireK = 0.0;
           // Wisp: drifts on the wind, no rise, a long flat band.
           c = aOrigin + aWind * t + vec3(0.0, sin(t * 0.05 + aMisc.x) * 4.0, 0.0);
           size = aShape.z;
@@ -641,6 +668,8 @@ function softMaterial(sunDir: THREE.Vector3, noise: THREE.Texture, atlas: THREE.
         // The sun's direction on screen, in this puff's rotated frame.
         vec2 s = normalize((viewMatrix * vec4(uSunDir, 0.0)).xy + vec2(1e-4));
         vSun = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * s;
+        // The screen's up in the same frame, for the fire's light on a puff's underside.
+        vUpDir = vec2(sin(ang), cos(ang));
         #include <fog_vertex>
       }`,
     fragmentShader: /* glsl */ `
@@ -649,6 +678,8 @@ function softMaterial(sunDir: THREE.Vector3, noise: THREE.Texture, atlas: THREE.
       uniform vec3 uShade;
       uniform vec3 uCloudTop;
       uniform vec3 uCloudBase;
+      uniform float uFire;
+      uniform vec3 uFireCol;
       varying vec2 vUv;
       varying float vAlpha;
       varying float vSeed;
@@ -656,6 +687,8 @@ function softMaterial(sunDir: THREE.Vector3, noise: THREE.Texture, atlas: THREE.
       varying vec2 vSun;
       varying float vAge;
       varying float vUp;
+      varying float vFireK;
+      varying vec2 vUpDir;
       uniform sampler2D uNoise;
       uniform sampler2D uAtlas;
       uniform vec4 uCells;
@@ -686,6 +719,11 @@ function softMaterial(sunDir: THREE.Vector3, noise: THREE.Texture, atlas: THREE.
           float bw = 0.035 + 0.06 * vAge;
           float band = 0.5 * smoothstep(0.36 - bw, 0.36 + bw, lit) + 0.5 * smoothstep(0.7 - bw, 0.7 + bw, lit);
           col = mix(uShade, uLit, mix(band, ${SMOKE_THIN.mid.toFixed(3)}, ${SMOKE_THIN.flat.toFixed(3)} * vUp));
+          // The night layer (uFire is 0 by day): the fire lights the column's
+          // base from below, so the lowest puffs' undersides take its colour
+          // and their tops stay smoke.
+          float fireUnder = smoothstep(-0.2, 0.9, -dot(vUv, vUpDir));
+          col = mix(col, uFireCol, vFireK * uFire * fireUnder * ${NIGHT_LIFE.fireMix.toFixed(2)});
         } else {
           // A lumpy crown over a flatter base, eroded at the ends.
           float n = lfbm(vec2(vUv.x * 2.6 + vSeed * 3.1 + uTime * 0.004, vUv.y * 1.3 + vSeed));
@@ -1495,6 +1533,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const WHITE = new THREE.Color(1, 1, 1);
   const tint = new THREE.Color();
   const sunTmp = new THREE.Color();
+  const nightTint = hex(NIGHT_LIFE.tint);
+  const nightC = new THREE.Color();
   let animating = false;
   let lastT = -1;
   let timeOverride: number | null = null;
@@ -1511,7 +1551,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     camera.getWorldDirection(camDir);
   };
 
-  const poseBirds = (t: number) => {
+  const poseBirds = (t: number, ls: LightStateLike | null) => {
     let any = false;
     let n = 0;
     for (const f of flocks) {
@@ -1574,6 +1614,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     sunTmp.copy(ctx.sunColor);
     const mx = Math.max(sunTmp.r, sunTmp.g, sunTmp.b, 1e-3);
     tint.setRGB(sunTmp.r / mx, sunTmp.g / mx, sunTmp.b / mx).lerp(WHITE, 0.5);
+    // The night layer (light.ts state.night): moonlit, not lit from inside.
+    const nk = ls?.night ?? 0;
+    if (nk > 0) tint.lerp(nightC.copy(nightTint).multiplyScalar(NIGHT_LIFE.gull), nk);
     birdMat.uniforms.uTint.value.copy(tint);
     return any;
   };
@@ -1595,6 +1638,14 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     // Lit side leans to the sun's colour, shade to the haze.
     u.uLit.value.setHex(0xe8ded2).lerp(ctx.sunColor, 0.16);
     u.uShade.value.setHex(0x7e7c86).lerp(ctx.hazeColor, 0.35);
+    // The night layer: the campfire's and the chimneys' smoke is moonlit grey,
+    // not the day's cream (it stayed white at night, as if lit from inside).
+    const nk = ls?.night ?? 0;
+    if (nk > 0) {
+      u.uLit.value.lerp(nightC.copy(nightTint).multiplyScalar(NIGHT_LIFE.smokeLit), nk);
+      u.uShade.value.lerp(nightC.copy(nightTint).multiplyScalar(NIGHT_LIFE.smokeShade), nk);
+    }
+    u.uFire.value = nk;
     if (ls) {
       u.uCloudTop.value.copy(ls.cloudTop);
       u.uCloudBase.value.copy(ls.cloudBase);
@@ -1750,7 +1801,7 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     const ls = lightHandle();
     refreshView();
     gateLife();
-    const b = poseBirds(t);
+    const b = poseBirds(t, ls);
     const s = poseSoft(t, ls);
     const sh = poseShips(t);
     const g = poseGlow(t, ls, still || timeOverride !== null);

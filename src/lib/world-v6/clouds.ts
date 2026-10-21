@@ -721,6 +721,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
   const tmp = new THREE.Vector3();
   const fwd = new THREE.Vector3();
   let lastU = NaN;
+  /** The light's revision last read: the night layer changes the light where the camera has not moved (light.ts rev). */
+  let lastRev = -1;
   const lastQ = new THREE.Quaternion();
   const applyTier = (t: QualityTier) => {
     geo.instanceCount = streaks.length + heroStreaks.length + Math.round(clouds.length * Math.max(0, Math.min(1, t.clouds)));
@@ -731,8 +733,9 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     if (!light) return false;
     const s = light.state;
     const cam = ctx.camera;
-    if (s.u === lastU && cam.quaternion.equals(lastQ)) return false;
+    if (s.u === lastU && s.rev === lastRev && cam.quaternion.equals(lastQ)) return false;
     lastU = s.u;
+    lastRev = s.rev;
     lastQ.copy(cam.quaternion);
     const u = mat.uniforms;
     (u.uTop.value as THREE.Color).copy(s.cloudTop);

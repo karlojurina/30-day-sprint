@@ -6,6 +6,35 @@
  *   node world-tests/v6-gates.mjs --batch 1      stops a5-a8
  *   node world-tests/v6-gates.mjs --only a5      just that stop (debug)
  *   node world-tests/v6-gates.mjs sheet          gates-sheet.png + gates.json from the stops on disk
+ *   node world-tests/v6-gates.mjs --night        the night rows (below), into shots/v6/gates-night
+ *   node world-tests/v6-gates.mjs --night sheet  their sheet
+ *
+ * The page is pinned to day unless asked (src/lib/world-v6/clock.ts: every
+ * page but /world is), so these rows grade the frames they always graded
+ * whatever the hour of the run.
+ *
+ * NIGHT ROWS (2026-10-20 night, the night layer of light.ts; option D of
+ * _admin/prds/map-review-2026-10-15/real_time_light.md): the opening and the
+ * stops from a1 to the forest on /dev/world-v6?tod=night. The day's gates
+ * cannot hold at night (no sky over the ridges, no bright 5%), so a night
+ * row has its own:
+ *   readable          very dark pixels (luma under 50, the day rows' and the
+ *                     doc's count) at most NIGHT_READABLE[stop]: the doc found
+ *                     about 4 in 5 at the opening under the world's own night;
+ *   lanterns brightest the warm light (hue 12 to 62, saturation over 0.3,
+ *                     value over 0.35: the lanterns, the windows, the campfire
+ *                     and their halos) outshines the moonlit land: its 95th
+ *                     percentile luma at least the 99.5th of every other pixel
+ *                     that is not sky or water (the moon and its path on the
+ *                     sea are highlights of their own), with NIGHT_WARM_MIN
+ *                     warm pixels in frame; the forest has no lanterns (its
+ *                     lessons light the floating steps), so its row asks the
+ *                     day's glow gate instead (NIGHT_GLOW);
+ *   no white beach    where a beach is in frame (terrain under 10 high and
+ *                     not steep: the ID pass writes the world height for
+ *                     terrain), its 90th percentile luma at most NIGHT_BEACH
+ *                     (by day the opening's beach is about 200);
+ * and the day rows' landmark and edge gates.
  *
  * Each stop is the page's own stop depth (stopDepths()), on the rail, not parked.
  * Per stop it renders twice:
@@ -27,11 +56,12 @@ import { fileURLToPath } from "node:url";
 import puppeteer from "puppeteer-core";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const OUT = process.env.GATES_OUT ? path.resolve(process.env.GATES_OUT) : path.join(HERE, "shots/v6/gates");
+const argv = process.argv.slice(2);
+const NIGHT = argv.includes("--night");
+const OUT = process.env.GATES_OUT ? path.resolve(process.env.GATES_OUT) : path.join(HERE, NIGHT ? "shots/v6/gates-night" : "shots/v6/gates");
 fs.mkdirSync(OUT, { recursive: true });
 const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const BASE = process.env.BASE_URL || "http://localhost:3111";
-const argv = process.argv.slice(2);
 const flag = (k) => {
   const i = argv.indexOf(k);
   return i >= 0 ? argv[i + 1] : null;
@@ -61,6 +91,34 @@ const STOPS = [
   [62, "a7", "Creative Strategy", "LM_Observatory", "dark", "#ffc070"],
   [81, "a8", "Job Board", "LM_StoneArch", "sunrise", "#ffd9a0"],
 ];
+/**
+ * The night rows: [trail key or -1 for the opening (depth 0), id, name, landmark mesh, kind, accent].
+ * Accents are left out at night (the moonlit ground shares the day accents' hues).
+ */
+const NIGHT_STOPS = [
+  [-1, "k0", "The opening", "LM_Signpost", "night", null],
+  [2, "a1", "Introduction", "LM_Signpost", "night", null],
+  [7, "a2", "Fundamentals", "LM_Lookout", "night", null],
+  [28, "a3", "Video Ads I", "LM_Waterfall", "night", null],
+  [39, "a4", "Video Ads II", "LM_TrailHut", "night", null],
+  [51, "a5", "Static Ads", "LM_Boathouse", "night", null],
+  [55, "a6", "AI Ads & Content", "LM_GreatTree", "night", null],
+];
+/** The most very dark pixels a night row may have, percent. The forest is dark by design (its day row: 75 to 85). */
+const NIGHT_READABLE = { k0: 62, a1: 65, a2: 65, a3: 68, a4: 70, a5: 78, a6: 88 };
+/** A night row needs at least this many warm pixels (lit lamps in view) for its lanterns gate to pass. */
+const NIGHT_WARM_MIN = 30;
+/**
+ * A beach in frame: its 90th percentile luma at most this. Measured at night
+ * on SwiftShader: 79 at the opening and 81 at a1 with the night's sand
+ * (surfaces.ts SAND_NIGHT), 133 and 131 with the day's sand left on.
+ */
+const NIGHT_BEACH = 105;
+/** The forest has no lanterns (its lessons light the floating steps): its glow carries the frame, as by day. */
+const NIGHT_GLOW = new Set(["a6"]);
+/** The landmark's centre is where the day row has it, except the opening's (the signpost stands right of centre, far). */
+const NIGHT_NO_CX = new Set(["k0"]);
+const ROWS = NIGHT ? NIGHT_STOPS : STOPS;
 /** Walk stops, where trees and rocks must cover 40 to 55 percent of the land. */
 const WALK = new Set(["a1", "a2", "a5"]);
 const CLASS = ["sky", "terrain", "trees", "rocks", "cover", "water", "landmark", "other"];
@@ -238,6 +296,30 @@ function measure(px, id, stop, dims) {
     }
   }
 
+  // Night rows: the beach (terrain under 10 high and not steep; the ID pass
+  // writes a terrain pixel's world height in blue, (y + 20) / 80), and
+  // whether the lamps outshine the land: the warm light (lanterns, windows,
+  // the campfire, their halos: hue 12 to 62, saturation over 0.3, value over
+  // 0.35) against the rest of the land. The sky and the water are left out
+  // (the moon and its path on the sea are their own highlights).
+  const beach = [];
+  const warm = [];
+  const cool = [];
+  for (let i = 0; i < n; i++) {
+    const c = cls[i];
+    if (c === 0 || c === 5) continue;
+    if (c === 1 && ny[i] > 0.55 && (id[i * 4 + 2] / 255) * 80 - 20 < 10) beach.push(L[i]);
+    const [h, s, v] = hsv(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]);
+    if (h >= 12 && h <= 62 && s > 0.3 && v > 0.35) warm.push(L[i]);
+    else cool.push(L[i]);
+  }
+  const pct = (a, q) => {
+    if (!a.length) return null;
+    const s = Float32Array.from(a).sort();
+    return Math.round(s[Math.min(s.length - 1, Math.floor(q * s.length))]);
+  };
+  const beachSorted = Float32Array.from(beach).sort();
+
   const land = n - counts[0] - counts[5];
   const m = {
     p5: Math.round(p(0.05)),
@@ -257,6 +339,12 @@ function measure(px, id, stop, dims) {
     darkPct: +((dark / n) * 100).toFixed(1),
     glowPct: +((glow / n) * 100).toFixed(1),
     glowTealViolet: glow ? +((glowTV / glow) * 100).toFixed(1) : null,
+    warmPx: warm.length,
+    warmP95: pct(warm, 0.95),
+    landP995: pct(cool, 0.995),
+    beachPct: +((beach.length / n) * 100).toFixed(2),
+    beachP90: beach.length ? Math.round(beachSorted[Math.floor(beach.length * 0.9)]) : null,
+    beachMedian: beach.length ? Math.round(beachSorted[Math.floor(beach.length / 2)]) : null,
   };
   return { m, gates: gates(m, sid, kind) };
 }
@@ -282,10 +370,28 @@ function gates(m, sid, kind) {
     add("a6 75-85% dark", m.darkPct >= 75 && m.darkPct <= 85, m.darkPct);
     add("a6 glow teal or violet (60%+ of glow)", m.glowTealViolet !== null && m.glowTealViolet >= 60, `${m.glowTealViolet}% of ${m.glowPct}% glowing`);
   }
+  if (kind === "night") {
+    const most = NIGHT_READABLE[sid];
+    add(`night: readable (very dark <= ${most}%)`, m.darkPct <= most, m.darkPct);
+    if (NIGHT_GLOW.has(sid)) {
+      add("night: the glow carries the frame (teal or violet, 60%+ of the glow)", m.glowTealViolet !== null && m.glowTealViolet >= 60, `${m.glowTealViolet}% of ${m.glowPct}% glowing`);
+    } else {
+      add(
+        "night: lanterns brightest (the warm light's p95 >= the rest of the land's p99.5)",
+        m.warmPx >= NIGHT_WARM_MIN && m.warmP95 !== null && m.landP995 !== null && m.warmP95 >= m.landP995,
+        `warm p95 ${m.warmP95} over ${m.warmPx} px, land p99.5 ${m.landP995}`,
+      );
+    }
+    if (m.beachPct >= 0.2) add(`night: no white beach (p90 <= ${NIGHT_BEACH})`, m.beachP90 !== null && m.beachP90 <= NIGHT_BEACH, `p90 ${m.beachP90}, median ${m.beachMedian}, ${m.beachPct}% of the frame`);
+  }
   add("darkest 20% touches an edge", m.darkEdge > 5, m.darkEdge);
-  add("landmark centre x 0.55-0.75", !!m.landmark.px && m.landmark.cx >= 0.55 && m.landmark.cx <= 0.75, m.landmark.px ? `${m.landmark.cx} (${m.landmark.px} px)` : "not in frame");
+  if (!(kind === "night" && NIGHT_NO_CX.has(sid))) {
+    add("landmark centre x 0.55-0.75", !!m.landmark.px && m.landmark.cx >= 0.55 && m.landmark.cx <= 0.75, m.landmark.px ? `${m.landmark.cx} (${m.landmark.px} px)` : "not in frame");
+  } else {
+    add("landmark in frame", !!m.landmark.px, m.landmark.px ? `${m.landmark.cx} (${m.landmark.px} px)` : "not in frame");
+  }
   if (m.accentPct !== null) add("accent hue elsewhere < 0.5%", m.accentPct < 0.5, m.accentPct);
-  if (WALK.has(sid)) add("trees + rocks 40-55% of land", m.treesRocksOverLand >= 40 && m.treesRocksOverLand <= 55, m.treesRocksOverLand);
+  if (WALK.has(sid) && kind !== "night") add("trees + rocks 40-55% of land", m.treesRocksOverLand >= 40 && m.treesRocksOverLand <= 55, m.treesRocksOverLand);
   return g;
 }
 
@@ -310,7 +416,10 @@ async function renderStops(list) {
   });
   await page.setViewport({ width: W, height: H });
   const tLoad = Date.now();
-  await page.goto(BASE + "/dev/world-v6", { waitUntil: "domcontentloaded", timeout: 120000 });
+  // poster=off: SwiftShader is a software renderer, so since the cheap laptops'
+  // poster mode (poster.ts) the page would show the posters and build no 3D.
+  // The dev page is pinned to day; the night rows ask for night (clock.ts).
+  await page.goto(BASE + "/dev/world-v6?poster=off" + (NIGHT ? "&tod=night" : ""), { waitUntil: "domcontentloaded", timeout: 120000 });
   await page.waitForFunction(() => window.__worldReady || window.__worldError, { timeout: 180000, polling: 300 });
   const err = await page.evaluate(() => window.__worldError || null);
   if (err) throw new Error("world error: " + err);
@@ -323,8 +432,10 @@ async function renderStops(list) {
     const [key, sid, , lm] = stop;
     const t0 = Date.now();
     let res = null;
+    // The stop's index in PLACES order (stopDepths()); -1 is the opening, depth 0.
+    const stopIndex = key < 0 ? -1 : STOPS.findIndex((s) => s[1] === sid);
     for (let attempt = 0; attempt < 2; attempt++) {
-      res = await page.evaluate(renderInPage, STOPS.indexOf(stop), lm);
+      res = await page.evaluate(renderInPage, stopIndex, lm);
       // SwiftShader sometimes hands back a black buffer on a long batch: once more after a pause.
       if (res.meanLuma > 3 || sid === "a4") break;
       console.log(`  ${sid}: black frame, retrying`);
@@ -356,8 +467,8 @@ async function renderStops(list) {
 /** Runs in the page: seed the stop, beauty pass with attribution, ID pass. */
 async function renderInPage(stopIndex, lmName) {
   const sc = window.__worldV6Debug;
-  // The stop's own scroll depth, as the page stops the student there (and v5-strip.mjs "stops").
-  const d = sc.stopDepths()[stopIndex];
+  // The stop's own scroll depth, as the page stops the student there (and v5-strip.mjs "stops"); -1 the opening.
+  const d = stopIndex < 0 ? 0 : sc.stopDepths()[stopIndex];
   window.scrollTo(0, sc.scrollYForDepth(d));
   sc.seedDepth(d);
   const wait = async (n) => {
@@ -451,8 +562,10 @@ async function renderInPage(stopIndex, lmName) {
 
   // 2. ID pass: flat classes, the terrain's world normal Y in green.
   const SM = THREEish.ShaderMaterial;
+  // The terrain also writes its world normal Y (green) and, for the night rows' beach, its world height (blue, (y + 20) / 80).
   const vs = `
     varying float vNy;
+    varying float vY;
     void main() {
       vec3 transformed = vec3( position );
       #ifdef USE_INSTANCING
@@ -462,15 +575,18 @@ async function renderInPage(stopIndex, lmName) {
       #endif
       #ifdef WITH_NY
         vNy = normalize( mat3( modelMatrix ) * normal ).y;
+        vY = ( modelMatrix * vec4( transformed, 1.0 ) ).y;
       #else
         vNy = 0.0;
+        vY = 0.0;
       #endif
       gl_Position = projectionMatrix * mv;
     }`;
   const fs = `
     uniform float uClass;
     varying float vNy;
-    void main() { gl_FragColor = vec4( uClass / 255.0, clamp( vNy, 0.0, 1.0 ), 0.0, 1.0 ); }`;
+    varying float vY;
+    void main() { gl_FragColor = vec4( uClass / 255.0, clamp( vNy, 0.0, 1.0 ), clamp( ( vY + 20.0 ) / 80.0, 0.0, 1.0 ), 1.0 ); }`;
   const mats = new Map();
   const matFor = (c, side, withNy) => {
     const k = `${c}-${side}-${withNy}`;
@@ -580,7 +696,7 @@ async function renderInPage(stopIndex, lmName) {
 async function makeSheet() {
   const rows = [];
   const summary = [];
-  for (const [, sid, name] of STOPS) {
+  for (const [, sid, name] of ROWS) {
     const f = path.join(OUT, `${sid}.json`);
     if (!fs.existsSync(f)) continue;
     const j = JSON.parse(fs.readFileSync(f, "utf8"));
@@ -610,7 +726,7 @@ async function makeSheet() {
       .map(([k, v]) => `${k} ${Math.round(v.tris / 1000)}k`)
       .join(" · ");
   const html = `<html><body style="margin:0;background:#15171a;font:11px/1.35 -apple-system,Helvetica,sans-serif;color:#e8e4dc">
-  <div style="padding:10px 8px 2px;font-size:15px">v5 acceptance gates (bible section 7) · 8 stops at 960x600, GL buffer, no UI · ${new Date().toISOString().slice(0, 16)}</div>
+  <div style="padding:10px 8px 2px;font-size:15px">${NIGHT ? "night rows (?tod=night): the opening and a1 to a6" : "v5 acceptance gates (bible section 7) · 8 stops"} at 960x600, GL buffer, no UI · ${new Date().toISOString().slice(0, 16)}</div>
   <div style="display:grid;grid-template-columns:${cellW}px ${cellW}px 330px;gap:8px;padding:8px">
   ${rows
     .map(
@@ -641,10 +757,10 @@ async function makeSheet() {
 if (argv.includes("sheet")) {
   await makeSheet();
 } else {
-  let list = STOPS;
+  let list = ROWS;
   const only = flag("--only");
   const batch = flag("--batch");
-  if (only) list = STOPS.filter((s) => only.split(",").includes(s[1]));
-  else if (batch !== null) list = STOPS.slice(Number(batch) * 4, Number(batch) * 4 + 4);
+  if (only) list = ROWS.filter((s) => only.split(",").includes(s[1]));
+  else if (batch !== null) list = ROWS.slice(Number(batch) * 4, Number(batch) * 4 + 4);
   await renderStops(list);
 }

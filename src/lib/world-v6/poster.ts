@@ -16,6 +16,17 @@
  *   2. as the whole map on a machine that cannot draw it (no WebGL, a software
  *      renderer, the load probe, or the governor's last step failing);
  *   3. forced from the tuning panel.
+ * Phones show the student's place's poster on top of the list (WorldV6's
+ * PhoneWorld).
+ *
+ * NIGHT (2026-10-21, the night on the student's clock, clock.ts). The opening
+ * and the first six places have a night twin, `<id>-night.webp`, rendered by
+ * the same script at night (`--tod=night`) with the same camera, so the
+ * markers in the manifest hold for both. Creative Strategy is night already
+ * and the arch keeps its sunrise, so a7 and a8 have one poster. Which set
+ * shows is clock.ts posterNight: the page's head picks it before the first
+ * paint (CLOCK_BOOT), the stylesheets read it from <html> (POSTER_TOD_ATTR)
+ * and the page's code from posterSrc(id, night).
  */
 
 export const POSTER_DIR = "/world-v6/posters";
@@ -24,8 +35,12 @@ export const POSTER_H = 1080;
 /** The opening, then the eight stops in PLACES order. */
 export const POSTER_IDS = ["k0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"] as const;
 export type PosterId = (typeof POSTER_IDS)[number];
+/** The posters with a night twin: the opening and the first six places, the ones light.ts's night layer covers. */
+export const NIGHT_POSTER_IDS: readonly PosterId[] = ["k0", "a1", "a2", "a3", "a4", "a5", "a6"];
 
-export const posterSrc = (id: string): string => `${POSTER_DIR}/${id}.webp`;
+/** A poster's file: its night twin when `night` and it has one, else the day's (the same file every time by day). */
+export const posterSrc = (id: string, night = false): string =>
+  night && (NIGHT_POSTER_IDS as readonly string[]).includes(id) ? `${POSTER_DIR}/${id}-night.webp` : `${POSTER_DIR}/${id}.webp`;
 
 /** A place marker where it sat on the poster, as a share of the poster's width and height. */
 export interface PosterMarker {
@@ -51,6 +66,13 @@ export interface PosterManifest {
   height: number;
   made: string;
   posters: PosterEntry[];
+  /** The night twins (NIGHT_POSTER_IDS), rendered with the day's camera: the day entries' markers hold for them. */
+  night?: {
+    made: string;
+    /** The night factor they were drawn at (1: the clock at 23:00). */
+    factor: number;
+    posters: Array<{ id: PosterId; file: string; bytes: number; quality: number }>;
+  };
 }
 
 /**

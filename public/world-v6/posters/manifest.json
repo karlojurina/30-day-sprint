@@ -707,5 +707,53 @@
     }
    ]
   }
- ]
+ ],
+ "night": {
+  "made": "2026-10-21T00:55:52.752Z",
+  "factor": 1,
+  "posters": [
+   {
+    "id": "k0",
+    "file": "k0-night.webp",
+    "bytes": 68102,
+    "quality": 0.8
+   },
+   {
+    "id": "a1",
+    "file": "a1-night.webp",
+    "bytes": 96596,
+    "quality": 0.8
+   },
+   {
+    "id": "a2",
+    "file": "a2-night.webp",
+    "bytes": 92076,
+    "quality": 0.8
+   },
+   {
+    "id": "a3",
+    "file": "a3-night.webp",
+    "bytes": 69482,
+    "quality": 0.8
+   },
+   {
+    "id": "a4",
+    "file": "a4-night.webp",
+    "bytes": 53770,
+    "quality": 0.8
+   },
+   {
+    "id": "a5",
+    "file": "a5-night.webp",
+    "bytes": 88448,
+    "quality": 0.8
+   },
+   {
+    "id": "a6",
+    "file": "a6-night.webp",
+    "bytes": 159262,
+    "quality": 0.8
+   }
+  ]
+ }
 }

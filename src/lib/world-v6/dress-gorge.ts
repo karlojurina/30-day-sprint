@@ -4,6 +4,7 @@ import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { addFootprint, addPathLine, blocked } from "./footprints";
 import { terrainHeight } from "./terrain";
 import { trailDist } from "./rocks";
+import { nightPale } from "./light";
 
 /**
  * v6 gorge dressing (world_art_bible_v6.md 1.4 to 1.11, B7): everything built
@@ -641,6 +642,8 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
 
   const wood = track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
   wood.name = "GorgeWood";
+  // The night layer's pale rule (light.ts NIGHT_PALE): the boulder at the falls' foot read pale pink under the moon.
+  nightPale(wood);
   const leaf = track(new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true, side: THREE.DoubleSide }));
   leaf.name = "GorgeLeaf";
   const glowMat = track(new THREE.MeshBasicMaterial({ vertexColors: true }));

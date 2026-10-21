@@ -11,6 +11,8 @@ import { addPathLine, footprintStats, resetFootprints } from "./footprints";
 import { NO_PROGRESS, sameProgress, type WorldProgress } from "./progress";
 import { CHECKPOINT, type CheckpointLook } from "./checkpoint";
 import { BOUNTY } from "./bounty";
+import { CLOCK } from "./clock";
+import type { LightModule } from "./light";
 
 /**
  * The world-v6 scene: the grey version of the V4 map. V3's camera, park,
@@ -507,6 +509,8 @@ export interface WorldSceneOptions {
    * then nothing. Proves a cold first frame does not lower the tier.
    */
   coldStall?: { ms: number; frames: number };
+  /** NOT SHIPPED, dev only (?mood=morning): light.ts's morning probe. Ignored in production. */
+  mood?: "morning";
 }
 
 // ── Internals ────────────────────────────────────────────────────────────────
@@ -1563,6 +1567,10 @@ export class WorldScene {
   private worldProgress: WorldProgress = NO_PROGRESS;
   /** The discount checkpoint's look (checkpoint.ts), passed to modules with setCheckpoint. */
   private checkpointLook: CheckpointLook = "closed";
+  /** The night factor from the student's clock (setNight), handed to light.ts once it installs. */
+  private nightTarget = 0;
+  /** NOT SHIPPED, dev only: the morning probe (WorldSceneOptions.mood). */
+  private mood: "morning" | null = null;
   private depthMax = 1;
   private spacerEl: HTMLElement | null = null;
 
@@ -1734,6 +1742,7 @@ export class WorldScene {
     this.posterPref = opts.poster ?? "auto";
     this.tryingLive = this.posterPref === "try";
     this.slowGpuFactor = Math.max(1, opts.slowGpu ?? 1);
+    if (process.env.NODE_ENV !== "production" && opts.mood === "morning") this.mood = "morning";
     if (process.env.NODE_ENV !== "production" && opts.coldStall && opts.coldStall.ms > 0) {
       this.coldStall = { ms: Math.min(2000, opts.coldStall.ms), frames: Math.max(1, Math.min(8, Math.round(opts.coldStall.frames || 1))) };
     }
@@ -2859,6 +2868,17 @@ export class WorldScene {
         }
         this.modules.push({ name, module: m, broken: false });
         this.moduleReport[name] = Math.round(performance.now() - t0);
+        // The clock was read before the world was built: the light takes the
+        // night at once, so the first frame drawn (and the load probe that
+        // times it) is the night the student sees, and the modules after it
+        // install under that light.
+        const light = m as Partial<LightModule>;
+        if (typeof light.setNight === "function") {
+          light.setNight(this.nightTarget, 0);
+          // NOT SHIPPED, dev only: the morning probe.
+          if (this.mood) light.setMood?.(this.mood);
+          light.update?.(0, 0);
+        }
       } catch (e) {
         this.moduleReport[name] = `install threw: ${e instanceof Error ? e.message : String(e)}`;
         console.error(`[world-v6] module ${name} failed to install`, e);
@@ -3330,6 +3350,32 @@ export class WorldScene {
     if (look === this.checkpointLook) return;
     this.checkpointLook = look;
     this.forwardCheckpoint();
+  }
+
+  /**
+   * The night factor from the student's clock (clock.ts), 0 day .. 1 night,
+   * for light.ts's night layer. A change wakes one frame and no more: the map
+   * still goes to sleep 45 s after the last input (the idle ladder). Awake,
+   * the change eases in over CLOCK.easeMs (the light animates for that long,
+   * at the ladder's rate); asleep, under reduced motion or before the first
+   * frame, it lands in the one frame it wakes. Before the world is built it
+   * is kept and handed to the light as it installs.
+   */
+  setNight(f: number): void {
+    const n = Math.min(1, Math.max(0, Number.isFinite(f) ? f : 0));
+    this.nightTarget = n;
+    const light = this.scene?.userData.light as LightModule | undefined;
+    if (!light || typeof light.setNight !== "function") return;
+    const awake = this.ready && !this.reducedMotion && this.idle.phase(performance.now()) !== "asleep";
+    light.setNight(n, awake ? CLOCK.easeMs : 0);
+    this.dirty = true;
+    this.wake();
+  }
+
+  /** The night as the page asked for it and as the light shows it (harness). */
+  nightInfo(): { target: number; shown: number | null } {
+    const light = this.scene?.userData.light as LightModule | undefined;
+    return { target: this.nightTarget, shown: light && typeof light.nightFactor === "number" ? light.nightFactor : null };
   }
 
   private forwardCheckpoint() {

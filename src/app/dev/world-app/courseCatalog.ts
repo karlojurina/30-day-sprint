@@ -148,9 +148,12 @@ const PARTIAL_EACH = 6;
 /** In the loom preset: Lovro's own test in the map review Loom (6:16), lessons watched per area. */
 const LOOM_EACH: Readonly<Record<string, number>> = { a3: 3, a4: 7 };
 
+/** In the lake preset: the areas done, so the student's place is the Mirror Lake (Static Ads). */
+const LAKE_AREAS: ReadonlySet<string> = new Set(["a1", "a2", "a3", "a4"]);
+
 /**
  * What ?p= means in course mode. The other presets of the harness count
- * lessons of the placeholder course, so here any name but these four is a
+ * lessons of the placeholder course, so here any name but these five is a
  * student who has watched nothing.
  *
  *   ?p=mid      every counting lesson of areas 1 to 3, and a4l01 to a4l09
@@ -159,6 +162,9 @@ const LOOM_EACH: Readonly<Record<string, number>> = { a3: 3, a4: 7 };
  *   ?p=loom     Lovro's test at 6:16 in the map review Loom: lessons 1 to 3
  *               of Video Ads I and 1 to 7 of Video Ads II, nothing else
  *   ?p=all      every lesson that counts toward progress
+ *   ?p=lake     every counting lesson of areas 1 to 4: the student is at the
+ *               Mirror Lake (the phone's picture of the student's place, at
+ *               night, for the night prototype of 2026-10-20)
  */
 export function coursePresetIds(name: string | null): string[] {
   const counting = COURSE.lessons.filter((l) => l.counts_toward_progress);
@@ -171,6 +177,8 @@ export function coursePresetIds(name: string | null): string[] {
       return COURSE.regions.flatMap((r) => counting.filter((l) => l.region_id === r.id).slice(0, LOOM_EACH[r.id] ?? 0).map((l) => l.id));
     case "all":
       return counting.map((l) => l.id);
+    case "lake":
+      return counting.filter((l) => LAKE_AREAS.has(l.region_id)).map((l) => l.id);
     default:
       return [];
   }

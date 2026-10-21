@@ -19,7 +19,7 @@ import {
   WORLD,
 } from "./layout";
 import { addFootprint } from "./footprints";
-import { NO_REFLECT_LAYER } from "./light";
+import { NIGHT_PALE_GLSL, NO_REFLECT_LAYER } from "./light";
 import { gateIsleTop } from "./dress-gate";
 import type { InstallFn, WorldCtx, WorldModule } from "./modules";
 import { LAKE_OUTER, LAKE_PAD, LAKE_SURFACE, lakePoints, lakeShoreAt, lakeShoreR, terrainHeight } from "./terrain";
@@ -1814,8 +1814,11 @@ function rockMaterial(floor: number, name: string): THREE.MeshLambertMaterial {
   const u = { value: floor };
   mat.onBeforeCompile = (sh) => {
     sh.uniforms.uRockFloor = u;
+    // The night layer's pale rule (light.ts NIGHT_PALE; nothing by day): the
+    // painted rock tops read pale under the moon, the floor with them.
     sh.fragmentShader = sh.fragmentShader
-      .replace("#include <common>", "#include <common>\nuniform float uRockFloor;")
+      .replace("#include <common>", "#include <common>\nuniform float uRockFloor;\n" + NIGHT_PALE_GLSL.pars)
+      .replace("#include <color_fragment>", "#include <color_fragment>\n" + NIGHT_PALE_GLSL.fragment)
       .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\n\ttotalEmissiveRadiance += diffuseColor.rgb * uRockFloor;");
   };
   mat.customProgramCacheKey = () => "v6-rock-floor";

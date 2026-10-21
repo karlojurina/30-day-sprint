@@ -87,6 +87,31 @@ const PAL = {
   forestFloor: "#3c3c2b", // dark green brown
 } as const;
 
+/**
+ * The night layer (light.ts state.night): the dry sand's colour at night 1,
+ * near the wet sand's value, so the beach reads as moonlit sand and not as
+ * snow; and the share of its day value the wet band keeps.
+ */
+const SAND_NIGHT = "#8c8270";
+const NIGHT_WET_SAND = 0.8;
+/**
+ * The shade hue at night 1 (uShadeHue: what the slopes turned from the sun
+ * lean to). By day it is the key's mid sky normalised to luma 1; the night's
+ * navy normalised that way is (0.66, 0.88, 1.53), and under the night's blue
+ * fill the falls' cliff split into saturated blue shade planes beside grey
+ * violet lit ones, a quilt (the critique of 2026-10-20 night). A milder cool
+ * leaves the split to value.
+ */
+const NIGHT_SHADE_HUE = new THREE.Color(0.94, 0.97, 1.08);
+/**
+ * How much of the ground's colour goes grey at night 1 (paintTerrain's
+ * uNightAlb): everywhere, and more on slopes. The falls' cliff kept its warm
+ * lit planes beside cool shade ones under the moon, mauve against blue (hue
+ * 290 against 236); greyed, the moon's colour sets both and they differ in
+ * value.
+ */
+const NIGHT_GROUND_GREY = [0.15, 0.45] as const;
+
 export const lin = (hex: string) => new THREE.Color(hex);
 
 // ── Tunables ─────────────────────────────────────────────────────────────────
@@ -737,6 +762,7 @@ uniform float uShadeOn;
 uniform vec3 uSand, uWetSand, uPath, uPathEdge, uVerge, uBank, uWorn, uMoss, uRockHigh, uForestFloor, uDry;
 uniform vec3 uSunDirS;
 uniform vec3 uShadeHue;
+uniform vec2 uNightAlb;
 uniform vec4 uLake;
 uniform float uSwash;
 // Final pass E: the gully mountain's flank (x strength, y lit gain, z crest
@@ -1203,6 +1229,11 @@ vec3 paintTerrain( vec3 grass ) {
     c = mix( c, cF, flankK );
     gFlank = flankK * cF * vec3( 1.0, 0.5, 0.22 ) * ( uFlank.y * ( 0.55 * lit1 + 0.45 * lit2 ) * ( 1.0 - 0.75 * treesF ) + uFlank.z * crestF );
   }
+  // The night layer (light.ts state.night; 0 by day and from the Sky Island
+  // on): moonlight takes the colour out of the ground, the slopes most, so a
+  // wall's warm lit planes and cool shade planes stop splitting by hue under
+  // the moon (x: everywhere, y: more on slopes).
+  c = mix( c, vec3( sLuma( c ) ), clamp( uNightAlb.x + uNightAlb.y * tilt, 0.0, 1.0 ) );
   return c;
 }
 `;
@@ -1329,6 +1360,12 @@ export interface LightStateLike {
   haze: THREE.Color;
   hemiIntensity: number;
   water: THREE.Color;
+  /** The night layer here, 0..1 (light.ts state.night): 0 by day and from the Sky Island on. */
+  night?: number;
+  /** The moon's disc (direction, colour, how much of it shows), for the water's moon path at night. */
+  moonDir?: THREE.Vector3;
+  moonColor?: THREE.Color;
+  moonVis?: number;
 }
 
 /** light.ts's live state, or null before it has one (or without light.ts). */
@@ -1550,6 +1587,7 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
     uContact: { value: contactTex },
     uNoiseTex: { value: getNoiseTexture(ctx.renderer) as THREE.Texture },
     uShadeHue: { value: new THREE.Color(0.86, 0.98, 1.3) },
+    uNightAlb: { value: new THREE.Vector2(0, 0) },
     uSwash: { value: 0 },
     uFlank: { value: new THREE.Vector3(1, 1.6, 1.4) },
     ...shadeUniforms,
@@ -1647,9 +1685,25 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   // ── Light: slopes away from the sun lean to the key's near shade ───────────
   const sunDirNow = new THREE.Vector3();
   const hueNow = new THREE.Color();
+  // The night layer (light.ts state.night): the sand is the palest ground, and
+  // under the night's raised fill and exposure the beach read as snow. At
+  // night 1 the dry sand is SAND_NIGHT and the wet band NIGHT_WET_SAND of its
+  // day value; by day and from the island on (night 0) both are PAL's.
+  const sandDay = lin(PAL.sand);
+  const wetSandDay = lin(PAL.wetSand);
+  const sandNight = lin(SAND_NIGHT);
+  let sandAt = 0;
   function applyLight(): boolean {
     const s = lightStateOf(scene);
     let changed = false;
+    const nk = s?.night ?? 0;
+    if (nk !== sandAt) {
+      sandAt = nk;
+      tU.uSand.value.copy(sandDay).lerp(sandNight, nk);
+      tU.uWetSand.value.copy(wetSandDay).multiplyScalar(1 - (1 - NIGHT_WET_SAND) * nk);
+      tU.uNightAlb.value.set(NIGHT_GROUND_GREY[0] * nk, NIGHT_GROUND_GREY[1] * nk);
+      changed = true;
+    }
     if (s) {
       // The key's mid sky, normalised to luma 1 and softened: blue by day,
       // violet at sunset, so shade takes the sky's colour (bible 2.3, 2.6).
@@ -1657,6 +1711,8 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
       const l = Math.max(1e-3, 0.2126 * m.r + 0.7152 * m.g + 0.0722 * m.b);
       const k = (v: number) => 1 + (Math.min(1.7, Math.max(0.55, v / l)) - 1) * 0.75;
       hueNow.setRGB(k(m.r), k(m.g), k(m.b));
+      // The night layer: toward NIGHT_SHADE_HUE (by day nk is 0 and this is the sky's own).
+      if (nk > 0) hueNow.lerp(NIGHT_SHADE_HUE, nk);
       if (!hueNow.equals(tU.uShadeHue.value)) {
         tU.uShadeHue.value.copy(hueNow);
         changed = true;

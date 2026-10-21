@@ -177,6 +177,28 @@ const PLUME_FAR_RIM = 0.15;
 const PLUME_LIT = "#edf3fb";
 const PLUME_SHADE = "#c9d7ea";
 const PLUME_SUN_TINT = 0.03;
+/**
+ * The night layer (light.ts state.night): the share of its light each water
+ * surface gives up at night 1. The spray and mist at the falls' foot
+ * (puffs), the opening's plume and the Upper Falls kept their day brightness
+ * at night and read white; the curtain itself stays the brightest water.
+ *
+ * Tune pass (the critique of 2026-10-20 night):
+ *   plume      0.75 -> 0.6: it keeps 40% of its light, so it is the
+ *              opening's first look again once the moon is calmer;
+ *   sea        0.62 -> 0.42 and seaSky 0.5 -> 0.15: the near water was luma
+ *              24, one slab with the treeline (now about 31);
+ *   pathPow    the moon path: the glints' lobe times pow(cos, pathPow) at
+ *              night (by day the factor is exactly 1). With the sun's broad
+ *              lobe the glints covered the whole sea in even white flecks;
+ *              now they gather into a column under the moon's bearing (full
+ *              within about 5 degrees, gone past 13), at moonGlint (0.4 over
+ *              the whole sea before) and in moonPath of the moon's colour;
+ *   stripes    the curtain's dark stripes go this far toward its lit colour,
+ *              so the falls read as water and not a striped denim curtain
+ *              (dark stripes p10 64 against highlights 155 -> 91 and 155).
+ */
+const NIGHT_WATER = { falls: 0.52, puffs: 0.2, plume: 0.6, upper: 0.5, sea: 0.42, seaSky: 0.15, foam: 0.78, moonPath: 0.35, moonGlint: 0.9, pathPow: 200, stripes: 0.45 } as const;
 
 // ── Small helpers ────────────────────────────────────────────────────────────
 
@@ -229,7 +251,8 @@ void main() {
 const SEA_FRAG = /* glsl */ `
 #include <common>
 #include <fog_pars_fragment>
-uniform float uTime, uSwash, uLevel;
+uniform float uTime, uSwash, uLevel, uSkyK, uGlintK;
+uniform vec2 uPath; // the night layer's moon path: its share (0 by day) and the narrowing power
 uniform vec3 uSunDir, uSunCol, uSkyLo, uSkyHi, uDeep, uShallow, uFoam;
 uniform sampler2D uHeight, uNoise;
 uniform vec4 uHB;
@@ -303,8 +326,11 @@ void main() {
 
   // The sky it reflects (flat water; the cells do the rest): the blue of the
   // upper sky on the near and middle water, the gold horizon on the far water.
+  // uSkyK (1 but at night, NIGHT_WATER.seaSky): the sky dome is drawn as it
+  // is and the sea through ACES at the key's exposure, so at night the
+  // reflected navy came out brighter and bluer than the sky above it.
   vec3 R = reflect( -V, vec3( 0.0, 1.0, 0.0 ) );
-  vec3 sky = mix( uSkyLo, uSkyHi * 1.08, smoothstep( 0.0, 0.16, max( R.y, 0.0 ) ) );
+  vec3 sky = mix( uSkyLo, uSkyHi * 1.08, smoothstep( 0.0, 0.16, max( R.y, 0.0 ) ) ) * uSkyK;
   float F = 0.06 + 0.94 * pow( 1.0 - clamp( V.y, 0.0, 1.0 ), 5.0 );
   vec3 base = mix( body, sky * 0.9, clamp( F * 0.85 + 0.1, 0.0, 1.0 ) );
   vec3 darkC = mix( sky * 0.6, body, 0.35 );
@@ -315,9 +341,11 @@ void main() {
   // Glints: bright, near white, inside the sun's lobe.
   vec2 dirH = normalize( -V.xz + 1e-5 );
   vec2 sunH = normalize( uSunDir.xz + 1e-5 );
+  // The night layer's moon path (uPath.x 0 by day: the factor is exactly 1).
+  float pathK = mix( 1.0, pow( max( dot( dirH, sunH ), 0.0 ), uPath.y ), uPath.x );
   // A low sun spreads its path wide across rippled water: a broad lobe, so the
   // glint path reaches in from the sun's side of the frame (the far mirror's: the brightest cells).
-  float lobe = pow( max( dot( dirH, sunH ), 0.0 ), 1.6 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y );
+  float lobe = pow( max( dot( dirH, sunH ), 0.0 ), 1.6 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y ) * pathK;
   float glint = pStep( 0.9 - 0.42 * lobe, 1.0 - min( ca, cb * 1.15 ) ) * pStep( 0.12, lobe ) * max( detail, 0.5 );
   // On the near and middle water (detail) the glints are where both layers'
   // cell borders cross: small and many toward the sun, fewer and smaller out of
@@ -325,9 +353,9 @@ void main() {
   // broken dashes stretched 520 by 55 across the sun's line here, cut at a hard
   // edge of the path; Lovro's "weird streaks", map review 2026-10-15, item 15a.)
   // The far mirror keeps the old glints.
-  float lobeN = pow( max( dot( dirH, sunH ), 0.0 ), 3.0 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y );
-  float spark = pStep( 0.66 - 0.04 * lobeN, min( ca, cb ) ) * smoothstep( 0.02, 0.3, lobeN );
-  glint = mix( glint, spark, detail );
+  float lobeN = pow( max( dot( dirH, sunH ), 0.0 ), 3.0 ) * smoothstep( 0.0, 0.2, 1.0 - V.y ) * smoothstep( -0.05, 0.1, uSunDir.y ) * pathK;
+  float spark = pStep( 0.66 - ( 0.04 + 0.12 * uPath.x ) * lobeN, min( ca, cb ) ) * smoothstep( 0.02, 0.3, lobeN );
+  glint = mix( glint, spark, detail ) * uGlintK;
   col = mix( col, uSunCol * 1.25 + vec3( 0.25 ), glint );
 
   // Foam bands marching up the beach (every ~7.7 s) and breaking into lumps as they die.
@@ -1755,6 +1783,13 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
   const skyHi = new THREE.Color(0.5, 0.6, 0.75);
   const sunCol = ctx.sunColor.clone();
   const sunDir = ctx.sunDir.clone().normalize();
+  /** The sea's and the tarn's sun: sunDir / sunCol by day; at night the moon's path (applyLight). */
+  const seaSunCol = sunCol.clone();
+  const seaSunDir = sunDir.clone();
+  /** How much the sea's glints show: 1 by day, NIGHT_WATER.moonGlint at night 1. */
+  const seaGlint = { value: 1 };
+  /** The night layer's moon path: its share (0 by day) and NIGHT_WATER.pathPow. */
+  const seaPath = { value: new THREE.Vector2(0, NIGHT_WATER.pathPow) };
 
   // ── Sea (and the tarn, the same program) ───────────────────────────────────
   const seaMatFor = (name: string, level: number): THREE.ShaderMaterial => {
@@ -1768,22 +1803,26 @@ export const install: InstallFn = async (ctx: WorldCtx): Promise<WorldModule> =>
           uDeep: { value: lin(WATER_C.sea) },
           uShallow: { value: lin(WATER_C.seaShallow) },
           uFoam: { value: lin(WATER_C.foam) },
+          uSkyK: { value: 1 },
         },
       ]),
       vertexShader: WATER_VERT,
       fragmentShader: SEA_FRAG,
     });
-    // Shared by reference (merge() clones values).
+    // Shared by reference (merge() clones values). The sea's sun is its own
+    // pair (the sun's own by day): at night its glints follow the moon.
     Object.assign(m.uniforms, {
       uTime: time,
       uSwash: swash,
       uHeight: { value: heightTex },
       uNoise: noise,
       uHB: { value: hbU },
-      uSunDir: { value: sunDir },
-      uSunCol: { value: sunCol },
+      uSunDir: { value: seaSunDir },
+      uSunCol: { value: seaSunCol },
       uSkyLo: { value: skyLo },
       uSkyHi: { value: skyHi },
+      uGlintK: seaGlint,
+      uPath: seaPath,
     });
     mats.push(m);
     return m;
@@ -2474,16 +2513,34 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
   const tmpC = new THREE.Color();
   const across = new THREE.Vector2(FLOW_ACROSS[0], FLOW_ACROSS[1]); // the main sheet's across direction (mainSheet above)
   let lastSig = NaN;
+  /** The night the sea and the tarn were last set for (0: their day colours, untouched). */
+  let seaNight = 0;
   function applyLight(): boolean {
     const s = lightStateOf(scene);
     const sd = s ? s.sunDir : ctx.sunDir;
     const sc = s ? s.sunColor : ctx.sunColor;
-    const sig = sd.x * 7.1 + sd.y * 3.3 + sd.z * 1.7 + sc.r * 2.9 + sc.g * 5.3 + (s ? s.skyHorizon.r * 11 + s.haze.g * 13 : 0);
+    const nk = s?.night ?? 0;
+    // The night layer's moon path: the water's glints and lit side follow the
+    // moon's disc where the night shows it (by day, and from the island on,
+    // nk is 0 and this is the sun's, as it always was).
+    const moonK = s && s.moonDir && s.moonColor ? nk * clamp01(s.moonVis ?? 0) : 0;
+    const md = moonK > 0 ? s!.moonDir! : null;
+    const sig = sd.x * 7.1 + sd.y * 3.3 + sd.z * 1.7 + sc.r * 2.9 + sc.g * 5.3 + (s ? s.skyHorizon.r * 11 + s.haze.g * 13 : 0) + nk * 17.3 + (md ? md.x * 19.1 + md.y * 23.3 + moonK * 29.7 : 0);
     if (sig === lastSig) return false;
     lastSig = sig;
     sunDir.copy(sd).normalize();
     const dayK = s ? clamp01((s.sunIntensity / 4.5) * smooth(-3, 6, s.sunEl)) : 1;
     sunCol.copy(sc).multiplyScalar(0.35 + 0.9 * dayK);
+    seaSunDir.copy(sunDir);
+    seaSunCol.copy(sunCol);
+    seaGlint.value = 1;
+    seaPath.value.x = 0;
+    if (md) {
+      seaSunDir.lerp(md, moonK).normalize();
+      seaSunCol.lerp(tmpC.copy(s!.moonColor!).multiplyScalar(NIGHT_WATER.moonPath), moonK);
+      seaGlint.value = 1 - (1 - NIGHT_WATER.moonGlint) * moonK;
+      seaPath.value.x = moonK;
+    }
     if (s) {
       skyLo.copy(s.skyHorizon).lerp(s.haze, 0.35);
       skyHi.copy(s.skyMid).lerp(s.skyTop, 0.5);
@@ -2496,21 +2553,46 @@ float surfNoise( vec2 p ) { vec2 i = floor( p ); vec2 f = fract( p ); vec2 u = f
     const sideLen = Math.hypot(sunDir.x, sunDir.z) || 1;
     curtainU.uSunFront.value = 0.15 + 0.55 * smooth(-0.5, 0.6, front) * dayK;
     curtainU.uSunSide.value = ((sunDir.x * across.x + sunDir.z * across.y) / sideLen) * 0.9 * dayK;
-    curtainU.uDay.value = 0.3 + 0.7 * (s ? clamp01(0.35 * s.hemiIntensity + 0.75 * dayK) : 1);
+    // The night layer (light.ts state.night; 0 by day and from the island on):
+    // uDay follows the fill, which the night raises so the land reads, and the
+    // falls, the mist, the plume and the spray stayed white at night as if lit
+    // from inside. Each takes NIGHT_WATER's share less light at night 1; uDay
+    // carries the curtain's, the river's, the pool's and the spray's.
+    const nd = (k: number) => 1 - k * nk;
+    curtainU.uDay.value = (0.3 + 0.7 * (s ? clamp01(0.35 * s.hemiIntensity + 0.75 * dayK) : 1)) * nd(NIGHT_WATER.falls);
     curtainU.uLit.value.copy(lin(WATER_C.curtainLit)).lerp(tmpC.copy(sc).multiplyScalar(0.95), 0.2);
     curtainU.uShade.value.copy(lin(WATER_C.curtainShade)).lerp(skyLo, 0.25);
+    // The night layer: the curtain's dark stripes toward its lit colour
+    // (NIGHT_WATER.stripes), or under the night's navy sky the falls read as a
+    // striped curtain (dark stripes 64 against highlights 155; by day 1.4 to 1).
+    if (nk > 0) curtainU.uShade.value.lerp(curtainU.uLit.value, NIGHT_WATER.stripes * nk);
     // Puffs: lit by the sun's colour, shaded in the sky's; dimmer at night.
-    puffU.uLitC.value.copy(lin(WATER_C.foam)).lerp(tmpC.copy(sc), 0.35).multiplyScalar(0.25 + 0.75 * curtainU.uDay.value);
-    puffU.uShadeC.value.copy(skyHi).lerp(skyLo, 0.5).multiplyScalar(0.72 * curtainU.uDay.value);
+    puffU.uLitC.value.copy(lin(WATER_C.foam)).lerp(tmpC.copy(sc), 0.35).multiplyScalar((0.25 + 0.75 * curtainU.uDay.value) * nd(NIGHT_WATER.puffs));
+    puffU.uShadeC.value.copy(skyHi).lerp(skyLo, 0.5).multiplyScalar(0.72 * curtainU.uDay.value * nd(NIGHT_WATER.puffs));
     // The plume: warm white on the sun side (only a touch of the sun's colour), pale blue grey in shade.
-    plumeU.uLitC.value.copy(lin(PLUME_LIT)).lerp(tmpC.copy(sc), PLUME_SUN_TINT).multiplyScalar(0.3 + 0.7 * curtainU.uDay.value);
-    plumeU.uShadeC.value.copy(lin(PLUME_SHADE)).lerp(skyHi, 0.12).multiplyScalar(0.3 + 0.7 * curtainU.uDay.value);
+    plumeU.uLitC.value.copy(lin(PLUME_LIT)).lerp(tmpC.copy(sc), PLUME_SUN_TINT).multiplyScalar((0.3 + 0.7 * curtainU.uDay.value) * nd(NIGHT_WATER.plume));
+    plumeU.uShadeC.value.copy(lin(PLUME_SHADE)).lerp(skyHi, 0.12).multiplyScalar((0.3 + 0.7 * curtainU.uDay.value) * nd(NIGHT_WATER.plume));
     // The Upper Falls: cream, catching the sun's colour.
-    upperU.uLit.value.copy(lin(WATER_C.upper)).lerp(tmpC.copy(sc), 0.2).multiplyScalar(0.4 + 0.7 * curtainU.uDay.value);
-    upperU.uShade.value.copy(skyLo).lerp(lin(WATER_C.curtainShade), 0.4).multiplyScalar(0.9 * curtainU.uDay.value);
+    upperU.uLit.value.copy(lin(WATER_C.upper)).lerp(tmpC.copy(sc), 0.2).multiplyScalar((0.4 + 0.7 * curtainU.uDay.value) * nd(NIGHT_WATER.upper));
+    upperU.uShade.value.copy(skyLo).lerp(lin(WATER_C.curtainShade), 0.4).multiplyScalar(0.9 * curtainU.uDay.value * nd(NIGHT_WATER.upper));
     poolU.uShade.value.copy(skyHi).lerp(lin(WATER_C.curtainShade), 0.5).multiplyScalar(0.65);
     const sl = s ? s.water : null;
     if (sl) (seaMat.uniforms.uDeep.value as THREE.Color).copy(lin(WATER_C.sea)).lerp(sl, 0.4);
+    // The sea and the tarn are unlit (their body and foam are fixed colours),
+    // so the night's higher exposure lit them brighter than by day: an electric
+    // blue sea with a white rim. At night 1 they keep NIGHT_WATER.sea of their
+    // body and NIGHT_WATER.foam of their foam; by day they are exactly as set.
+    if (nk > 0 || seaNight > 0) {
+      seaNight = nk;
+      for (const m of [seaMat, tarnMat]) {
+        const u = m.uniforms;
+        if (m !== seaMat || !sl) (u.uDeep.value as THREE.Color).copy(lin(WATER_C.sea));
+        (u.uDeep.value as THREE.Color).multiplyScalar(nd(NIGHT_WATER.sea));
+        (u.uShallow.value as THREE.Color).copy(lin(WATER_C.seaShallow)).multiplyScalar(nd(NIGHT_WATER.sea));
+        (u.uFoam.value as THREE.Color).copy(lin(WATER_C.foam)).multiplyScalar(nd(NIGHT_WATER.foam));
+        u.uSkyK.value = nd(NIGHT_WATER.seaSky);
+      }
+    }
     return true;
   }
   applyLight();

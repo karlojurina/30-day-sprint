@@ -123,8 +123,8 @@ import { StudentNameStandInContext } from "@/components/world/WorldMap";
  * part of it: with the two ids, every lesson that has a video plays test
  * video 1 (fixtureTransport.ts). Its presets are p0, mid (areas 1 to 3 done,
  * lessons 1 to 9 of area 4), partial (the first 6 lessons of every area), loom
- * (Lovro's test in the map review Loom: 3 of area 3, 7 of area 4) and all; any
- * other name is p0.
+ * (Lovro's test in the map review Loom: 3 of area 3, 7 of area 4), lake (areas
+ * 1 to 4 done: the student at the Mirror Lake) and all; any other name is p0.
  * world-tests/v6-course.mjs walks it. Its watch lessons with no video can't
  * be finished on the map, as in the app (map-model.ts); on the placeholder
  * course "Mark watched (dev)" finishes any lesson, so there the map passes

@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useMemo, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useMemo, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -17,7 +17,7 @@ import { WorldCelebrations } from "@/components/world/WorldCelebrations";
 import { approvalOnMap } from "@/lib/world/celebrations";
 import { useLessonAccess, useLessonTransport } from "@/lib/world/useLessonTransport";
 import { STUDENT_HOME, WORLD_LOCK_MODE } from "@/lib/world/access";
-import { posterSrc } from "@/lib/world-v6/poster";
+import { CLOCK_LIVE_BASE, markPosterTod } from "@/lib/world-v6/clock";
 import u from "@/components/world/world-ui.module.css";
 
 /** The development harness's pretend student's name (FixtureStudentProvider.tsx). /world provides nothing and reads AuthContext. */
@@ -69,6 +69,14 @@ function firstNameOf(name: string | null | undefined): string | null {
  */
 export function WorldMap() {
   const { status, model } = useMapModel();
+  const { base } = useWorldStage();
+  // The posters' day or night (clock.ts posterNight), on <html> before the
+  // card below paints. The page head's script already wrote it on the page
+  // the visit started on; this writes it for this page, which is the same
+  // answer unless the visit came in by a link (the login's redirect).
+  useLayoutEffect(() => {
+    markPosterTod(base === CLOCK_LIVE_BASE);
+  }, [base]);
 
   if (status === "loading") {
     return (
@@ -129,7 +137,7 @@ const routesAsked = new Set<string>();
 /** The map with a real student in it. Mounted once the model is the eight-area one. */
 function SourcedMap({ model }: { model: ReadyMapModel }) {
   const router = useRouter();
-  const { openAreaId, lessonId, href, open } = useWorldStage();
+  const { openAreaId, lessonId, href, open, base } = useWorldStage();
   // The lesson page's own transport, so what is asked for here is what its player finds.
   const transport = useLessonTransport();
   // Nothing is asked for ahead while the membership is not active.
@@ -230,7 +238,8 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
 
   return (
     <>
-      <WorldV6 source={source} corner={corner} />
+      {/* The students' map follows their own clock (night after dark, clock.ts); the dev harness stays on day unless its address asks. */}
+      <WorldV6 source={source} corner={corner} liveClock={base === CLOCK_LIVE_BASE} />
       {/* Over the map, outside it: the discount's questions and the two celebrations. */}
       <WorldDiscountForm form={discountForm} paused={lessonId !== null} />
       <WorldCelebrations
@@ -255,9 +264,8 @@ function Card({
   return (
     <div
       data-world-card={kind}
-      className={`${tokens.tokens} ${u.ground}`}
-      // The landing's still view, behind the loading card only.
-      style={poster ? { backgroundImage: `url(${posterSrc("k0")})` } : undefined}
+      // The landing's still view, behind the loading card only: day or night by the clock (the stylesheet's .groundPoster).
+      className={`${tokens.tokens} ${u.ground}${poster ? ` ${u.groundPoster}` : ""}`}
     >
       <div className={`${u.card} ${u.note}`}>{children}</div>
     </div>

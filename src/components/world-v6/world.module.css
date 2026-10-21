@@ -1667,6 +1667,31 @@
   filter: blur(14px);
 }
 
+/* After dark on the student's clock (clock.ts posterNight, written on <html>
+   by the page head's script before the first paint): the night poster's,
+   made the same way from public/world-v6/posters/k0-night.webp
+   (world-tests/v6-posters.mjs --tod=night prints it). */
+:global(html[data-world-tod="night"]) .poster::before {
+  background-image: url("data:image/webp;base64,UklGRvIAAABXRUJQVlA4IOYAAADwBgCdASowABsAPm0qkUYkIiGhMBVdUIANiWUApawubW7sejbr/l5U6NnGj4xTpb0s7iN8P4lY8ustHhWQJmTgAP78s9C5xkzzS6dMD/q787fN7vO2ClH5sUGD98NfZAYb8sc9RsNehzQyL4vkPSjUDa2DLAsEPLSYUvqqy+ow7BKVITkpb49ja+1f3xxehXgAcwqepCi2j3luqXZvnz5ckY7H0dQ9SMKEfJ/bnv8Uio2E0uo17FgBauAL7XQjfmCvlS0qKlOTeN1lLvolg5RgVb/EuDEY0yfHPzJ9bejV0ootsj8AAA==");
+}
+
+/* The landing poster, the opening's, from the first paint: drawn by the
+   stylesheet, so the day or the night file is chosen before any of the
+   page's code runs, and only that one downloads. Only where the 3D draws
+   (the complement of WorldV6.tsx NARROW_QUERY, its twin in
+   client-tests/media-query.mjs), so a phone never downloads it. Once the
+   page runs, the same file goes in the img's src (the one the posters'
+   code reads and swaps), drawn exactly over this. */
+@media (min-width: 760px) and (min-height: 500px), (min-width: 760px) and (pointer: fine), (min-width: 760px) and (pointer: none) {
+  .posterLanding {
+    background: url("/world-v6/posters/k0.webp") center / cover no-repeat;
+  }
+
+  :global(html[data-world-tod="night"]) .posterLanding {
+    background-image: url("/world-v6/posters/k0-night.webp");
+  }
+}
+
 .posterImg {
   position: absolute;
   inset: 0;

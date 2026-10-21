@@ -858,8 +858,12 @@ Both failed into *plausible* states rather than errors, and in both cases a stal
   listed product, or the earliest of all 10 when none is listed. "The
   course" below means the products the list names. What the wider
   list brings: the sync makes a row for every Apex and ETfB member, and
-  on plans outside `PAYING_WHOP_PLAN_IDS` they stay out of the admin
-  surfaces and the CSM crons and get no first payment from the sync
+  on plans outside `PAYING_WHOP_PLAN_IDS` they stay out of the counts
+  that filter by plan (the Dashboard, Insights, the journey's counts)
+  and the CSM crons, and get no first payment from the sync; All
+  students and the 30% page list anyone with a real first payment of
+  any product (admin rebuild 2, D9), so an ETfB owner who has paid
+  shows there (a question for the owner, 2026-10-21)
   (an Apex seat is a free team link, so with no payment of its own its
   `first_paid_at` stays empty and the 30% checkpoint reads "Ask the
   team"). Which of a user's memberships the row holds follows one

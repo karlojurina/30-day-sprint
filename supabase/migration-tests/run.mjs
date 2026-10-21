@@ -4710,7 +4710,8 @@ console.log('\n=== 29. v108: only the server calls increment_region_quiz_attempt
 // equals the same fact worked out here separately: lesson_is_complete()
 // and the two views' rules written again in JavaScript, the 30% rule of
 // src/lib/world/discount.ts with its dates and its 14 days read from the
-// source, the plan ids read from constants.ts and plans.ts, and the dates
+// source, the plan ids read from constants.ts (its code and, since plans.ts
+// went in admin rebuild 2's review fix round, its comment), and the dates
 // in Croatia time through Intl, as src/lib/admin/croatia-dates.ts reads
 // them. A member is put on each edge of the rule, so a date in the file
 // that drifts from the source fails here.
@@ -4737,7 +4738,10 @@ console.log('\n=== 30. the admin spot check (diagnostics/admin-today-spotcheck.s
   const SHARED = constOf(discountTs, 'DISCOUNT_SHARED_DEADLINE')
   const WINDOW_DAYS = Number(src('lib/constants.ts').match(/export const DISCOUNT_WINDOW_DAYS = (\d+);/)?.[1])
   const MONTHLY = idsIn(src('lib/constants.ts'), 'export const PAYING_WHOP_PLAN_IDS')
-  const YEARLY = idsIn(src('lib/admin/plans.ts'), 'export const YEARLY_WHOP_PLAN_IDS')
+  // The two yearly plans. src/lib/admin/plans.ts named them until admin rebuild 2's review fix round removed it (no
+  // page shows a plan since D4); constants.ts names both in its comment beside PAYING_WHOP_PLAN_IDS, and the file
+  // under test labels them "Yearly". Held here, and kept only while constants.ts still names each, so a drift fails.
+  const YEARLY = ['plan_fMMqxAljrzu75', 'plan_VFDntXQf9cYMo'].filter((id) => src('lib/constants.ts').includes(id))
   note(Number.isFinite(ELIGIBLE) && Number.isFinite(LAUNCH) && WINDOW_DAYS > 0 && MONTHLY.length === 1 && YEARLY.length === 2,
        "the rule's two dates, its shared deadline and its days, the monthly plan and the two yearly ones, read from the source",
        asJson({ ELIGIBLE: new Date(ELIGIBLE).toISOString(), LAUNCH: new Date(LAUNCH).toISOString(), SHARED, WINDOW_DAYS, MONTHLY, YEARLY }))

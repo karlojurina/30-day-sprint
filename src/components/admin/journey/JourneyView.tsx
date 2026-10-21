@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, Pill, T } from "@/components/admin/ui";
-import { ListHeader, LoadError, SkeletonRows, TAP } from "@/components/admin/list-parts";
+import { FailedMeta, ListHeader, ListPage, LoadError, SkeletonRows, TAP } from "@/components/admin/list-parts";
 import { ActivityPill, FactsLine, Meter, STATUS_WORDS } from "@/components/admin/people-parts";
 import { ProblemNotice, ReadFailure } from "@/components/admin/review-parts";
 import { Block, DiscountBlock, StatGrid, useStudent } from "@/components/admin/students/StudentDetailView";
+import { StudentName } from "@/components/admin/student-name";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import type { Journey, JourneyCard } from "@/lib/admin/journey-board";
@@ -28,25 +29,17 @@ import { ACTIVITY_ORDER, ACTIVITY_TEXT } from "@/lib/useJourneyPaceCounts";
  * fresh for each student (keyed by id), so it never shows the last
  * student's answers (fix lane G1, admin-2), and an answer that lands after
  * it moved on is dropped (useStudent).
+ *
+ * The render review's fix round: the board sits in the page's column, as
+ * every other page's content does (it broke out to 1584px, and at 1280px wide
+ * its Month 2+ column was cut off at the window's edge). From 1120px wide the
+ * six columns fit side by side in it; narrower, the board scrolls sideways
+ * inside itself, never the page. A card's name is the name of every admin
+ * page (student-name.tsx: a link to the student's page, @username after it);
+ * the rest of the card is one button under it that opens the drawer.
  */
 
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; data: Journey };
-
-/**
- * ListPage's gutters (16px on a phone) with the page's standard column for
- * the header and the lines above the board (BoardColumn, ListPage's width),
- * so the header sits where it sits on every other page; only the board
- * breaks out, to 1584px: the six columns sit side by side from about 1400px,
- * and under that the board scrolls sideways inside itself.
- */
-function BoardPage({ children }: { children: React.ReactNode }) {
-  return <div className="px-4 sm:px-8 lg:px-12 pt-4 sm:pt-10 pb-28">{children}</div>;
-}
-
-/** ListPage's content width (1180px less its 48px gutters at the widest). */
-function BoardColumn({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
-  return <div style={{ maxWidth: wide ? 1584 : 1084, margin: "0 auto" }}>{children}</div>;
-}
 
 /** The activity colours, on each tile's dot (status is never colour alone: its word is beside it), as Insights' Activity right now. */
 const ACTIVITY_DOT = {
@@ -105,7 +98,15 @@ export function JourneyView({
     <ListHeader
       title="Student journey"
       description={`The new program's students: a first payment on or after ${dayLabel(data?.launchedAt ?? "2026-10-08T22:00:00.000Z")}, on any plan, by days since that payment. Open a card for the student.`}
-      meta={data ? `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${data.total} ${data.total === 1 ? "student" : "students"}` : "Loading"}
+      meta={
+        data ? (
+          `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${data.total} ${data.total === 1 ? "student" : "students"}`
+        ) : loaded.kind === "error" ? (
+          <FailedMeta />
+        ) : (
+          "Loading"
+        )
+      }
       // Kept while the board loads or failed, so the header never jumps (the review's fix round).
       action={
         <Button variant="raised" size="md" busy={busy || loaded.kind === "loading"} disabled={loaded.kind === "loading"} onClick={() => void refresh()}>
@@ -117,65 +118,62 @@ export function JourneyView({
 
   if (loaded.kind === "loading") {
     return (
-      <BoardPage>
-        <BoardColumn>
-          {header(null)}
-          <SkeletonRows rows={4} label="Loading the journey" />
-        </BoardColumn>
-      </BoardPage>
+      <ListPage>
+        {header(null)}
+        <SkeletonRows rows={4} label="Loading the journey" />
+      </ListPage>
     );
   }
   if (loaded.kind === "error") {
     return (
-      <BoardPage>
-        <BoardColumn>
-          {header(null)}
-          <LoadError title="Couldn't load the journey." detail={loaded.error} onRetry={() => void refresh()} busy={busy} />
-        </BoardColumn>
-      </BoardPage>
+      <ListPage>
+        {header(null)}
+        <LoadError title="Couldn't load the journey." detail={loaded.error} onRetry={() => void refresh()} busy={busy} />
+      </ListPage>
     );
   }
 
   const data = loaded.data;
   return (
-    <BoardPage>
-      <BoardColumn>
-        {header(data)}
-        {refreshError && <ProblemNotice text="Couldn't refresh the board, so it may be out of date. Press Refresh." raw={refreshError} />}
-        {data.problems.map((p) => (
-          <ProblemNotice key={p.text} text={p.text} raw={p.error} />
-        ))}
+    <ListPage>
+      {header(data)}
+      {refreshError && <ProblemNotice text="Couldn't refresh the board, so it may be out of date. Press Refresh." raw={refreshError} />}
+      {data.problems.map((p) => (
+        <ProblemNotice key={p.text} text={p.text} raw={p.error} />
+      ))}
 
-        {data.activity && (
-          <div
-            aria-label="Activity of the students who have not churned"
-            className="grid grid-cols-2 sm:grid-cols-4"
-            style={{ gap: 8, marginBottom: 16 }}
-          >
-            {ACTIVITY_ORDER.map((label) => (
-              <Card key={label} padding={12}>
-                <p style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
-                  {data.activity?.[label] ?? 0}
-                </p>
-                <p className="flex items-center" style={{ gap: 6, fontSize: 12, color: "var(--color-text-secondary)", marginTop: 4 }}>
-                  <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: ACTIVITY_DOT[label], flex: "none" }} />
-                  {ACTIVITY_TEXT[label]}
-                </p>
-              </Card>
-            ))}
-          </div>
-        )}
-      </BoardColumn>
+      {data.activity && (
+        <div
+          aria-label="Activity of the students who have not churned"
+          className="grid grid-cols-2 sm:grid-cols-4"
+          style={{ gap: 8, marginBottom: 16 }}
+        >
+          {ACTIVITY_ORDER.map((label) => (
+            <Card key={label} padding={12}>
+              <p style={{ fontSize: 22, fontWeight: 600, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums", lineHeight: 1.1 }}>
+                {data.activity?.[label] ?? 0}
+              </p>
+              <p className="flex items-center" style={{ gap: 6, fontSize: 12, color: "var(--color-text-secondary)", marginTop: 4 }}>
+                <span aria-hidden="true" style={{ width: 8, height: 8, borderRadius: 999, background: ACTIVITY_DOT[label], flex: "none" }} />
+                {ACTIVITY_TEXT[label]}
+              </p>
+            </Card>
+          ))}
+        </div>
+      )}
 
-      {/* Six columns of at least 208px (264px on a phone). Under that the board
-          scrolls sideways inside itself; the page never does. The columns grow
-          with the page: one scroll, the page's. */}
-      <BoardColumn wide>
-        <div style={{ overflowX: "auto", paddingBottom: 8, scrollSnapType: "x proximity" }}>
-          <div
-            className="grid grid-cols-[repeat(6,minmax(264px,1fr))] lg:grid-cols-[repeat(6,minmax(208px,1fr))]"
-            style={{ gap: 12, alignItems: "start" }}
-          >
+      {/* The board, in the page's column. From 1120px wide its six columns (164px at least, 8px apart) fit in
+          it side by side; narrower, they keep 232px each and the board scrolls sideways inside itself, out to
+          the window's edges on a phone. The page never scrolls sideways. */}
+      <div
+        data-board=""
+        className="max-sm:-mx-4 max-sm:px-4"
+        style={{ overflowX: "auto", paddingBottom: 8, scrollSnapType: "x proximity", scrollPaddingInline: 16 }}
+      >
+        <div
+          className="grid grid-cols-[repeat(6,minmax(232px,1fr))] lg:grid-cols-[repeat(6,minmax(164px,1fr))]"
+          style={{ gap: 8, alignItems: "start" }}
+        >
             {data.columns.map((col) => (
               <section key={col.id} aria-label={col.label} style={{ minWidth: 0, scrollSnapAlign: "start" }}>
                 <div className="flex items-baseline justify-between" style={{ padding: "0 4px", marginBottom: 8 }}>
@@ -205,58 +203,79 @@ export function JourneyView({
                 </div>
               </section>
             ))}
-          </div>
         </div>
-      </BoardColumn>
+      </div>
 
       {drawer && <JourneyDrawer key={drawer} studentId={drawer} transport={transport} onClose={() => setDrawer(null)} />}
-    </BoardPage>
+    </ListPage>
   );
 }
 
+/**
+ * A card: the student's name (a link to their page, @username after it), the
+ * day, the area and the pills, the progress and the last activity. One button
+ * lies under the whole card and opens the drawer; the words above it let
+ * every press through to it but the name's.
+ */
 function JourneyCardView({ card: c, onOpen }: { card: JourneyCard; onOpen: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onOpen}
+    <div
+      data-journey-card={c.id}
       className="surface-resting"
       style={{
-        flex: "none",
-        width: "100%",
-        textAlign: "left",
-        padding: 14,
+        position: "relative",
         minHeight: TAP,
         borderRadius: "var(--radius-control)",
         background: "var(--color-bg-card)",
         border: "1px solid var(--color-border)",
-        cursor: "pointer",
         color: "inherit",
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
       }}
     >
-      <span className="flex items-baseline" style={{ gap: 8, width: "100%" }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text-primary)", flex: "1 1 auto", minWidth: 0, overflowWrap: "anywhere" }}>
-          {c.name}
+      <button
+        type="button"
+        onClick={onOpen}
+        style={{
+          position: "absolute",
+          inset: 0,
+          width: "100%",
+          padding: 0,
+          border: "none",
+          borderRadius: "inherit",
+          background: "transparent",
+          cursor: "pointer",
+        }}
+      >
+        <span className="sr-only">Show {c.name}</span>
+      </button>
+      <div style={{ position: "relative", pointerEvents: "none", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        {/* The name and @username wrap as the card's width asks; the day always on the line under them, so the
+            cards of a column read alike. */}
+        <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+          <span className="flex flex-wrap items-baseline" style={{ gap: "0 8px", minWidth: 0 }}>
+            <StudentName id={c.id} name={c.name} username={c.username} size={14} />
+          </span>
+          <span style={{ fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>Day {c.day}</span>
         </span>
-        <span style={{ fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums", flex: "none" }}>Day {c.day}</span>
-      </span>
-      <span className="flex flex-wrap items-center" style={{ gap: 6 }}>
-        {c.area && <AreaChip numeral={c.area.numeral} name={c.area.name} />}
-        {c.activity && <ActivityPill label={c.activity} />}
-        {c.canceling && <Pill tone="warning">Canceling</Pill>}
-        {c.status === "past_due" && <Pill tone="warning">Payment failed</Pill>}
-      </span>
-      <span style={{ display: "block", width: "100%" }}>
-        <Meter value={c.progress} />
-      </span>
-      <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>Last active {c.lastActive === "Never" ? "never" : c.lastActive}</span>
-    </button>
+        <span className="flex flex-wrap items-center" style={{ gap: 6 }}>
+          {c.area && <AreaChip numeral={c.area.numeral} name={c.area.name} />}
+          {c.activity && <ActivityPill label={c.activity} />}
+          {c.canceling && <Pill tone="warning">Canceling</Pill>}
+          {c.status === "past_due" && <Pill tone="warning">Payment failed</Pill>}
+        </span>
+        <span style={{ display: "block", width: "100%" }}>
+          <Meter value={c.progress} />
+        </span>
+        <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>Last active {c.lastActive === "Never" ? "never" : c.lastActive}</span>
+      </div>
+    </div>
   );
 }
 
-/** The area a student is in: its numeral, as the map numbers the areas, and its name. A place, not a status, so no dot. */
+/**
+ * The area a student is in: its numeral, as the map numbers the areas, and
+ * its name. A place, not a status, so no dot; the numeral in the primary ink
+ * (Airy Blue is for links: the render review's fix round).
+ */
 function AreaChip({ numeral, name }: { numeral: string; name: string }) {
   return (
     <span
@@ -272,7 +291,7 @@ function AreaChip({ numeral, name }: { numeral: string; name: string }) {
         color: "var(--color-text-secondary)",
       }}
     >
-      <span style={{ color: "var(--color-accent-dark)", fontWeight: 600 }}>{numeral}</span>
+      <span style={{ color: "var(--color-text-primary)", fontWeight: 600 }}>{numeral}</span>
       {name}
     </span>
   );
@@ -326,7 +345,10 @@ function JourneyDrawer({ studentId, transport, onClose }: { studentId: string; t
         {loaded.kind === "ready" && (
           <>
             <div className="flex flex-wrap items-baseline justify-between" style={{ gap: "0 12px" }}>
-              <h2 style={{ ...T.heading, overflowWrap: "anywhere", minWidth: 0 }}>{loaded.data.name}</h2>
+              {/* The name as on every admin page: a link to the student's page, @username after it. */}
+              <h2 className="flex flex-wrap items-baseline" style={{ ...T.heading, gap: "2px 10px", overflowWrap: "anywhere", minWidth: 0 }}>
+                <StudentName id={loaded.data.id} name={loaded.data.name} username={loaded.data.username} size={20} />
+              </h2>
               <Link
                 href={`/admin/students/${encodeURIComponent(loaded.data.id)}`}
                 style={{ display: "inline-flex", alignItems: "center", minHeight: TAP, fontSize: 13, fontWeight: 600, color: "var(--color-accent-dark)", whiteSpace: "nowrap" }}

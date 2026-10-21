@@ -3,11 +3,12 @@
  *
  * Every 2 hours (vercel.json, at minute 40): reads from Whop whether each
  * student in the 30%'s window already has a discount on their next renewal,
- * and stores it in student_membership_discounts. The window: a first payment
- * from 1 October (DISCOUNT_ELIGIBLE_FROM), membership active or past_due, and
- * no approved or applied 30% request. The run and the rule are
- * src/lib/membership-discount.ts refreshMembershipDiscounts; this file is its
- * door.
+ * and stores it in student_membership_discounts. The window: a 30% window
+ * still open at the run's start (discountWindowOpen in discount.ts: a first
+ * payment from 1 October and a deadline not past), membership active or
+ * past_due, and no approved or applied 30% request. The run and the rule
+ * are src/lib/membership-discount.ts refreshMembershipDiscounts; this file
+ * is its door.
  *
  * The map reads the stored flag (/api/student/data), and so does the admin's
  * 30% page. The request routes and the approve route ask Whop again

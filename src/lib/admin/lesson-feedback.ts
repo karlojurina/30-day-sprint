@@ -59,6 +59,8 @@ export interface FeedbackStudent {
   id: string;
   name: string | null;
   email: string | null;
+  /** A Whop or a Discord username, shown after the name as on every admin page (the render review's fix round). */
+  discord_username?: string | null;
 }
 
 /** Everything the page is built from, as the reads hand it over. */
@@ -118,7 +120,7 @@ export async function loadLessonFeedback(supabase: SupabaseClient): Promise<Less
   const students: FeedbackStudent[] = [];
   for (let i = 0; i < ids.length; i += STUDENT_BATCH) {
     const batch = ids.slice(i, i + STUDENT_BATCH);
-    const { data, error } = await supabase.from("students").select("id, name, email").in("id", batch);
+    const { data, error } = await supabase.from("students").select("id, name, email, discord_username").in("id", batch);
     if (error) return { ok: false, failed: [`students: ${error.message}`] };
     students.push(...((data ?? []) as FeedbackStudent[]));
   }

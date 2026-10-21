@@ -53,6 +53,9 @@ const SEEDS: Seed[] = [
   ["r-priya", "Priya Nair", "rejected", "2026-08-30T10:00:00.000Z", [3, "Way too fast", null, "More live calls, please."]],
 ];
 
+/** Made-up usernames, shown after the names as on every admin page. */
+const USERNAMES: Record<string, string> = { maya: "maya.lq", jonah: "jonah_p", ethan: "ethan.cole", ruby: "ruby.ok" };
+
 function data(): SurveyData {
   const applications: SurveyApplication[] = SEEDS.map(([id, name, status, created_at, values]) => {
     const answers: SurveyAnswer[] = QUESTIONS.map((q, i) => {
@@ -71,7 +74,7 @@ function data(): SurveyData {
       id,
       status,
       created_at,
-      student: name ? { id: `p-${id.slice(2)}`, name, email: `${id.slice(2)}@example.com` } : null,
+      student: name ? { id: `p-${id.slice(2)}`, name, email: `${id.slice(2)}@example.com`, discord_username: USERNAMES[id.slice(2)] ?? null } : null,
       answers,
     };
   }).sort((a, b) => (a.created_at < b.created_at ? 1 : -1));

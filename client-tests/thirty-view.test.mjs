@@ -752,8 +752,8 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
   const c1 = request(C.view, 'r-c1')
   ok(!c1.verdict.ok && c1.verdict.reason === 'has-discount' && c1.verdict.text === 'This student already has a discount on their membership (evolve10).' && !c1.verdict.oldCourse,
      'C1: every video done, evolve10 on the membership: no, in the approve route\'s own words', show(c1.verdict))
-  ok(show(c1.coupon) === show({ code: 'evolve10', discounted: true, renewalPrice: 87.3, planRenewalPrice: 97, checkedAt: '2026-10-21T06:40:00.000Z' }),
-     'C1: the coupon on the row, its prices as numbers (Postgres numeric reaches the route as a string)', show(c1.coupon))
+  ok(show(c1.coupon) === show({ code: 'evolve10', promoCodeId: 'promo_devEvolve', discounted: true, ours: false, renewalPrice: 87.3, planRenewalPrice: 97, checkedAt: '2026-10-21T06:40:00.000Z' }),
+     'C1: the coupon on the row, its code\'s id, not the team\'s own code, its prices as numbers (Postgres numeric reaches the route as a string)', show(c1.coupon))
   ok(approve(C.per.get('s-c1'), new Date(WED), c1).said.ok, 'C1: (the rule alone would have said yes: the coupon is what refuses)')
   ok(request(C.view, 'r-c2').verdict.ok && request(C.view, 'r-c2').coupon === null, 'C2: a row read from another membership says nothing: the rule\'s yes, no coupon')
   ok(request(C.view, 'r-c3').verdict.ok && request(C.view, 'r-c3').coupon?.discounted === false && request(C.view, 'r-c3').coupon?.code === 'welcome50',

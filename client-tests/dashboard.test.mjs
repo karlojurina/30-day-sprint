@@ -280,21 +280,31 @@ console.log('\n=== Avg progress: one metric, from the switch ===')
     avg_progress_cohort: d < '2026-10-19' ? 36.47 : d === '2026-10-19' ? '2.66' : 2.71,
   }))
   const a = M.avgProgress(rows, days, '2026-10-19T14:33:33.972Z')
-  ok(a.kind === 'value' && show(a.line.map((p) => p.date)) === show(['2026-10-19', '2026-10-20']),
-     'the line starts on the switch\'s date: no old-course point, so no cliff', show(a.line))
+  const readings = a.line.filter((p) => p.value !== null)
+  // The render review's fix round: the line is on the 14 days' axis, as the other lines are, with no reading
+  // before the switch's date; it used to hold the 2 days alone, stretched across the whole tile.
+  ok(a.kind === 'value' && show(a.line.map((p) => p.date)) === show(days) && show(readings.map((p) => p.date)) === show(['2026-10-19', '2026-10-20']),
+     'the line holds the 14 days; its readings start on the switch\'s date: no old-course point, so no cliff', show(a.line))
+  ok(a.line.slice(0, 12).every((p) => p.value === null) && a.from === '2026-10-19',
+     'the 12 days before the switch are empty (never the old course\'s 36%), and the tile says the line is from 19 October', show({ from: a.from }))
   ok(a.value === 2.71 && a.line[a.line.length - 1].value === a.value && a.date === '2026-10-20',
      'the number is the line\'s last point: one metric', show({ v: a.value }))
-  ok(a.line[0].value === 2.66, 'a numeric column that arrives as a string is read')
+  ok(a.line.find((p) => p.date === '2026-10-19').value === 2.66, 'a numeric column that arrives as a string is read')
   ok(a.builtAt === '2026-10-20T00:30:12.000Z', 'it carries when that row was written')
   const gap = M.avgProgress(rows.filter((r) => r.snapshot_date !== '2026-10-20'), days, '2026-10-19T14:33:33.972Z')
-  ok(gap.kind === 'value' && gap.value === 2.66 && gap.date === '2026-10-19' && gap.line[1].value === null,
+  ok(gap.kind === 'value' && gap.value === 2.66 && gap.date === '2026-10-19' && gap.line.at(-1).value === null && gap.line.length === 14,
      'with no row today, the number is the newest row there is, and today is a gap')
   const none = M.avgProgress(rows.filter((r) => r.snapshot_date < '2026-10-19'), days, '2026-10-19T14:33:33.972Z')
   ok(none.kind === 'none' && none.since === '2026-10-19', 'no row since the switch: no number, and the day it waits from', show(none))
   const noSwitch = M.avgProgress(rows, days, null)
-  ok(noSwitch.kind === 'value' && noSwitch.line.length === 14, 'before any switch, the whole 14 days')
+  ok(noSwitch.kind === 'value' && noSwitch.line.length === 14 && noSwitch.line.every((p) => p.value !== null) && noSwitch.from === null,
+     'before any switch, the whole 14 days, every one read, and no "from"')
   const old = M.avgProgress(rows, M.trendDays(at('2026-11-24T09:00:00.000Z')), '2026-10-19T14:33:33.972Z')
   ok(old.kind === 'none' && old.since === '2026-11-11', 'a switch before the window floors nothing (and these rows are all older)')
+  const novDays = M.trendDays(at('2026-11-24T09:00:00.000Z'))
+  const nov = M.avgProgress(novDays.map((d) => ({ snapshot_date: d, created_at: null, avg_progress: 9, avg_progress_cohort: 9 })), novDays, '2026-10-19T14:33:33.972Z')
+  ok(nov.kind === 'value' && nov.from === null && nov.line.every((p) => p.value === 9),
+     'a switch before the 14 days: every day read, and no "from" on the tile', show({ from: nov.from }))
   const legacy = M.avgProgress([{ snapshot_date: '2026-10-20', created_at: null, avg_progress: 4.2, avg_progress_cohort: null }], days, null)
   ok(legacy.kind === 'value' && legacy.value === 4.2 && legacy.builtAt === null, 'a row with no cohort column falls back to the legacy one')
 

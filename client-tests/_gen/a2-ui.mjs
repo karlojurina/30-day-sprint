@@ -232,12 +232,12 @@ function buttonStyle(variant, size, busy, disabled = false) {
         minHeight: "var(--admin-button-min-height, auto)",
     };
 }
-export function Button({ children, variant = "ghost", size = "sm", busy = false, onClick, href, type = "button", disabled, title, }) {
+export function Button({ children, variant = "ghost", size = "sm", busy = false, onClick, href, type = "button", disabled, title, expanded, controls, }) {
     const style = buttonStyle(variant, size, busy, disabled);
     if (href) {
         return (_jsx(Link, { href: href, style: style, title: title, children: children }));
     }
-    return (_jsx("button", { type: type, onClick: onClick, disabled: busy || disabled, style: style, title: title, children: children }));
+    return (_jsx("button", { type: type, onClick: onClick, disabled: busy || disabled, style: style, title: title, "aria-expanded": expanded, "aria-controls": controls, children: children }));
 }
 /* ─── Tabs ─── */
 /**

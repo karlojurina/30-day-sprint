@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button, Card, EmptyState, T } from "@/components/admin/ui";
-import { ListHeader, ListPage, LoadError, TAP, pressPill } from "@/components/admin/list-parts";
-import { ReadFailure } from "@/components/admin/review-parts";
+import { FailedMeta, ListHeader, ListPage, LoadError, PILL_ROW, TAP, pressPill } from "@/components/admin/list-parts";
+import { FoldSummary, ReadFailure } from "@/components/admin/review-parts";
 import { TrendChart, pointDay } from "@/components/admin/dashboard/TrendChart";
 import { ACTIVITY_ORDER, ACTIVITY_TEXT } from "@/lib/useJourneyPaceCounts";
 import type { PaceCounts } from "@/lib/useJourneyPaceCounts";
@@ -163,7 +163,15 @@ export function InsightsView({ transport, pace }: { transport: InsightsTransport
       <ListHeader
         title="Insights"
         description="How the course is going, from a snapshot written every night at 00:30 UTC."
-        meta={updatedAt ? `Updated ${clockLabel(updatedAt)}${loading ? " · Updating" : ""}` : "Loading"}
+        meta={
+          updatedAt ? (
+            `Updated ${clockLabel(updatedAt)}${loading ? " · Updating" : ""}`
+          ) : snapshots.kind === "error" ? (
+            <FailedMeta text="Couldn't load the snapshots" />
+          ) : (
+            "Loading"
+          )
+        }
         action={
           <Button variant="raised" size="md" busy={loading} onClick={refreshAll}>
             Refresh
@@ -172,7 +180,7 @@ export function InsightsView({ transport, pace }: { transport: InsightsTransport
       />
 
       <div className="flex flex-wrap items-end" style={{ gap: 12, marginBottom: 20 }}>
-        <div role="group" aria-label="Range" className="flex flex-wrap" style={{ gap: 8 }}>
+        <div role="group" aria-label="Range" className={`${PILL_ROW} max-sm:w-[calc(100%+2rem)]`} style={{ gap: 8 }}>
           {PRESETS.map((p) => (
             <button
               key={p.value}
@@ -356,15 +364,14 @@ function PaceCard({ counts }: { counts: PaceCounts }) {
  * label, the number in the text colour, so green and red stay for the
  * changes' arrows and a status is never colour alone (its word is the
  * label). The Student journey's tiles show activity the same way (the
- * review's fix round). The accent stays on Mean progress, the one number
- * the course's progress is read by.
+ * review's fix round). Mean progress was in Airy Blue until the render
+ * review's fix round: Airy Blue marks a link, and no number here is one.
  */
 const CELL_TONE = {
   plain: { dot: null, number: "var(--color-text-primary)" },
   success: { dot: "var(--color-success)", number: "var(--color-text-primary)" },
   warning: { dot: "var(--color-warning)", number: "var(--color-text-primary)" },
   danger: { dot: "var(--color-danger)", number: "var(--color-text-primary)" },
-  accent: { dot: null, number: "var(--color-accent-dark)" },
 } as const;
 
 type CellTone = keyof typeof CELL_TONE;
@@ -424,7 +431,7 @@ function SprintersCard({ read, onRetry }: { read: Read<SprinterProgress>; onRetr
         <p style={{ ...T.body, lineHeight: 1.5 }}>Couldn&apos;t count the lessons, so no progress is shown.</p>
       ) : (
         <div className="grid grid-cols-2" style={{ gap: 12 }}>
-          <Cell label="Mean progress" value={value(d?.avgProgress)} suffix="%" tone="accent" description="Average completion across them." />
+          <Cell label="Mean progress" value={value(d?.avgProgress)} suffix="%" tone="plain" description="Average completion across them." />
           <Cell label="Median progress" value={value(d?.medianProgress)} suffix="%" tone="plain" description="Half of them are above this." />
         </div>
       )}
@@ -640,9 +647,7 @@ function CalcNotes({ courseIsNew }: { courseIsNew: boolean }) {
   ];
   return (
     <details style={{ marginTop: 24 }}>
-      <summary style={{ ...T.body, fontWeight: 600, minHeight: TAP, display: "flex", alignItems: "center", cursor: "pointer", color: "var(--color-text-secondary)" }}>
-        How these are worked out
-      </summary>
+      <FoldSummary>How these are worked out</FoldSummary>
       <dl className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: "14px 24px", marginTop: 6 }}>
         {entries.map((e) => (
           <div key={e.label}>

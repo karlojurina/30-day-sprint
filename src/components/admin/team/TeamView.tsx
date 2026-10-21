@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button, Card, EmptyState, Pill, T } from "@/components/admin/ui";
-import { ListHeader, ListPage, LoadError, NoticeStack, SkeletonRows } from "@/components/admin/list-parts";
+import { FailedMeta, ListHeader, ListPage, LoadError, NoticeStack, SkeletonRows } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
 import { Field, INPUT } from "@/components/admin/templates/form-parts";
 import { dayLabel } from "@/lib/admin/croatia-dates";
@@ -131,7 +131,15 @@ export function TeamView({
 
   return (
     <ListPage>
-      {header(loaded.kind === "ready" ? `${loaded.members.length} ${loaded.members.length === 1 ? "member" : "members"}` : "Loading")}
+      {header(
+        loaded.kind === "ready" ? (
+          `${loaded.members.length} ${loaded.members.length === 1 ? "member" : "members"}`
+        ) : loaded.kind === "error" ? (
+          <FailedMeta />
+        ) : (
+          "Loading"
+        ),
+      )}
       <InviteCard onInvite={invite} />
       <h2 style={{ ...T.eyebrow, color: "var(--color-text-secondary)", margin: "24px 0 8px" }}>Members</h2>
       {loaded.kind === "loading" && <SkeletonRows rows={3} label="Loading the team" />}

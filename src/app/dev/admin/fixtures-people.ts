@@ -334,6 +334,7 @@ export function fixturePeopleTransport(opts: { state: PeopleState; reloadFails?:
         id: p.id,
         name: p.name,
         email: p.email,
+        discord_username: p.username ?? null,
         membership_status: p.status,
         first_paid_at: p.paid,
         last_active_at: p.lastActive ?? null,

@@ -436,6 +436,8 @@ export function Button({
   type = "button",
   disabled,
   title,
+  expanded,
+  controls,
 }: {
   children: React.ReactNode;
   variant?: ButtonVariant;
@@ -446,6 +448,10 @@ export function Button({
   type?: "button" | "submit";
   disabled?: boolean;
   title?: string;
+  /** A button that opens and closes something: aria-expanded (admin rebuild 2, the render review's fix round). */
+  expanded?: boolean;
+  /** The id of what it opens: aria-controls. */
+  controls?: string;
 }) {
   const style = buttonStyle(variant, size, busy, disabled);
   if (href) {
@@ -462,6 +468,8 @@ export function Button({
       disabled={busy || disabled}
       style={style}
       title={title}
+      aria-expanded={expanded}
+      aria-controls={controls}
     >
       {children}
     </button>

@@ -30,10 +30,10 @@ import { DISCOUNT_LAUNCH_DATE } from "@/lib/world/discount";
 import { activityLabel, type ActivityLabel } from "@/lib/curriculum-reset";
 import { isCanceling } from "@/lib/admin/metrics-definitions";
 import type { CourseActivity } from "@/lib/useJourneyPaceCounts";
-import { agoText, dayNumber, failed, ok, readCountingLessons, readOf, type Read, type Problem } from "./people-common";
+import { agoText, bareUsername, dayNumber, failed, ok, readCountingLessons, readOf, type Read, type Problem } from "./people-common";
 
 /** The columns a card needs. Never `*`, and never a plan. */
-export const JOURNEY_COLUMNS = "id, name, email, membership_status, first_paid_at, last_active_at, cancel_scheduled_at";
+export const JOURNEY_COLUMNS = "id, name, email, discord_username, membership_status, first_paid_at, last_active_at, cancel_scheduled_at";
 
 /** The memberships the board shows: on the program, or churned from it. */
 export const JOURNEY_STATUSES = ["active", "past_due", "canceled"] as const;
@@ -42,6 +42,8 @@ export interface JourneyStudent {
   id: string;
   name: string | null;
   email: string | null;
+  /** A Whop or a Discord username: the card shows it after the name, as every admin page does. */
+  discord_username?: string | null;
   membership_status: string;
   first_paid_at: string;
   last_active_at: string | null;
@@ -115,6 +117,8 @@ const NUMERALS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
 export interface JourneyCard {
   id: string;
   name: string;
+  /** students.discord_username without its "@", or null. */
+  username: string | null;
   day: number;
   status: string;
   canceling: boolean;
@@ -172,6 +176,7 @@ export function buildJourney(
     byColumn.get(columnFor(s.membership_status, day))?.push({
       id: s.id,
       name: s.name?.trim() || s.email?.trim() || "No name on file",
+      username: bareUsername(s.discord_username),
       day,
       status: s.membership_status,
       canceling: isCanceling(s),

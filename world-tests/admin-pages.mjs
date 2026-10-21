@@ -4,7 +4,7 @@
  * page, in every state, at a phone's width and two desktop widths. Today,
  * which this file also drew, was removed in admin rebuild 2 (D2).
  *
- *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty,dash,tasks,people,feedback,templates,survey,team,insights,review]
+ *   node world-tests/admin-pages.mjs [--only routes,frame,signin,thirty,dash,tasks,people,feedback,templates,survey,team,insights,review,render]
  *
  * Opens BASE_URL (default http://localhost:3226): a development server
  * started for the run in the app root, `PORT=3226 npx next dev`. This script
@@ -80,6 +80,18 @@
  *           than wrapping at 375 and 360. The round's other checks sit in
  *           the parts of the pages they changed (each says "the review's
  *           fix round")
+ *   render  admin rebuild 2's render review fix round, across the pages: a
+ *           failed read said in every header; the journey's board in the
+ *           page's column at 1280 and 1440, scrolling inside itself on a
+ *           phone; the Dashboard's sections the same distance apart and
+ *           Month 2's bar with no knob; the 30% page's and Tasks' actions on
+ *           the right from 768px and under the words on a phone; every pill
+ *           row on one line on a phone; a student's numbers on one line and a
+ *           failed one plainly not a value; the Whop sync in one line; the
+ *           name part on every page; the folds' markers and Show settings'
+ *           aria-expanded; the team's own ECOM30 code with no warning; the
+ *           course switch page and the not-found page in the dark look, and
+ *           the old admin addresses answered 404 by the catch-all
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
  * or two of them), and each one is measured. It fails on: a horizontal
@@ -158,7 +170,7 @@ if (wanted('routes')) {
   for (const s of distinct.slice(0, 40)) console.log(`       "${s}"`)
 }
 
-const needBrowser = ['frame', 'signin', 'thirty', 'dash', 'tasks', 'people', 'feedback', 'templates', 'survey', 'team', 'insights', 'review'].some(wanted)
+const needBrowser = ['frame', 'signin', 'thirty', 'dash', 'tasks', 'people', 'feedback', 'templates', 'survey', 'team', 'insights', 'review', 'render'].some(wanted)
 if (!needBrowser) finish()
 
 fs.mkdirSync(OUT, { recursive: true })
@@ -745,15 +757,16 @@ if (wanted('thirty')) {
     expect(!/Open in Discord|Copy @|No Discord linked|Survey answers|Can still earn|Mark messaged|No message yet|Messaged |Deadline |Paid |Whop progress not pulled yet/.test(text),
       'no Discord buttons, survey answers, Can still earn, last contact, Mark messaged, deadline or payment facts, and no "not pulled" pill')
     const maya = await row('Maya Lindqvist')
+    // The row's words are RowSplit's first column (the render review's fix round): its first line is the student.
     const head = await maya.evaluate((r) => {
-      const top = r.firstElementChild
+      const top = r.querySelector('[data-row-split]').firstElementChild.firstElementChild
       return { link: top.querySelector('a')?.getAttribute('href'), parts: [...top.children].map((c) => c.textContent.trim()) }
     })
     expect(head.link === '/admin/students/p-maya' && JSON.stringify(head.parts) === JSON.stringify(['Maya Lindqvist', '@maya.lq', 'Active']),
       'the top line: the name (to the student page), @username, Active', JSON.stringify(head))
     expect((await rowText(maya)).includes('Applied Mon 19 Oct') && (await rowText(maya)).includes('Every video up to the checkpoint was done in time.') && (await rowText(maya)).includes('61 of 61 videos'),
       'then the date applied and the verdict line with the count', await rowText(maya))
-    const priyaHead = await (await row('Priya Raman')).evaluate((r) => [...r.firstElementChild.children].map((c) => c.textContent.trim()))
+    const priyaHead = await (await row('Priya Raman')).evaluate((r) => [...r.querySelector('[data-row-split]').firstElementChild.firstElementChild.children].map((c) => c.textContent.trim()))
     expect(JSON.stringify(priyaHead) === JSON.stringify(['Priya Raman', 'Payment failed']), 'a member whose payment failed, with no @username: name and "Payment failed"', JSON.stringify(priyaHead))
     const priya = await rowText(await row('Priya Raman'))
     expect(priya.includes('Not every video up to the checkpoint is done yet.') && priya.includes('57 of 61 videos') && priya.includes('Whop progress not pulled since the switch'),
@@ -766,20 +779,25 @@ if (wanted('thirty')) {
       const link = [...r.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Approve anyway')
       return { name: r.querySelector('a')?.textContent, yes: r.textContent.includes('Every video up to the checkpoint was done in time.'), open: !!b && !b.disabled, link: !!link }
     }))
-    expect(approvable.filter((a) => a.open).map((a) => a.name).join() === 'Tara Quinn,Hugo Lindahl,Maya Lindqvist,Jonah Pereira' && approvable.every((a) => a.open !== a.link),
-      'Approve is on where the verdict is yes (Hugo, Maya, Jonah) and beside the coupon\'s verdict (Tara: the route asks Whop again); every other row has Approve anyway in its place, never both', JSON.stringify(approvable))
+    // The render review's fix round: the coupon's row (Tara) has no Approve at all, and no Approve anyway.
+    expect(approvable.filter((a) => a.open).map((a) => a.name).join() === 'Hugo Lindahl,Maya Lindqvist,Jonah Pereira'
+        && approvable.every((a) => (a.name === 'Tara Quinn' ? !a.open && !a.link : a.open !== a.link)),
+      'Approve is on where the verdict is yes (Hugo, Maya, Jonah); the coupon\'s row (Tara) has neither Approve nor Approve anyway; every other row has Approve anyway in its place, never both', JSON.stringify(approvable))
     expect(approvable.filter((a) => a.link).map((a) => a.name).join() === 'Leo Hartmann,Sofia Marin,Maximilian Featherstonehaugh-Smythe,Priya Raman',
       'the Approve anyway link after every refusal but the coupon\'s: Leo, Sofia, Max, Priya, never Tara', JSON.stringify(approvable))
     const notChecked = await page.$$eval('.list-row', (rs) => rs.filter((r) => r.textContent.includes('Coupon not checked yet. Approve asks Whop first.')).map((r) => r.querySelector('a')?.textContent))
-    expect(notChecked.join() === 'Leo Hartmann,Hugo Lindahl', 'the rows whose membership has no stored check say "Coupon not checked yet": Leo and Hugo, no other', notChecked.join())
+    expect(notChecked.join() === 'Hugo Lindahl',
+      '"Coupon not checked yet" only beside the rule\'s yes: Hugo; never Leo, refused for his first payment (the render review\'s fix round)', notChecked.join())
     const buttons = await (await row('Jonah Pereira')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => ({ t: b.textContent.trim(), bg: getComputedStyle(b).backgroundColor, border: getComputedStyle(b).borderTopColor })))
     const reject = buttons.find((b) => b.t === 'Reject')
     const approve = buttons.find((b) => b.t === 'Approve')
     expect(reject && approve && reject.bg === 'rgba(0, 0, 0, 0)' && approve.bg !== 'rgba(0, 0, 0, 0)',
       'Reject is the ghost button, the row\'s "no" as Dismiss is on Tasks; Approve is raised', JSON.stringify(buttons))
     const tara = await row('Tara Quinn')
-    expect((await rowText(tara)).includes(`${COUPON_LINE} Approve asks Whop again first.`) && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled)) && (await isNull(await linkIn(tara))) && !(await rowText(tara)).includes('videos'),
-      'Tara, every video done and evolve10 stored for her membership: the coupon\'s line, Approve on (it asks Whop again and refuses while the code is there), no Approve anyway, no count', await rowText(tara))
+    const taraReject = await (await buttonIn(tara, 'Reject')).evaluate((b) => getComputedStyle(b).backgroundColor)
+    expect((await rowText(tara)).includes(COUPON_LINE) && !(await rowText(tara)).includes('Approve asks Whop again') && (await isNull(await buttonIn(tara, 'Approve')))
+        && (await isNull(await linkIn(tara))) && !(await rowText(tara)).includes('videos') && taraReject !== 'rgba(0, 0, 0, 0)',
+      'Tara, every video done and evolve10 stored for her membership: the coupon\'s line, no Approve and no Approve anyway, Reject the one action, raised; no count (the render review\'s fix round)', await rowText(tara))
     const link = await (await linkIn(await row('Priya Raman'))).evaluate((b) => {
       const cs = getComputedStyle(b)
       const r = b.getBoundingClientRect()
@@ -811,8 +829,13 @@ if (wanted('thirty')) {
     expect(notice.text.startsWith(`Hugo Lindahl: ${COUPON_LINE}`) && !notice.copy,
       'Whop says now that evolve10 applies: the approve route\'s own sentence, naming the code, with nothing to copy', JSON.stringify(notice))
     const hugo = await row('Hugo Lindahl')
-    expect((await rowText(hugo)).includes(COUPON_LINE) && !(await rowText(hugo)).includes('Coupon not checked yet') && (await isNull(await linkIn(hugo))),
-      'the list is read again: Hugo\'s row now shows the coupon the route stored, no "not checked" line, no Approve anyway after it')
+    expect((await rowText(hugo)).includes(COUPON_LINE) && !(await rowText(hugo)).includes('Coupon not checked yet') && (await isNull(await linkIn(hugo))) && (await isNull(await buttonIn(hugo, 'Approve'))),
+      'the list is read again: Hugo\'s row now shows the coupon the route stored, no "not checked" line, no Approve and no Approve anyway after it')
+    await press(await buttonIn(hugo, 'Reject'))
+    await page.waitForSelector('input[placeholder^="For example"]')
+    const prefilled = await page.$eval('input[placeholder^="For example"]', (i) => i.value)
+    expect(prefilled === 'Already has a discount on their membership (evolve10)', 'his Reject opens with the reason filled in, naming the code', prefilled)
+    await press(await buttonIn(await row('Hugo Lindahl'), 'Cancel'))
     counts = await tabCounts()
     expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'and he stays on Applied, nothing approved', counts.join(' | '))
     for (const size of SIZES) {
@@ -1016,8 +1039,9 @@ if (wanted('dash')) {
       expect(t['open-tasks'].numbers[0] === '95' && t['open-tasks'].href === '/admin/tasks' && t['to-decide'].numbers[0] === '3' && t['to-decide'].href === '/admin/discounts',
         `${label}: Open tasks 95, links to Tasks; 30% to decide 3, links to the 30% page`, JSON.stringify([t['open-tasks'].numbers, t['to-decide'].numbers]))
       const avgRows = await tableOf('avg-progress')
-      expect(t['avg-progress'].numbers[0] === '2.7%' && JSON.stringify(avgRows) === JSON.stringify(['Mon 19 Oct 2.66%', 'Tue 20 Oct 2.71%']),
-        `${label}: Avg progress 2.7%, its line from the switch only (19 and 20 Oct, no 36%)`, JSON.stringify([t['avg-progress'].numbers, avgRows]))
+      expect(t['avg-progress'].numbers[0] === '2.7%' && avgRows.length === 14 && JSON.stringify(avgRows.slice(12)) === JSON.stringify(['Mon 19 Oct 2.66%', 'Tue 20 Oct 2.71%'])
+          && avgRows.slice(0, 12).every((r) => r.endsWith('Before the switch')) && t['avg-progress'].text.includes('From Mon 19 Oct'),
+        `${label}: Avg progress 2.7%, its line on the 14 days with readings from the switch only (19 and 20 Oct, no 36%), "From Mon 19 Oct" over them`, JSON.stringify([t['avg-progress'].numbers, avgRows.slice(10)]))
       expect((await tableOf('active')).length === 14 && (await tableOf('churned')).length === 14, `${label}: the other lines hold the 14 days`)
       expect(!(await isNull(await refreshButton())) && !(await isNull(await syncButton())), `${label}: a founder has Refresh (reads again) and Sync Whop and rebuild`)
       const order = await page.evaluate(() => ['dash-today', 'dash-program', 'dash-trends'].map((id) => Math.round(document.getElementById(id).getBoundingClientRect().top)))
@@ -1031,6 +1055,9 @@ if (wanted('dash')) {
       })
       expect(m2.biggest <= 24 && (w < 768 || (m2.side && m2.m2Width < m2.bountyWidth)),
         `${label}: until its first rate Month 2 is a compact tile (no headline over 24px) beside the Bounty Program's chart`, JSON.stringify(m2))
+      const slots = await page.evaluate(() => [...document.querySelectorAll('[data-program-slot]')].map((x) => { const r = x.getBoundingClientRect(); return { slot: x.dataset.programSlot, left: Math.round(r.left), top: Math.round(r.top), h: Math.round(r.height), card: Math.round(x.firstElementChild.getBoundingClientRect().height) } }))
+      expect(slots.length === 2 && slots[0].slot === 'bounty' && (w < 768 ? slots[0].top < slots[1].top : slots[0].left < slots[1].left && slots[0].h === slots[1].h && slots[0].card === slots[1].card),
+        `${label}: the Bounty Program first (left from 768px), Month 2 beside it, the two cards as tall as each other (the render review's fix round)`, JSON.stringify(slots))
       const small = await smallTaps()
       expect(small.length === 0, `${label}: every button is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
     }
@@ -1047,6 +1074,9 @@ if (wanted('dash')) {
       expect(m2.length === 14 && m2[0] === 'Wed 11 Nov Nobody past a renewal yet' && /^Tue 24 Nov \d+%$/.test(m2[13]) && m2[13].endsWith(t.month2.numbers[0]),
         `${label}: its line: no rate before anyone resolved, and the last day is the big number`, JSON.stringify([m2[0], m2[13]]))
       expect(t['open-tasks'].text.includes('Created since the reset, Wed 21 Oct'), `${label}: Open tasks count from the tasks reset`, t['open-tasks'].text)
+      const slots = await page.evaluate(() => [...document.querySelectorAll('[data-program-slot]')].map((x) => { const r = x.getBoundingClientRect(); return { slot: x.dataset.programSlot, left: Math.round(r.left), top: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } }))
+      expect(slots.length === 2 && slots[0].slot === 'bounty' && (w < 768 ? slots[0].top < slots[1].top : slots[0].left < slots[1].left && slots[0].h === slots[1].h && Math.abs(slots[0].w - slots[1].w) <= 1),
+        `${label}: with its rate, Month 2 still on the right, the two halves of the row as tall as each other (it took the left before the render review's fix round)`, JSON.stringify(slots))
     }
     {
       const label = `Dashboard, empty, ${w}x${h}`
@@ -1306,7 +1336,7 @@ if (wanted('tasks')) {
     const heads = await page.$$eval('main section h2', (hs) => hs.map((h) => [...h.childNodes].map((n) => n.textContent.trim()).filter(Boolean).join(' ')))
     expect(JSON.stringify(heads) === JSON.stringify(['Canceling: save first 1', 'Cancel path 1', 'At risk 2', 'Events and wins 2']),
       'the tiers: canceling first, then cancel path, at risk, events and wins', JSON.stringify(heads))
-    expect((await page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelector('button')?.textContent))).join() === 'Sofia Marin,Priya Raman,Omar Haddad,Nora Brandt,Maya Lindqvist,Maximilian Featherstonehaugh-Smythe',
+    expect((await page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelector('[data-student-name]')?.textContent))).join() === 'Sofia Marin,Priya Raman,Omar Haddad,Nora Brandt,Maya Lindqvist,Maximilian Featherstonehaugh-Smythe',
       'the longest wait first in each tier')
     const small = await smallTaps()
     expect(small.length === 0, 'To do: every button and tab 44px tall or more', JSON.stringify(small.slice(0, 4)))
@@ -1316,12 +1346,12 @@ if (wanted('tasks')) {
       buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()),
       text: r.textContent,
     })))
-    expect(archived.length === 4 && archived.every((r) => r.buttons.length === 1),
-      'Archived: four rows, read only: the name opens the task, and nothing else is a button', JSON.stringify(archived.map((r) => r.buttons)))
+    expect(archived.length === 4 && archived.every((r) => r.buttons.length === 1 && r.buttons[0] === 'Details'),
+      'Archived: four rows, read only: Details opens the task, and nothing else is a button (the name is the student\'s link)', JSON.stringify(archived.map((r) => r.buttons)))
     expect(archived.some((r) => r.text.includes('Dismissed Tue 20 Oct by the reset for the new program. Before it: checked twice'))
       && archived.some((r) => r.text.includes('Sent Mon 12 Oct, no reply')),
       'an archived row says how it was closed: by the reset (with the note before it), or sent with its reply')
-    await press(await button('Leo Hartmann'))
+    await press(await buttonIn(await rowWith('Leo Hartmann'), 'Details'))
     await page.waitForSelector('[role="dialog"]')
     const dialogButtons = await page.$$eval('[role="dialog"] button', (bs) => bs.map((b) => b.textContent.trim()))
     expect(JSON.stringify(dialogButtons) === JSON.stringify(['Close']), 'an archived task\'s detail has no Copy DM, Mark sent, Dismiss or Move to To do', JSON.stringify(dialogButtons))
@@ -1503,7 +1533,12 @@ if (wanted('people')) {
       if (name === 'synced') expect(text.includes('Synced since the switch'), `${label}: "Synced since the switch"`)
       if (name === 'stale') expect(text.includes('Not synced since the switch') && text.includes('These numbers are from before the course switch.'), `${label}: "Not synced since the switch", and why the numbers are old`)
       if (name === 'never') expect(text.includes('Never synced'), `${label}: "Never synced"`)
-      if (name === 'canceling') expect(text.includes('Canceling') && text.includes('Note: Whop returned 3 interactions but 0 marked completed'), `${label}: Canceling, and the backfill's note as a note`)
+      if (name === 'canceling') {
+        // The render review's fix round: the note is folded under "Sync details", with the counts.
+        const fold = await page.evaluate(() => { const d = document.querySelector('details[data-sync-details]'); return d ? { open: d.open, text: d.textContent } : null })
+        expect(text.includes('Canceling') && fold && !fold.open && fold.text.includes('Note: Whop returned 3 interactions but 0 marked completed') && !text.includes('Note: Whop returned'),
+          `${label}: Canceling, and the backfill's note as a note, folded under Sync details`, JSON.stringify(fold).slice(0, 160))
+      }
       if (name === 'partial') {
         // Progress, Streak, the Whop sync, the 30% request and the lessons: their reads failed.
         expect((text.match(/Couldn't load/g) ?? []).length === 5 && !text.includes('0 days') && !text.includes('No 30% request') && !text.includes('Never synced'),
@@ -1618,7 +1653,7 @@ if (wanted('people')) {
     const drawer = await page.$eval('aside[role="dialog"]', (a) => {
       const h = a.querySelector('h2')
       const link = [...a.querySelectorAll('a')].find((x) => x.textContent.trim() === 'Open the full page')
-      return { name: h?.textContent, linkTop: link ? Math.round(link.getBoundingClientRect().top) : null, nameTop: h ? Math.round(h.getBoundingClientRect().top) : null, ads: a.innerText.includes('Ad submissions verified'), firstBlock: Math.round([...a.querySelectorAll('section')][0]?.getBoundingClientRect().top ?? 0) }
+      return { name: h?.querySelector('[data-student-name]')?.textContent, linkTop: link ? Math.round(link.getBoundingClientRect().top) : null, nameTop: h ? Math.round(h.getBoundingClientRect().top) : null, ads: a.innerText.includes('Ad submissions verified'), firstBlock: Math.round([...a.querySelectorAll('section')][0]?.getBoundingClientRect().top ?? 0) }
     })
     expect(drawer.name === 'Maya Lindqvist' && drawer.linkTop !== null && Math.abs(drawer.linkTop - drawer.nameTop) < 30 && drawer.linkTop < drawer.firstBlock && !drawer.ads,
       'a card opens the drawer with that student, "Open the full page" at its top beside the name, and no ads tick (the review\'s fix round)', JSON.stringify(drawer))
@@ -1795,9 +1830,10 @@ if (LANE_PARTS.some(wanted)) {
   /** A row header (aria-expanded) whose words start with `title`. */
   const rowHeader = (title) => page.evaluateHandle((t) => [...document.querySelectorAll('button[aria-expanded]')]
     .find((b) => b.textContent.trim().startsWith(t)) || null, title)
-  /** A button with exactly these words inside the open template row. */
+  /** A button with exactly these words inside the open template row. Its header is in a .list-row: Show settings,
+   *  which says open or closed too since the render review's fix round, is not. */
   const inOpenRow = (label) => page.evaluateHandle((l) => {
-    const row = document.querySelector('button[aria-expanded="true"]')?.closest('.list-row')
+    const row = document.querySelector('.list-row button[aria-expanded="true"]')?.closest('.list-row')
     return (row && [...row.querySelectorAll('button')].find((b) => b.textContent.trim() === l)) || null
   }, label)
   /** The control a label with these words points at (the first one). */
@@ -1911,10 +1947,10 @@ if (LANE_PARTS.some(wanted)) {
       await ready('Message settings')
       await press(await rowHeader('Is cancelling'))
       await sleep(200)
-      const ops = await page.evaluate(() => [...document.querySelector('button[aria-expanded="true"]').closest('.list-row').querySelectorAll('select')].map((sel) => [...sel.options].map((o) => o.textContent.trim()).join('|')))
+      const ops = await page.evaluate(() => [...document.querySelector('.list-row button[aria-expanded="true"]').closest('.list-row').querySelectorAll('select')].map((sel) => [...sel.options].map((o) => o.textContent.trim()).join('|')))
       expect(ops.some((o) => o === 'is yes|is no'), 'a yes-or-no condition (Is canceling) is one select, "is yes" or "is no", never a lone "is"', JSON.stringify(ops))
       const del = await page.evaluate(() => {
-        const row = document.querySelector('button[aria-expanded="true"]').closest('.list-row')
+        const row = document.querySelector('.list-row button[aria-expanded="true"]').closest('.list-row')
         const bs = [...row.querySelectorAll('button')].filter((b) => ['Delete template', 'Show preview', 'Save'].includes(b.textContent.trim()))
         return bs.map((b) => ({ t: b.textContent.trim(), left: Math.round(b.getBoundingClientRect().left), bg: getComputedStyle(b).backgroundColor, color: getComputedStyle(b).color }))
       })
@@ -1937,11 +1973,11 @@ if (LANE_PARTS.some(wanted)) {
       await body.evaluate((el) => { el.scrollIntoView({ block: 'center' }); el.focus(); el.setSelectionRange(el.value.length, el.value.length) })
       await page.keyboard.type(' See you there.')
       await sleep(150)
-      const rowText = await page.evaluate(() => document.querySelector('button[aria-expanded="true"]').innerText)
+      const rowText = await page.evaluate(() => document.querySelector('.list-row button[aria-expanded="true"]').innerText)
       expect(rowText.includes('Unsaved'), 'a changed message shows Unsaved on its line')
       await press(await inOpenRow('Show preview'))
       await sleep(150)
-      const preview = await page.evaluate(() => document.querySelector('button[aria-expanded="true"]').closest('.list-row').innerText)
+      const preview = await page.evaluate(() => document.querySelector('.list-row button[aria-expanded="true"]').closest('.list-row').innerText)
       expect(preview.includes('The course: https://old-course-host.example.com/login') && preview.includes('Discord: {discordInvite}')
         && preview.includes('{discordInvite} stays as written: the Discord link is empty. Set it in Message settings.') && preview.includes('See you there.'),
         'the preview fills the live program link, names the empty Discord link, and shows the unsaved text')
@@ -1983,7 +2019,7 @@ if (LANE_PARTS.some(wanted)) {
 
       await press(await rowHeader('Is cancelling'))
       await sleep(200)
-      const rowWords = await page.evaluate(() => document.querySelector('button[aria-expanded="true"]').closest('.list-row').innerText)
+      const rowWords = await page.evaluate(() => document.querySelector('.list-row button[aria-expanded="true"]').closest('.list-row').innerText)
       expect(rowWords.includes('Membership status'), 'the custom template\'s conditions read "Membership status"')
       await press(await inOpenRow('Delete template'))
       await sleep(100)
@@ -2011,7 +2047,7 @@ if (LANE_PARTS.some(wanted)) {
       await go('/dev/admin/templates?drift=1', [1440, 900])
       await ready('Message settings')
       const openMessage = () => page.evaluate(() => {
-        const head = document.querySelector('button[aria-expanded="true"]')
+        const head = document.querySelector('.list-row button[aria-expanded="true"]')
         const area = head.closest('.list-row').querySelector('textarea[rows]:not([rows="2"])')
         return { unsaved: head.innerText.includes('Unsaved'), text: area?.value ?? '' }
       })
@@ -2303,6 +2339,249 @@ if (wanted('review')) {
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, 'review: no error in the browser console', errs.slice(0, 3).join(' || '))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// render: admin rebuild 2's render review fix round, across the pages
+// ════════════════════════════════════════════════════════════════════════════
+if (wanted('render')) {
+  const from = consoleErrors.length
+  const settle = () => sleep(900)
+  /** The page's own header (the one with an h1): its meta line's words, and whether it carries FailedMeta. */
+  const headerMeta = () => page.evaluate(() => {
+    const h = [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))
+    return h ? { failed: !!h.querySelector('[data-meta-failed]'), text: h.innerText.replace(/\s+/g, ' ') } : null
+  })
+
+  console.log('\nrender: a failed read is said in the header too')
+  for (const path of ['/dev/admin/tasks', '/dev/admin/students', '/dev/admin/journey', '/dev/admin/insights', '/dev/admin/tasks/insights', '/dev/admin/team',
+    '/dev/admin/discounts', '/dev/admin/survey', '/dev/admin/feedback/lessons', '/dev/admin/templates']) {
+    await go(`${path}?state=error`, [1280, 720])
+    await settle()
+    const m = await headerMeta()
+    expect(m && m.failed && m.text.includes("Couldn't load") && !m.text.includes('Loading'), `${path}, failed: the header says "Couldn't load", never "Loading"`, JSON.stringify(m))
+  }
+  await go('/dev/admin/team?state=error', [390, 844])
+  await settle()
+  await check('render, Team failed, its header saying so, 390x844', 'render-team-error-390')
+
+  console.log('\nrender: the journey\'s board in the page\'s column')
+  for (const size of [[1280, 720], [1440, 900], [1100, 800]]) {
+    await go('/dev/admin/journey', size)
+    await settle()
+    const b = await page.evaluate(() => {
+      const h = [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1')).getBoundingClientRect()
+      const board = document.querySelector('[data-board]')
+      const r = board.getBoundingClientRect()
+      const cols = [...board.querySelectorAll('section[aria-label]')].map((x) => x.getBoundingClientRect())
+      return { headerLeft: Math.round(h.left), headerRight: Math.round(h.right), left: Math.round(r.left), right: Math.round(r.right), scroll: board.scrollWidth - board.clientWidth, lastRight: Math.round(cols.at(-1).right), n: cols.length, win: innerWidth }
+    })
+    const fits = size[0] >= 1120
+    expect(b.n === 6 && b.left === b.headerLeft && b.right === b.headerRight && (fits ? b.scroll <= 0 && b.lastRight <= b.right : b.scroll > 0),
+      `${size.join('x')}: the board's edges are the header's, the page's column; ${fits ? 'all six columns in it' : 'it scrolls sideways inside itself'}`, JSON.stringify(b))
+    await check(`render, the journey, ${size.join('x')}`, `render-journey-${size[0]}`)
+  }
+  await go('/dev/admin/journey', [390, 844])
+  await settle()
+  const phoneBoard = await page.evaluate(() => { const b = document.querySelector('[data-board]'); const r = b.getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), scroll: b.scrollWidth > b.clientWidth, overflowX: getComputedStyle(b).overflowX } })
+  expect(phoneBoard.left === 0 && phoneBoard.right === 390 && phoneBoard.scroll && phoneBoard.overflowX === 'auto', 'on a phone the board scrolls sideways inside itself, out to the window\'s edges', JSON.stringify(phoneBoard))
+  await check('render, the journey, 390x844', 'render-journey-390')
+  const card = await page.evaluate(() => {
+    const c = document.querySelector('[data-journey-card="p-maya"]')
+    const a = c.querySelector('a[data-student-name]')
+    const btn = c.querySelector('button')
+    return { href: a?.getAttribute('href'), weight: getComputedStyle(a).fontWeight, user: c.querySelector('[data-student-username]')?.textContent, btnH: Math.round(btn.getBoundingClientRect().height), cardH: Math.round(c.getBoundingClientRect().height) }
+  })
+  expect(card.href === '/admin/students/p-maya' && card.weight === '600' && card.user === '@maya.lq' && card.btnH >= card.cardH - 2,
+    'a card: the name links to the student\'s page (600, @username after it); the button under it covers the card', JSON.stringify(card))
+
+  console.log('\nrender: the Dashboard\'s sections and Month 2\'s bar')
+  for (const size of [[1440, 900], [390, 844]]) {
+    await go('/dev/admin/dashboard?state=full', size)
+    await page.waitForFunction(() => /Updated \d\d:\d\d/.test(document.body.innerText), { timeout: 30000 })
+    const gaps = await page.evaluate(() => {
+      const top = (id) => document.getElementById(id).getBoundingClientRect().top
+      const bottom = (id) => document.getElementById(id).closest('section').getBoundingClientRect().bottom
+      const titles = [...document.querySelectorAll('[data-section-title]')].map((t) => Math.round(t.getBoundingClientRect().height))
+      return { a: Math.round(top('dash-program') - bottom('dash-today')), b: Math.round(top('dash-trends') - bottom('dash-program')), titles }
+    })
+    expect(gaps.a === gaps.b && gaps.titles.every((h) => h === gaps.titles[0]), `${size.join('x')}: the three sections the same distance apart (${gaps.a}px and ${gaps.b}px), every title row as tall`, JSON.stringify(gaps))
+    const meter = await page.evaluate(() => { const m = document.querySelector('[data-tile="month2"] [role="meter"]'); return { kids: m.children.length, h: Math.round(m.getBoundingClientRect().height) } })
+    expect(meter.kids === 1 && meter.h === 6, `${size.join('x')}: Month 2's countdown is a plain bar, no knob`, JSON.stringify(meter))
+    const today = await page.evaluate(() => [...document.querySelectorAll('[data-tile="open-tasks"], [data-tile="to-decide"]')].map((t) => t.innerText.replace(/\s+/g, ' ')))
+    expect(today.every((t) => (t.match(/\bopen\b/gi) ?? []).length <= 1) && today[0].includes('Go to Tasks') && today[1].includes('Go to 30% off'),
+      `${size.join('x')}: Today's tiles say "open" once at most, their links named after their pages`, JSON.stringify(today))
+  }
+
+  console.log('\nrender: the rows\' actions on the right, under the words on a phone')
+  for (const [path, label] of [['/dev/admin/discounts', '30% off, Applied'], ['/dev/admin/discounts?tab=approved', '30% off, Approved'], ['/dev/admin/tasks', 'Tasks, To do']]) {
+    for (const size of [[1440, 900], [390, 844]]) {
+      await go(path, size)
+      await settle()
+      const rows = await page.evaluate(() => [...document.querySelectorAll('[data-row-split]')].filter((x) => x.querySelector('[data-row-actions]')).map((x) => {
+        const words = x.firstElementChild.getBoundingClientRect()
+        const acts = x.querySelector('[data-row-actions]').getBoundingClientRect()
+        return { wordsRight: Math.round(words.right), wordsBottom: Math.round(words.bottom), actsLeft: Math.round(acts.left), actsTop: Math.round(acts.top), wordsTop: Math.round(words.top), actsRight: Math.round(acts.right), rowRight: Math.round(x.getBoundingClientRect().right) }
+      }))
+      const wide = size[0] >= 768
+      const good = rows.length > 0 && rows.every((r) => (wide ? r.actsLeft >= r.wordsRight && r.actsTop === r.wordsTop && Math.abs(r.actsRight - r.rowRight) <= 1 : r.actsTop >= r.wordsBottom))
+      expect(good, `${label}, ${size.join('x')}: ${wide ? 'the actions in a column on the right, level with the row\'s first line' : 'the actions under the words'} (${rows.length} rows)`, JSON.stringify(rows.slice(0, 2)))
+    }
+  }
+  await go('/dev/admin/discounts', [1440, 900])
+  await settle()
+  await check('render, 30% off, the actions on the right, 1440x900', 'render-thirty-1440')
+  await go('/dev/admin/tasks', [1440, 900])
+  await settle()
+  await check('render, Tasks, the actions on the right, 1440x900', 'render-tasks-1440')
+
+  console.log('\nrender: the team\'s own 30% code is never warned about')
+  for (const size of [[1440, 900], [390, 844]]) {
+    await go('/dev/admin/discounts?tab=approved&state=owncode', size)
+    await settle()
+    const rows = await page.$$eval('.list-row', (rs) => rs.map((r) => ({ name: r.querySelector('a')?.textContent, coupon: [...r.querySelectorAll('[data-coupon]')].map((x) => x.dataset.coupon), mark: [...r.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Mark code applied') })))
+    expect(rows.length === 2 && rows.every((r) => r.coupon.length === 0 && r.mark),
+      `${size.join('x')}: Approved, the team's own code already on both memberships in Whop (one by its name, one by the request's own promo id): no coupon line, Mark code applied there`, JSON.stringify(rows))
+    await check(`render, 30% off, Approved, the team's own codes, ${size.join('x')}`, `render-thirty-owncode-${size[0]}`)
+  }
+
+  console.log('\nrender: every pill row on one line on a phone')
+  for (const [path, sel, label] of [
+    ['/dev/admin/tasks', '[role="tablist"][aria-label="Task lists"]', 'Tasks\' tabs'],
+    ['/dev/admin/students', '[role="group"][aria-label="Membership"]', 'All students\' membership filter'],
+    ['/dev/admin/students', '[role="group"][aria-label="Sort"]', 'All students\' sorts'],
+    ['/dev/admin/insights', '[role="group"][aria-label="Range"]', 'Insights\' ranges'],
+    ['/dev/admin/tasks/insights?reset=none', '[role="group"][aria-label="Range"]', 'Outreach insights\' ranges'],
+  ]) {
+    for (const width of [390, 360]) {
+      await go(path, [width, 844])
+      await settle()
+      const r = await page.evaluate((s) => {
+        const row = document.querySelector(s)
+        const kids = [...row.children]
+        // One line: every child's middle at the same height (the sorts' "Sort by" is shorter than a pill, centred on it).
+        return { lines: new Set(kids.map((k) => { const b = k.getBoundingClientRect(); return Math.round((b.top + b.bottom) / 2) })).size, overflowX: getComputedStyle(row).overflowX, minH: Math.min(...kids.filter((k) => k.tagName === 'BUTTON').map((k) => k.getBoundingClientRect().height)), pageScroll: document.scrollingElement.scrollWidth - document.scrollingElement.clientWidth }
+      }, sel)
+      expect(r.lines === 1 && r.overflowX === 'auto' && r.minH >= 44 && r.pageScroll <= 0, `${label}, ${width}px: one line that scrolls sideways inside itself, 44px pills, the page never scrolls`, JSON.stringify(r))
+    }
+  }
+  await go('/dev/admin/students', [390, 844])
+  await settle()
+  await check('render, All students, the filters on one line, 390x844', 'render-students-390')
+
+  console.log('\nrender: a student\'s numbers, a failed one, the Whop sync')
+  for (const [route, label] of [['/dev/admin/students/p-jonah', 'Jonah'], ['/dev/admin/students/p-maya?state=partial', 'Maya, partial'], ['/dev/admin/journey?drawer=p-maya', 'the drawer']]) {
+    await go(route, [390, 844])
+    await settle()
+    const facts = await page.evaluate(() => ({
+      values: [...document.querySelectorAll('[data-fact-value]')].map((v) => ({ t: v.textContent, lines: Math.round(v.getBoundingClientRect().height / parseFloat(getComputedStyle(v).lineHeight)), clipped: v.scrollWidth > v.clientWidth + 1, color: getComputedStyle(v).color })),
+      failed: [...document.querySelectorAll('[data-failed]')].filter((f) => f.closest('.surface-resting')).map((f) => ({ t: f.textContent, size: getComputedStyle(f).fontSize })),
+    }))
+    expect(facts.values.every((v) => v.lines === 1 && !v.clipped && v.color !== 'rgb(147, 183, 213)') && facts.failed.every((f) => f.t === "Couldn't load" && f.size === '13px'),
+      `${label}, 390x844: every number on one line, none in Airy Blue; a failed one is a dot and "Couldn't load" at 13px`, JSON.stringify(facts))
+    await check(`render, ${label}, 390x844`, `render-student-${label.replace(/[^a-z]+/gi, '-').toLowerCase()}-390`)
+  }
+  {
+    await go('/dev/admin/students/p-jonah', [1440, 900])
+    await settle()
+    const sync = await page.evaluate(() => ({ line: document.querySelector('[data-sync-line]')?.innerText.replace(/\s+/g, ' '), open: document.querySelector('details[data-sync-details]')?.open, shown: document.body.innerText.includes('FETCHED') || document.body.innerText.includes('Fetched') }))
+    expect(sync.line === 'Not synced since the switch Last synced Sun 18 Oct, 12:00 · 5 lessons brought in' && sync.open === false && !sync.shown,
+      'the Whop sync: one line (not synced since the switch, when, the lessons it brought in); the counts behind a closed Sync details', JSON.stringify(sync))
+    await press(await page.evaluateHandle(() => document.querySelector('details[data-sync-details] summary')))
+    await sleep(150)
+    expect((await bodyText()).includes('FETCHED') || (await bodyText()).includes('Fetched'), 'pressed, Sync details shows the counts')
+    await check('render, a student, Sync details open, 1440x900', 'render-student-sync-open-1440')
+  }
+
+  console.log('\nrender: one name part on every page')
+  for (const [path, label, link] of [
+    ['/dev/admin/discounts', '30% off', true], ['/dev/admin/tasks', 'Tasks', true], ['/dev/admin/journey', 'the journey', true],
+    ['/dev/admin/survey', 'Survey', true], ['/dev/admin/feedback/lessons', 'Lesson feedback', true], ['/dev/admin/students', 'All students', false],
+  ]) {
+    await go(path, [1440, 900])
+    await settle()
+    const names = await page.evaluate(() => [...document.querySelectorAll('main [data-student-name]')].filter((n) => n.getBoundingClientRect().width > 0).map((n) => ({
+      tag: n.tagName, text: n.textContent, href: n.getAttribute('href') ?? n.closest('a')?.getAttribute('href') ?? null, weight: getComputedStyle(n).fontWeight, line: getComputedStyle(n).textDecorationLine, color: getComputedStyle(n).color,
+    })))
+    // A name with no student behind it (a student gone, an application whose student was deleted) has nothing to link to.
+    const NOBODY = ['Unknown student', 'A student no longer on file']
+    expect(names.length > 0 && names.every((n) => n.weight === '600' && n.line === 'underline' && n.color === 'rgba(247, 246, 243, 0.92)')
+        && names.every((n) => (link ? (n.tag === 'A' ? n.href.startsWith('/admin/students/') : NOBODY.includes(n.text)) : n.tag === 'SPAN' && n.href?.startsWith('/admin/students/'))),
+      `${label}: every name the same (600, the primary ink, a hairline underline), ${link ? 'each a link to the student\'s page' : 'inside the row that is the link'}`, JSON.stringify([names.length, names[0], names.filter((n) => n.tag !== 'A').map((n) => n.text)]))
+  }
+  {
+    await go('/dev/admin/students', [1440, 900])
+    await settle()
+    const theo = await page.evaluate(() => {
+      const r = [...document.querySelectorAll('main a.list-row')].find((a) => a.textContent.includes('Theo Marsh'))
+      const cell = r.querySelector('.lg\\:grid').children[1]
+      // What shows: the cell's words outside the screen reader's span (innerText reads a clipped span too).
+      const shown = [...cell.childNodes].map((n) => (n.nodeType === 1 && n.classList.contains('sr-only') ? '' : n.textContent)).join('').trim()
+      return { shown, sr: cell.querySelector('.sr-only')?.textContent ?? null }
+    })
+    expect(theo.shown === '' && theo.sr === 'No username', 'All students: no username is an empty cell (a screen reader hears "No username"), never "None"', JSON.stringify(theo))
+  }
+
+  console.log('\nrender: the folds\' markers, Show settings, the dialog\'s primary button, the Survey\'s cards')
+  for (const [path, words] of [['/dev/admin/insights', 'How these are worked out'], ['/dev/admin/tasks/insights', 'How these numbers work'], ['/dev/admin/templates', 'What the buckets mean']]) {
+    await go(path, [1280, 720])
+    await settle()
+    const sm = await page.evaluate((w) => { const s = [...document.querySelectorAll('summary')].find((x) => x.textContent.trim() === w); return s ? { display: getComputedStyle(s).display, h: Math.round(s.getBoundingClientRect().height) } : null }, words)
+    expect(sm && sm.display === 'list-item' && sm.h >= 44, `${path}: "${words}" has the browser's open/close triangle, 44px tall`, JSON.stringify(sm))
+  }
+  {
+    await go('/dev/admin/templates', [1440, 900])
+    await settle()
+    const state = () => page.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => /^(Show|Hide) settings/.test(x.textContent.trim())); return { exp: b.getAttribute('aria-expanded'), controls: b.getAttribute('aria-controls'), panel: !!document.getElementById(b.getAttribute('aria-controls')) } })
+    const closed = await state()
+    await press(await button('Show settings'))
+    await sleep(150)
+    const opened = await state()
+    expect(closed.exp === 'false' && opened.exp === 'true' && opened.panel && opened.controls === closed.controls, 'Show settings says closed, then open, and names the panel it opens', JSON.stringify({ closed, opened }))
+    await press(await button('New template'))
+    await page.waitForSelector('[role="dialog"]')
+    const create = await page.evaluate(() => { const b = [...document.querySelectorAll('[role="dialog"] button')].find((x) => x.textContent.trim() === 'Create template'); return getComputedStyle(b).backgroundColor })
+    expect(create === 'rgb(247, 246, 243)', 'the New template dialog\'s Create template is the ink (primary) button', create)
+  }
+  {
+    await go('/dev/admin/survey', [1440, 900])
+    await settle()
+    const answers = await page.$$eval('[data-answers]', (as) => as.map((a) => getComputedStyle(a).backgroundColor))
+    expect(answers.length > 0 && answers.every((c) => c === 'rgba(0, 0, 0, 0)'), 'the Survey\'s answers sit in their card, no card inside it', JSON.stringify(answers.slice(0, 3)))
+    await check('render, the Survey, 1440x900', 'render-survey-1440')
+  }
+
+  console.log('\nrender: the course switch page and the not-found page, in the dark look')
+  for (const size of SIZES) {
+    for (const state of ['after', 'problems', 'before', 'error', 'loading']) {
+      await go(`/dev/admin/cutover?state=${state}`, size)
+      await settle()
+      const bg = await page.$eval('main', (m) => getComputedStyle(m).backgroundColor)
+      expect(bg === 'rgb(24, 24, 26)', `the course switch page, ${state}, ${size.join('x')}: the dark ground`, bg)
+      await check(`render, the course switch page, ${state}, ${size.join('x')}`, `render-cutover-${state}-${size[0]}`)
+    }
+    await go('/dev/admin/missing', size)
+    await settle()
+    const nf = await page.evaluate(() => ({ title: document.querySelector('main h1')?.textContent, link: [...document.querySelectorAll('main a')].find((a) => a.textContent.trim() === 'Go to the Dashboard')?.getAttribute('href'), bg: getComputedStyle(document.querySelector('main')).backgroundColor }))
+    expect(nf.title === 'Page not found' && nf.link === '/admin' && nf.bg === 'rgb(24, 24, 26)', `the not-found page, ${size.join('x')}: in the dark look, a link to the Dashboard`, JSON.stringify(nf))
+    await check(`render, the not-found page, ${size.join('x')}`, `render-not-found-${size[0]}`)
+  }
+  {
+    // The real addresses, as the server renders them (the page itself then waits for a sign-in this server has
+    // none of): an address with no page is the admin's catch-all, whose notFound() the group's not-found
+    // answers (Next's 404 fallback in the page's payload, the catch-all's param beside it); a page that exists
+    // has neither. The development server streams, so its status line reads 200 either way.
+    const seen = {}
+    for (const path of ['/admin/today', '/admin/etfb', '/admin/stats', '/admin/settings', '/admin/discord', '/admin/no-such-page/deeper', '/admin/not-activated', '/admin/cutover']) {
+      const html = await (await fetch(`${ORIGIN}${path}`, { redirect: 'manual' })).text()
+      seen[path] = { notFound: html.includes('NEXT_HTTP_ERROR_FALLBACK;404') && html.includes('not-found.tsx@boundary'), missing: /\\"missing\\",\\"/.test(html) }
+    }
+    const old = ['/admin/today', '/admin/etfb', '/admin/stats', '/admin/settings', '/admin/discord', '/admin/no-such-page/deeper']
+    expect(old.every((p) => seen[p].notFound && seen[p].missing) && ['/admin/not-activated', '/admin/cutover'].every((p) => !seen[p].notFound && !seen[p].missing),
+      'the old admin addresses land on the admin\'s not-found (the catch-all\'s, inside the frame), and Not activated is a page again', JSON.stringify(seen))
+  }
+  const errs = newConsoleErrors(from)
+  expect(errs.length === 0, 'render: no error in the browser console', errs.slice(0, 3).join(' || '))
 }
 
 // ── Every page the run opened ──────────────────────────────────────────────

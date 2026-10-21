@@ -9,6 +9,11 @@
  *
  * Seeded by migration 2026_v40_dm_pause_switches.sql — every
  * switch defaults to "false" so nothing fires until Karlo opts in.
+ *
+ * readAllDmToggles, the reader of all 4 that the Discord test page used,
+ * went in admin rebuild 2's render review fix round: nothing called it once
+ * that page was removed. The Templates page's Message settings read the 4
+ * with the 2 links (readMessageSettings, src/lib/admin/templates-data.ts).
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -20,13 +25,6 @@ export type DmToggleKey =
   | "day28_dm_enabled"
   | "engagement_alerts_enabled"
   | "csm_task_summary_enabled";
-
-const ALL_KEYS: DmToggleKey[] = [
-  "dms_master_enabled",
-  "day28_dm_enabled",
-  "engagement_alerts_enabled",
-  "csm_task_summary_enabled",
-];
 
 /**
  * Returns true only when BOTH the master switch and the per-message
@@ -65,23 +63,4 @@ export async function readDmEnabled(
       byKey.get("dms_master_enabled") === "true" && byKey.get(key) === "true",
     error: null,
   };
-}
-
-/**
- * Loads every switch's current value. No caller since the Discord test
- * page went (admin rebuild 2); kept as the one reader of all 4.
- */
-export async function readAllDmToggles(
-  supabase: SupabaseClient,
-): Promise<Record<DmToggleKey, boolean>> {
-  const { data } = await supabase
-    .from("admin_config")
-    .select("key, value")
-    .in("key", ALL_KEYS);
-  const byKey = new Map<string, string>(
-    (data ?? []).map((r) => [r.key as string, r.value as string]),
-  );
-  const out: Partial<Record<DmToggleKey, boolean>> = {};
-  for (const k of ALL_KEYS) out[k] = byKey.get(k) === "true";
-  return out as Record<DmToggleKey, boolean>;
 }

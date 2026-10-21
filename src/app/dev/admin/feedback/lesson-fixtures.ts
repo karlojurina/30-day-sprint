@@ -66,10 +66,10 @@ const LESSONS: FeedbackLesson[] = (catalog.lessons as CourseLesson[]).map((l, i)
 }));
 
 const STUDENTS: FeedbackStudent[] = [
-  { id: "s-maya", name: "Maya Lindqvist", email: "s-maya@example.com" },
-  { id: "s-jonah", name: "Jonah Pereira", email: "s-jonah@example.com" },
+  { id: "s-maya", name: "Maya Lindqvist", email: "s-maya@example.com", discord_username: "maya.lq" },
+  { id: "s-jonah", name: "Jonah Pereira", email: "s-jonah@example.com", discord_username: "jonah_p" },
   { id: "s-priya", name: "Priya Raman", email: "s-priya@example.com" },
-  { id: "s-omar", name: "Omar Haddad", email: "s-omar@example.com" },
+  { id: "s-omar", name: "Omar Haddad", email: "s-omar@example.com", discord_username: "@omar.h" },
   { id: "s-lena", name: "Lena Vogel", email: "s-lena@example.com" },
   { id: "s-theo", name: "Theo Marsh", email: "s-theo@example.com" },
   // No name on file: the page shows the email.

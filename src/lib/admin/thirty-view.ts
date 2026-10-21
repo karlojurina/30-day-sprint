@@ -25,6 +25,14 @@
  * loaded after the request (after the switch, for one made before it) are
  * not asked for, only videos done by the deadline count, and once the
  * deadline has passed the count says so (`countedByDeadline`).
+ *
+ * The coupon of a decided row (the render review's fix round): once the team
+ * adds the 30% code in Whop, Whop shows it on the membership as a discount on
+ * the next renewal. That code is the team's own (isThirtyCode: an ECOM30
+ * code, or the request's own whop_promo_id), so the coupon carries `ours`
+ * and the Approved and Code Applied rows never warn about it (couponWarns).
+ * An Applied row the coupon refuses offers only Reject, with its reason
+ * filled in (couponRejectReason).
  */
 
 import {
@@ -112,8 +120,17 @@ export interface Verdict {
  */
 export interface Coupon {
   code: string | null;
+  /** The code's Whop promo id, null with no code. */
+  promoCodeId: string | null;
   /** A discount is on the next renewal: no 30% (D5). */
   discounted: boolean;
+  /**
+   * The code is the request's own 30% code (isThirtyCode): the team added it
+   * in Whop. An Approved or Code Applied row never warns about it. Always
+   * false on an Applied row, where the coupon decides as the approve route
+   * decides (any discount on the next renewal refuses).
+   */
+  ours: boolean;
   renewalPrice: number | null;
   planRenewalPrice: number | null;
   checkedAt: string;
@@ -217,11 +234,49 @@ export function couponOf(row: ThirtyCouponRow | undefined, student: Pick<ThirtyS
   if (!row || !row.whop_membership_id || row.whop_membership_id !== student.whop_membership_id) return null;
   return {
     code: row.promo_code ?? row.promo_code_id ?? null,
+    promoCodeId: row.promo_code_id ?? null,
     discounted: row.discounted === true,
+    ours: false,
     renewalPrice: priceOf(row.renewal_price),
     planRenewalPrice: priceOf(row.plan_renewal_price),
     checkedAt: row.checked_at,
   };
+}
+
+/** The 30% codes: Approve makes ECOM30- and 6 characters of the student's id (the approve route); any ECOM30 code is the team's. */
+const THIRTY_CODE = /^ECOM30/i;
+
+/**
+ * Is the code on the membership the team's own 30% code for this request (the
+ * render review's fix round)? An ECOM30 code, by its name; or the request's
+ * own Whop promo id (the name may not have been read, and then the coupon's
+ * `code` is the id); or the very code the request holds.
+ */
+export function isThirtyCode(
+  coupon: Pick<Coupon, "code" | "promoCodeId">,
+  request: { promo_code?: string | null; whop_promo_id?: string | null },
+): boolean {
+  if (coupon.code && THIRTY_CODE.test(coupon.code)) return true;
+  if (request.whop_promo_id && coupon.promoCodeId === request.whop_promo_id) return true;
+  return Boolean(request.promo_code && coupon.code && coupon.code.toUpperCase() === request.promo_code.toUpperCase());
+}
+
+/**
+ * An Approved row's warning: a discount on the next renewal that is not the
+ * request's own 30% code. The team checks Whop before adding the code, since
+ * adding it would replace that discount. No other tab warns.
+ */
+export function couponWarns(row: Pick<ThirtyRequestRow, "status" | "coupon">): boolean {
+  return row.status === "approved" && row.coupon !== null && row.coupon.discounted && !row.coupon.ours;
+}
+
+/**
+ * The reason an Applied row refused by the coupon starts its Reject with (the
+ * render review's fix round): the code on the membership, in the team's
+ * words. No em dash, since the student may read it on their map.
+ */
+export function couponRejectReason(code: string | null): string {
+  return code ? `Already has a discount on their membership (${code})` : "Already has a discount on their membership";
 }
 
 /** The first payment and the deadline, with no counts: the progress could not be read. */
@@ -410,6 +465,10 @@ export function buildThirtyView(
         } else if (!stored) {
           couponCheck = askable ? "failed" : "no-membership";
         }
+      }
+      // The team's own 30% code on the membership, on a decided row: theirs, never a warning.
+      if (coupon && (r.status === "approved" || r.status === "applied") && isThirtyCode(coupon, r)) {
+        coupon = { ...coupon, ours: true };
       }
       let facts: Facts | null = null;
       let verdict: Verdict | null = null;

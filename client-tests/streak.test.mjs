@@ -597,7 +597,7 @@ for (const [label, streak, shown] of [
   const view = read('../src/components/admin/students/StudentDetailView.tsx')
   const journey = read('../src/components/admin/journey/JourneyView.tsx')
   ok(builder.includes('currentStreakAsOf(reads.streak.data, nowIso.slice(0, 10))') && !builder.includes('.current_streak ??')
-       && view.includes('<Stat label="Streak" value={readValue(s.streak, (d) => `${d} ${d === 1 ? "day" : "days"}`)} />')
+       && view.includes('<Fact label="Streak" read={s.streak} show={(d) => `${d} ${d === 1 ? "day" : "days"}`} />')
        && view.includes('<StatGrid student={s} nowMs={nowMs} />') && journey.includes('<StatGrid student={loaded.data} nowMs={Date.parse(loaded.data.generatedAt)} compact />'),
      'the student page and the Journey drawer: the team sees the same number')
 }

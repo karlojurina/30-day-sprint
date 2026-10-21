@@ -1,16 +1,17 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Button, Card, EmptyState, T } from "@/components/admin/ui";
 import {
   CopyButton,
+  FailedMeta,
   ListHeader,
   ListPage,
   LoadError,
   MembershipPill,
   NoticeStack,
+  RowSplit,
   STALE_TEXT,
   SkeletonRows,
   TAP,
@@ -18,10 +19,12 @@ import {
   pressPill,
 } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
+import { StudentName } from "@/components/admin/student-name";
 import { adminTransport } from "@/lib/admin/admin-transport";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { DISCOUNT_STATUS } from "@/lib/admin/discount-status";
+import { couponRejectReason, couponWarns } from "@/lib/admin/thirty-view";
 import type {
   StudentBrief,
   TeamRef,
@@ -42,27 +45,33 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * stay in the database.
  *
  * A row's top line is the student: their name (to the student page),
- * @username and whether the membership is active. Then only the date
- * applied, the verdict line (meets the rule, or why not), the coupon, and the
- * actions: Approve and Reject (with a reason) on Applied, Mark code applied
- * on Approved. "Approve anyway" is a small link in the place of Approve after
- * a refusal, never after the coupon's: a student whose Whop membership
- * already has a discount on its next renewal gets no 30%, and the approve
- * route refuses it with no override (D5). Approve stays on beside the
- * coupon's verdict, since the route asks Whop again and refuses while the
- * discount is there (a stored row can be out of date). The verdicts, the
- * counts and the coupons come from GET /api/admin/thirty, which runs the
- * student app's own rule and asks Whop now about the Approved rows' coupons;
- * this file only shows them and sends the team's decisions to the existing
- * routes. An Applied row whose membership has no stored check says "Coupon
- * not checked yet"; one whose Whop id is missing or is not a membership's
+ * @username (student-name.tsx, the one name part of every admin page) and
+ * whether the membership is active. Then only the date applied, the verdict
+ * line (meets the rule, or why not), the coupon, and the actions, on the
+ * right from 768px wide and under the words on a phone (RowSplit): Approve
+ * and Reject (with a reason) on Applied, Mark code applied on Approved.
+ * "Approve anyway" is a small link in the place of Approve after a refusal,
+ * never after the coupon's: a student whose Whop membership already has a
+ * discount on its next renewal gets no 30%, and the approve route refuses
+ * it with no override (D5). Such a row (the render review's fix round) has
+ * no Approve at all: Reject is its one action, its reason filled in ("Already
+ * has a discount on their membership (evolve10)"). The verdicts, the counts
+ * and the coupons come from GET /api/admin/thirty, which runs the student
+ * app's own rule and asks Whop now about the Approved rows' coupons; this
+ * file only shows them and sends the team's decisions to the existing
+ * routes. An Applied row the rule says yes to, whose membership has no
+ * stored check, says "Coupon not checked yet" (a row refused for another
+ * reason does not); one whose Whop id is missing or is not a membership's
  * (Approve cannot ask Whop then, and nothing blocks the 30%) says to check
- * Whop by hand; an Approved row says when Whop could not be asked.
+ * Whop by hand; an Approved row says when Whop could not be asked. The
+ * team's own 30% code on a membership (an ECOM30 code, or the request's own
+ * Whop promo id: thirty-view.ts, Coupon.ours) is never warned about.
  *
  * Buttons (the brand kit: one ink primary at most, verbs that say what
  * happens): Approve, Mark code applied and Refresh are raised; Reject is
- * ghost, the "no" of the row, as Dismiss is on Tasks; "Reject the request",
- * which the student cannot undo by asking again, is the danger button.
+ * ghost, the "no" of the row, as Dismiss is on Tasks, and raised on the
+ * coupon's row, where it is the one action; "Reject the request", which the
+ * student cannot undo by asking again, is the danger button.
  *
  * What a decision did shows in a fixed place at the bottom of the window
  * (NoticeStack, list-parts.tsx), where it is seen however far down the row
@@ -335,7 +344,7 @@ export function ThirtyView({ transport = adminTransport }: { transport?: ThirtyT
   if (loaded.kind === "error") {
     return (
       <ListPage>
-        {header(null, <RefreshButton onPress={() => void retry()} busy={retrying} />)}
+        {header(<FailedMeta />, <RefreshButton onPress={() => void retry()} busy={retrying} />)}
         {blankTabs}
         <LoadError title="Couldn't load the 30% list." detail={loaded.error} onRetry={retry} busy={retrying} />
       </ListPage>
@@ -575,28 +584,11 @@ function Dot({ color }: { color: string }) {
   );
 }
 
-/** The row's top line: the name (to the student page), @username, and whether the membership is active. */
+/** The row's top line: the name (to the student page) with @username, as on every admin page, and whether the membership is active. */
 function StudentHead({ student }: { student: StudentBrief }) {
   return (
     <div className="flex flex-wrap items-center" style={{ gap: "6px 8px", minWidth: 0 }}>
-      <Link
-        href={`/admin/students/${encodeURIComponent(student.id)}`}
-        style={{
-          fontSize: 15,
-          fontWeight: 600,
-          letterSpacing: "-0.011em",
-          color: "var(--color-text-primary)",
-          textDecoration: "underline",
-          textDecorationColor: "var(--color-border-strong)",
-          textUnderlineOffset: 3,
-          overflowWrap: "anywhere",
-        }}
-      >
-        {studentName(student)}
-      </Link>
-      {student.username && (
-        <span style={{ ...T.bodyDim, overflowWrap: "anywhere" }}>@{student.username.replace(/^@/, "")}</span>
-      )}
+      <StudentName id={student.id} name={studentName(student)} username={student.username} />
       <MembershipPill status={student.status} />
     </div>
   );
@@ -632,7 +624,13 @@ function verdictDetail(row: ThirtyRequestRow, v: Verdict): string[] {
   return out;
 }
 
-/** An Applied row: the date applied, the verdict line, Approve and Reject, and Approve anyway after a refusal that is not the coupon's. */
+/**
+ * An Applied row: the date applied, the verdict line, and the actions on the
+ * right (RowSplit): Approve and Reject, Approve anyway in Approve's place
+ * after a refusal that is not the coupon's. A row the coupon refuses has no
+ * Approve and no Approve anyway: Reject is its one action, raised, and its
+ * reason starts filled in (the render review's fix round).
+ */
 function PendingRow({
   row,
   locked,
@@ -647,21 +645,21 @@ function PendingRow({
   onApprove: (row: ThirtyRequestRow, override: boolean) => RowResult;
   onReject: (row: ThirtyRequestRow, reason: string | null) => RowResult;
 }) {
-  const [busy, setBusy] = useState<null | "approve" | "override" | "reject">(null);
-  const [confirm, setConfirm] = useState<null | "override" | "reject">(null);
-  const [reason, setReason] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const reasonId = useId();
   const verdict: Verdict = row.verdict ?? {
     ok: false,
     reason: "unknown",
     text: "The rule could not judge this request. Judge it by hand.",
     oldCourse: false,
   };
-  const off = busy !== null || locked;
-  // D5: the coupon's refusal has no override, so no Approve anyway after it.
+  // D5: the coupon's refusal has no override, so no Approve and no Approve anyway after it.
   const coupon = verdict.reason === "has-discount";
   const canOverride = !verdict.ok && !coupon;
+  const [busy, setBusy] = useState<null | "approve" | "override" | "reject">(null);
+  const [confirm, setConfirm] = useState<null | "override" | "reject">(null);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const reasonId = useId();
+  const off = busy !== null || locked;
   const detail = verdictDetail(row, verdict);
 
   async function run(what: NonNullable<typeof busy>, fn: () => RowResult) {
@@ -676,78 +674,93 @@ function PendingRow({
   // A rejection the app counts: the student's map shows it and offers no new request (discount.ts, requestCounts).
   const rejectionCounts = requestCounts({ status: "rejected", created_at: row.askedAt }, row.facts?.firstPaidAt ?? null);
 
+  const actions = (
+    <>
+      {/* Approve, or "Approve anyway" in its place after a refusal that is not the coupon's: a small link, as tall as Reject. */}
+      {canOverride ? (
+        <button
+          type="button"
+          style={{ ...SMALL_LINK, padding: "0 6px", opacity: off ? 0.5 : 1, cursor: off ? "not-allowed" : "pointer" }}
+          disabled={off}
+          aria-expanded={confirm === "override"}
+          onClick={() => setConfirm((c) => (c === "override" ? null : "override"))}
+        >
+          Approve anyway
+        </button>
+      ) : coupon ? null : (
+        <Button
+          variant="raised"
+          size="md"
+          disabled={locked || (busy !== null && busy !== "approve")}
+          busy={busy === "approve"}
+          onClick={() => void run("approve", () => onApprove(row, false))}
+        >
+          Approve
+        </Button>
+      )}
+      <Button
+        variant={coupon ? "raised" : "ghost"}
+        size="md"
+        disabled={off}
+        expanded={confirm === "reject"}
+        onClick={() => {
+          const opening = confirm !== "reject";
+          setConfirm(opening ? "reject" : null);
+          // The coupon's row: the reason starts as what the team would type. Filled when the panel opens, so a row
+          // the coupon refuses only after a reload (Approve refused by Whop) gets it too.
+          if (opening && coupon && !reason.trim()) setReason(couponRejectReason(row.coupon?.code ?? null));
+        }}
+      >
+        Reject
+      </Button>
+    </>
+  );
+
   return (
     <div className="list-row" style={ROW}>
-      <StudentHead student={row.student} />
-      <DotLine parts={[`Applied ${dayLabel(row.askedAt)}`]} />
+      <RowSplit
+        main={
+          <>
+            <StudentHead student={row.student} />
+            <DotLine parts={[`Applied ${dayLabel(row.askedAt)}`]} />
 
-      <p style={{ display: "flex", gap: 8, alignItems: "flex-start", minWidth: 0 }} data-verdict={verdict.reason ?? "yes"}>
-        <Dot color={verdictColor(verdict)} />
-        <span style={{ ...T.body, lineHeight: 1.5 }}>
-          {verdict.text}
-          {coupon && <span style={{ color: "var(--color-text-secondary)" }}> Approve asks Whop again first.</span>}
-          {detail.length > 0 && (
-            <span style={{ color: "var(--color-text-secondary)" }}>
-              {detail.map((d) => (
-                <span key={d}>
-                  <span aria-hidden="true"> · </span>
-                  {d}
+            <p style={{ display: "flex", gap: 8, alignItems: "flex-start", minWidth: 0 }} data-verdict={verdict.reason ?? "yes"}>
+              <Dot color={verdictColor(verdict)} />
+              <span style={{ ...T.body, lineHeight: 1.5 }}>
+                {verdict.text}
+                {detail.length > 0 && (
+                  <span style={{ color: "var(--color-text-secondary)" }}>
+                    {detail.map((d) => (
+                      <span key={d}>
+                        <span aria-hidden="true"> · </span>
+                        {d}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </span>
+            </p>
+            {/* Only beside the rule's yes: a row refused for another reason has nothing Approve would do. */}
+            {row.couponCheck === "not-checked" && verdict.ok && (
+              <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="not-checked">
+                <Dot color="var(--color-neutral)" />
+                <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>Coupon not checked yet. Approve asks Whop first.</span>
+              </p>
+            )}
+            {row.couponCheck === "no-membership" && (
+              <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="no-membership">
+                <Dot color="var(--color-warning)" />
+                <span style={{ ...T.body, lineHeight: 1.5 }}>
+                  Coupon not checked: the student&apos;s Whop membership is not on file, so Approve can&apos;t ask Whop. Check
+                  Whop before you approve.
                 </span>
-              ))}
-            </span>
-          )}
-        </span>
-      </p>
-      {row.couponCheck === "not-checked" && (
-        <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="not-checked">
-          <Dot color="var(--color-neutral)" />
-          <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>Coupon not checked yet. Approve asks Whop first.</span>
-        </p>
-      )}
-      {row.couponCheck === "no-membership" && (
-        <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="no-membership">
-          <Dot color="var(--color-warning)" />
-          <span style={{ ...T.body, lineHeight: 1.5 }}>
-            Coupon not checked: the student&apos;s Whop membership is not on file, so Approve can&apos;t ask Whop. Check
-            Whop before you approve.
-          </span>
-        </p>
-      )}
-
-      {/* Approve, or "Approve anyway" in its place after a refusal that is not the coupon's: a small link, as tall as Reject. */}
-      <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
-        {canOverride ? (
-          <button
-            type="button"
-            style={{ ...SMALL_LINK, padding: "0 6px", opacity: off ? 0.5 : 1, cursor: off ? "not-allowed" : "pointer" }}
-            disabled={off}
-            aria-expanded={confirm === "override"}
-            onClick={() => setConfirm((c) => (c === "override" ? null : "override"))}
-          >
-            Approve anyway
-          </button>
-        ) : (
-          <Button
-            variant="raised"
-            size="md"
-            disabled={locked || (busy !== null && busy !== "approve")}
-            busy={busy === "approve"}
-            onClick={() => void run("approve", () => onApprove(row, false))}
-          >
-            Approve
-          </Button>
-        )}
-        <Button
-          variant="ghost"
-          size="md"
-          disabled={off}
-          onClick={() => setConfirm((c) => (c === "reject" ? null : "reject"))}
-        >
-          Reject
-        </Button>
-      </div>
-
-      {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
+              </p>
+            )}
+            {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
+          </>
+        }
+        actions={actions}
+      />
 
       {confirm === "override" && canOverride && (
         <div style={PANEL}>
@@ -855,7 +868,14 @@ function CodeWithCopy({ code }: { code: string }) {
   );
 }
 
-/** An Approved, Rejected or Code Applied row: the dates and who decided, the reason or the code, Mark code applied on Approved. */
+/**
+ * An Approved, Rejected or Code Applied row: the dates and who decided, the
+ * reason or the code, and Mark code applied on the right of an Approved row
+ * (RowSplit). The coupon warning is an Approved row's only: a discount on the
+ * next renewal that is not the request's own 30% code (couponWarns,
+ * thirty-view.ts). The team's ECOM30 code, added in Whop before Mark code
+ * applied was pressed, is never warned about (the render review's fix round).
+ */
 function DecidedRow({
   row,
   locked,
@@ -882,47 +902,60 @@ function DecidedRow({
   // said nothing): adding the 30% code would replace it, so the team checks Whop first. A request approved before
   // the coupon rule has no stored row, which is why the page asks Whop about the Approved rows itself.
   const approved = row.status === "approved";
-  const coupon = approved && row.coupon?.discounted ? row.coupon : null;
-  const unchecked = approved && !coupon && (row.couponCheck === "failed" || row.couponCheck === "no-membership");
+  const coupon = couponWarns(row) ? row.coupon : null;
+  const unchecked = approved && !row.coupon && (row.couponCheck === "failed" || row.couponCheck === "no-membership");
+  const canMark = approved && Boolean(row.promoCode);
 
   return (
     <div className="list-row" style={ROW}>
-      <StudentHead student={row.student} />
-      <DotLine parts={parts} />
+      <RowSplit
+        main={
+          <>
+            <StudentHead student={row.student} />
+            <DotLine parts={parts} />
 
-      {row.status === "rejected" && (
-        <p style={{ ...T.bodyDim, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-          {row.rejectionReason ? `Reason: ${row.rejectionReason}` : "No reason given."}
-        </p>
-      )}
-
-      {coupon && (
-        <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="discounted">
-          <Dot color="var(--color-warning)" />
-          <span style={{ ...T.body, lineHeight: 1.5 }}>
-            {couponApprovalRefusal(coupon.code)} Check Whop before you add the 30% code.
-            {row.couponCheck === "stored" && (
-              <span style={{ color: "var(--color-text-secondary)" }}> Whop gave no answer now; this is its answer of {dayLabel(coupon.checkedAt)}.</span>
+            {row.status === "rejected" && (
+              <p style={{ ...T.bodyDim, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+                {row.rejectionReason ? `Reason: ${row.rejectionReason}` : "No reason given."}
+              </p>
             )}
-          </span>
-        </p>
-      )}
-      {unchecked && (
-        <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="unchecked">
-          <Dot color="var(--color-neutral)" />
-          <span style={{ ...T.body, lineHeight: 1.5 }}>
-            {row.couponCheck === "no-membership"
-              ? "Couldn't ask Whop about a coupon: the student's Whop membership is not on file."
-              : "Couldn't ask Whop about a coupon on this membership."}{" "}
-            Check Whop before you add the 30% code.
-          </span>
-        </p>
-      )}
 
-      {row.promoCode && row.status !== "rejected" && (
-        <div className="flex flex-wrap items-center" style={{ gap: 10 }}>
-          <CodeWithCopy code={row.promoCode} />
-          {row.status === "approved" && (
+            {coupon && (
+              <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="discounted">
+                <Dot color="var(--color-warning)" />
+                <span style={{ ...T.body, lineHeight: 1.5 }}>
+                  {couponApprovalRefusal(coupon.code)} Check Whop before you add the 30% code.
+                  {row.couponCheck === "stored" && (
+                    <span style={{ color: "var(--color-text-secondary)" }}> Whop gave no answer now; this is its answer of {dayLabel(coupon.checkedAt)}.</span>
+                  )}
+                </span>
+              </p>
+            )}
+            {unchecked && (
+              <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="unchecked">
+                <Dot color="var(--color-neutral)" />
+                <span style={{ ...T.body, lineHeight: 1.5 }}>
+                  {row.couponCheck === "no-membership"
+                    ? "Couldn't ask Whop about a coupon: the student's Whop membership is not on file."
+                    : "Couldn't ask Whop about a coupon on this membership."}{" "}
+                  Check Whop before you add the 30% code.
+                </span>
+              </p>
+            )}
+
+            {row.promoCode && row.status !== "rejected" && <CodeWithCopy code={row.promoCode} />}
+            {/* The tab's note says what to do with a code; a row says it only when there is none. */}
+            {approved && !row.promoCode && (
+              <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>
+                This approved request has no code on file. Check it in Whop before marking anything.
+              </p>
+            )}
+
+            {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
+          </>
+        }
+        actions={
+          canMark ? (
             <Button
               variant="raised"
               size="md"
@@ -938,17 +971,9 @@ function DecidedRow({
             >
               Mark code applied
             </Button>
-          )}
-        </div>
-      )}
-      {/* The tab's note says what to do with a code; a row says it only when there is none. */}
-      {row.status === "approved" && !row.promoCode && (
-        <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>
-          This approved request has no code on file. Check it in Whop before marking anything.
-        </p>
-      )}
-
-      {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
+          ) : undefined
+        }
+      />
 
       {error && (
         <p role="alert" style={ERROR_TEXT}>

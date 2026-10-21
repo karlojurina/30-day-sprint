@@ -187,6 +187,31 @@ export function discountEndsAt(firstPaidAt: string | null): Date | null {
 }
 
 /**
+ * Is the offer still open to this first payment at `nowMs`: open to it
+ * (discountWindow) and its deadline not past. The deadline's own millisecond
+ * is inside, as discountState counts it. The coupon cron reads only these
+ * students (admin rebuild 2, the render review's fix round: it read every
+ * student since 1 October, a list that only grew).
+ */
+export function discountWindowOpen(firstPaidAt: string | null, nowMs: number): boolean {
+  const w = discountWindow(firstPaidAt);
+  return !("closed" in w) && nowMs <= w.endsAt.getTime();
+}
+
+/**
+ * The earliest first payment whose offer can still be open at `nowMs`, as an
+ * ISO moment: DISCOUNT_ELIGIBLE_FROM until the shared deadline has passed,
+ * then the launch or 14 days before `nowMs`, whichever is later. A read from
+ * here on holds every student discountWindowOpen keeps (and a few it does
+ * not, on the boundary's day), so the cron's read stays as short as the
+ * window.
+ */
+export function earliestOpenFirstPayment(nowMs: number): string {
+  if (nowMs <= Date.parse(DISCOUNT_SHARED_DEADLINE)) return DISCOUNT_ELIGIBLE_FROM;
+  return new Date(Math.max(Date.parse(DISCOUNT_LAUNCH_DATE), nowMs - DISCOUNT_WINDOW_DAYS * DAY_MS)).toISOString();
+}
+
+/**
  * Whether a discount request decides where the student stands: the one place
  * that says which requests count, read by discountState (the map, the request
  * routes) and by Discount Earned (achievements.ts).

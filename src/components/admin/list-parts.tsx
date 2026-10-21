@@ -24,11 +24,63 @@ import { ReadFailure } from "@/components/admin/review-parts";
  *                     place at the bottom of the window, where it is seen
  *                     wherever the click was
  *
+ * Admin rebuild 2, the render review's fix round:
+ *   FailedMeta        the header's meta line when the page's read failed
+ *   PILL_ROW          a row of pills (tabs, filters, ranges) that scrolls on
+ *                     one line on a phone instead of wrapping
+ *   RowSplit          a list row's words on the left and its actions on the
+ *                     right from 768px wide, the actions under the words below
+ *
  * Every tap target here is at least 44px tall (the kit's touch target).
  */
 
 /** The kit's touch target. */
 export const TAP = 44;
+
+/**
+ * A row of pills: the tabs of Tasks, the filters and sorts of All students,
+ * the ranges of the insights. Wide, it wraps. Under 640px it stays on one line
+ * and scrolls sideways inside itself, out to the window's edges, as the 30%
+ * page's tabs do: on a phone the rows wrapped onto a second and third line.
+ * The 4px above and below keep a pill's focus ring inside the scroll box.
+ * Spread it with the row's own gap in `style`.
+ */
+export const PILL_ROW =
+  "flex flex-wrap max-sm:flex-nowrap max-sm:overflow-x-auto max-sm:-mx-4 max-sm:px-4 max-sm:-my-1 max-sm:py-1 max-sm:[scrollbar-width:none]";
+
+/**
+ * The header's meta line once the page's read has failed: a warning dot and
+ * the words, where "Loading" stood. The error itself, with Retry, is under
+ * the header.
+ */
+export function FailedMeta({ text = "Couldn't load" }: { text?: string }) {
+  return (
+    <span data-meta-failed="" style={{ display: "inline-flex", alignItems: "center", gap: 8, color: "var(--color-text-primary)" }}>
+      <span aria-hidden="true" style={{ flex: "none", width: 8, height: 8, borderRadius: 999, background: "var(--color-warning)" }} />
+      {text}
+    </span>
+  );
+}
+
+/**
+ * A list row in two parts: what the row says on the left, its actions on the
+ * right from 768px wide (top-aligned with the row's first line), and under
+ * the words on a phone. Left under the words on a wide screen, the actions
+ * left the right half of the card empty. What opens under a row (a confirm,
+ * a reason) goes after this, across the whole row.
+ */
+export function RowSplit({ main, actions }: { main: React.ReactNode; actions?: React.ReactNode }) {
+  return (
+    <div data-row-split="" className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] md:items-start" style={{ gap: "10px 24px" }}>
+      <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>{main}</div>
+      {actions ? (
+        <div data-row-actions="" className="flex flex-wrap items-center md:justify-end" style={{ gap: 8 }}>
+          {actions}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * A pill that is pressed or not: the 30% page's tabs. Raised surface and

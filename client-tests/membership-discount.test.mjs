@@ -13,7 +13,10 @@
 // pinned shape (and the key's older shape where a row says so); the request
 // routes, the approve route, the cron route and the student data route
 // through their own handlers, on stub-server.ts's database; the rule's
-// discountState, the refusal words and the map's checkpointView.
+// discountState, the refusal words and the map's checkpointView. Since the
+// render review's fix round, also the cron's population: only the students
+// whose 30% window is still open (discountWindowOpen), on the suite's clock
+// moved past the shared deadline.
 //
 // The clock is the suite's, as in first-payment.test.mjs: `new Date()` and
 // `Date.now()` answer it, and setTimeout sets a timer on it that fires in the
@@ -149,7 +152,7 @@ const { POST: feedbackRoute } = await import('./_gen/discount-submit-feedback-ro
 const { POST: approveRoute } = await import('./_gen/discount-approve-route.ts')
 const { GET: cronRoute } = await import('./_gen/refresh-membership-discounts-route.ts')
 const { GET: dataRoute } = await import('./_gen/student-data-route.ts')
-const { MEMBERSHIP_DISCOUNT_LINE, DISCOUNT_ELIGIBLE_FROM, discountState } = await import('./_gen/discount.ts')
+const { MEMBERSHIP_DISCOUNT_LINE, DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, DISCOUNT_SHARED_DEADLINE, discountState, discountWindowOpen, earliestOpenFirstPayment } = await import('./_gen/discount.ts')
 const { discountRefusalMessage, membershipDiscountRefusal, couponApprovalRefusal } = await import('./_gen/discount-server.ts')
 const { checkpointView } = await import('./_gen/checkpointView.ts')
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
@@ -566,7 +569,7 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
   const rows = new Map(db.rows(MEMBERSHIP_DISCOUNTS_TABLE).map((x) => [x.student_id, x]))
   ok(r.value.status === 200 && b.ok === true && b.mode === 'write', 'a run: 200, ok', show(b))
   ok(b.in_window === 11 && b.have_the_30 === 2 && b.candidates === 9,
-     'the window: a first payment from 1 October, active or past_due (11); the 2 with an approved or applied request left out (9 to check)', show({ in: b.in_window, held: b.have_the_30, c: b.candidates }))
+     'the window on 21 Oct, when every first payment from 1 October is still in one: active or past_due (11); the 2 with an approved or applied request left out (9 to check)', show({ in: b.in_window, held: b.have_the_30, c: b.candidates }))
   ok(b.checked === 6 && b.discounted === 4 && b.written === 6 && b.skipped.no_membership === 1 && b.skipped.not_a_membership === 1 && show(b.failed) === show({ not_found: 1 }) && b.left === 0,
      '6 read and written (4 discounted), one with no membership, one with a payment\'s id, one Whop does not know', show(b))
   ok(rows.get('s-evolve')?.discounted === true && rows.get('s-evolve')?.promo_code === 'evolve10' && rows.get('s-used')?.discounted === false
@@ -637,6 +640,88 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
      `1,000 members: ${b.checked} read in the 240 s, ${b.left} left for the next run, the last request started at ${Math.round((lastStart - started) / 1000)} s`, show({ checked: b.checked, left: b.left }))
   const writes = db.calls(MEMBERSHIP_DISCOUNTS_TABLE, 'upsert').map((q) => q.values.length)
   ok(writes.length > 1 && writes.slice(0, -1).every((n) => n === 25), `written 25 at a time, as it went: ${writes.length} writes`)
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Admin rebuild 2, the render review's fix round: the cron reads only the
+// students whose 30% window is still open (discountWindowOpen), with no
+// approved or applied request. It read every student who first paid from 1
+// October, active or past due: a list that only grew while their windows
+// closed and no request could be made any more.
+console.log('\n=== The cron: only the students whose 30% window is still open ===')
+{
+  const ms = (iso) => RealDate.parse(iso)
+  // The rule's own edges, on the suite's clock moved where each is.
+  ok(discountWindowOpen('2026-10-05T10:00:00.000Z', ms('2026-10-21T09:00:00.000Z')) && discountWindowOpen('2026-10-05T10:00:00.000Z', ms(DISCOUNT_SHARED_DEADLINE))
+       && !discountWindowOpen('2026-10-05T10:00:00.000Z', ms(DISCOUNT_SHARED_DEADLINE) + 1),
+     'a first payment in the shared window (5 Oct): open until the end of 23 October, its last millisecond inside, closed the next')
+  ok(discountWindowOpen('2026-10-20T10:00:00.000Z', ms('2026-11-03T10:00:00.000Z')) && !discountWindowOpen('2026-10-20T10:00:00.000Z', ms('2026-11-03T10:00:00.001Z')),
+     'a first payment from the launch (20 Oct): open for 14 days to the millisecond, as discountState counts it')
+  ok(!discountWindowOpen('2026-09-29T10:00:00.000Z', ms('2026-10-21T09:00:00.000Z')) && !discountWindowOpen(null, ms('2026-10-21T09:00:00.000Z')),
+     'a first payment before 1 October, or none: never open')
+  ok(earliestOpenFirstPayment(ms('2026-10-21T09:00:00.000Z')) === DISCOUNT_ELIGIBLE_FROM && earliestOpenFirstPayment(ms(DISCOUNT_SHARED_DEADLINE)) === DISCOUNT_ELIGIBLE_FROM,
+     'the read starts at 1 October while the shared deadline has not passed')
+  ok(earliestOpenFirstPayment(ms('2026-10-24T09:00:00.000Z')) === '2026-10-10T09:00:00.000Z' && earliestOpenFirstPayment(ms('2026-11-05T09:00:00.000Z')) === '2026-10-22T09:00:00.000Z'
+       && Date.parse(earliestOpenFirstPayment(ms(DISCOUNT_SHARED_DEADLINE) + 1)) > Date.parse(DISCOUNT_LAUNCH_DATE),
+     'once the shared deadline has passed, 14 days back (24 Oct reads from 10 Oct, 5 Nov from 22 Oct), never before the launch')
+
+  const p = (id, paid, membership, more = {}) => ({ id, first_paid_at: paid, membership_status: 'active', whop_membership_id: membership, ...more })
+  function windowDb() {
+    const db = new FakeDb({
+      students: [
+        // Shared window (paid 1 to 8 October): closed after 23 October.
+        p('w-shared', '2026-10-05T10:00:00.000Z', 'mem_devEvolve'),
+        // Own windows: 14 days from the first payment.
+        p('w-closed', '2026-10-20T10:00:00.000Z', 'mem_devUsed'),
+        p('w-edge', '2026-10-22T09:00:00.000Z', 'mem_devFull'),
+        p('w-open', '2026-10-25T10:00:00.000Z', 'mem_devEvolve2'),
+        p('w-pending', '2026-11-01T10:00:00.000Z', 'mem_devYearCode', { membership_status: 'past_due' }),
+        // Open, but the 30% is theirs already.
+        p('w-approved', '2026-11-02T10:00:00.000Z', 'mem_devFull'),
+        // Open, but not a member any more.
+        p('w-canceled', '2026-11-03T10:00:00.000Z', 'mem_devFull', { membership_status: 'canceled' }),
+      ],
+      discount_requests: [
+        { id: 'r-wp', student_id: 'w-pending', status: 'pending', created_at: '2026-11-04T10:00:00.000Z' },
+        { id: 'r-wa', student_id: 'w-approved', status: 'approved', created_at: '2026-11-04T10:00:00.000Z' },
+      ],
+    })
+    installDb(db)
+    return db
+  }
+  const before = clock
+  try {
+    // Thu 5 Nov, 10:00 in Croatia: the shared deadline long past.
+    clock = ms('2026-11-05T09:00:00.000Z')
+    resetWhop()
+    const db = windowDb()
+    const r = await quiet(() => cron())
+    const b = r.value.body
+    const rows = new Set(db.rows(MEMBERSHIP_DISCOUNTS_TABLE).map((x) => x.student_id))
+    const read = whop.log.filter((x) => x.path.startsWith('/api/v1/memberships/')).map((x) => x.path.split('/').pop()).sort()
+    ok(r.value.status === 200 && b.in_window === 4 && b.have_the_30 === 1 && b.candidates === 3,
+       '5 Nov: in the window the 4 whose window is open and who are members (the edge of 22 Oct, 25 Oct, 1 Nov past due, 2 Nov); the approved one left out, 3 to check',
+       show({ in: b.in_window, held: b.have_the_30, c: b.candidates }))
+    ok(show(read) === show(['mem_devEvolve2', 'mem_devFull', 'mem_devYearCode']) && show([...rows].sort()) === show(['w-edge', 'w-open', 'w-pending']),
+       'Whop is asked about those 3 alone, and their rows written; a pending request does not keep a student out', show({ read, rows: [...rows] }))
+    ok(!rows.has('w-shared') && !rows.has('w-closed') && !rows.has('w-approved') && !rows.has('w-canceled'),
+       'the shared window (closed 23 Oct) and the own window closed on 3 Nov are no longer read, nor the approved or the canceled student')
+    const asked = db.calls('students', 'select').map((c) => c.filters).flat()
+    ok(asked.some((f) => f === 'first_paid_at>=2026-10-22T09:00:00.000Z'),
+       'the students read itself starts at the earliest first payment still open (22 Oct), so it stays as short as the window', show(asked))
+
+    // 21 October, the suite's own day: both of these windows are still open, and the read starts at 1 October.
+    clock = ms('2026-10-21T09:00:00.000Z')
+    resetWhop()
+    const early = new FakeDb({ students: [p('w-shared', '2026-10-05T10:00:00.000Z', 'mem_devEvolve'), p('w-closed', '2026-10-20T10:00:00.000Z', 'mem_devUsed')] })
+    installDb(early)
+    const e = (await quiet(() => cron())).value.body
+    ok(e.in_window === 2 && e.checked === 2 && early.calls('students', 'select').some((c) => c.filters.includes(`first_paid_at>=${DISCOUNT_ELIGIBLE_FROM}`)),
+       '21 Oct: the shared window (to 23 Oct) and the own one (to 3 Nov) are open, both read; the read starts at 1 October',
+       show({ in: e.in_window, checked: e.checked }))
+  } finally {
+    clock = before
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════

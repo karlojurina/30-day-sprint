@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Card, EmptyState, Stat, T } from "@/components/admin/ui";
-import { ListHeader, ListPage, LoadError, SkeletonRows, TAP, pressPill } from "@/components/admin/list-parts";
-import { TextLink } from "@/components/admin/review-parts";
+import { FailedMeta, ListHeader, ListPage, LoadError, PILL_ROW, SkeletonRows, TAP, pressPill } from "@/components/admin/list-parts";
+import { FoldSummary, TextLink } from "@/components/admin/review-parts";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { insightsTransport, type InsightsTransport } from "@/lib/admin/people-transport";
@@ -123,7 +123,7 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
   const offered = computedAt ? insightsRanges(floor, Date.parse(computedAt)) : [];
   const ranges =
     offered.length > 1 ? (
-      <div role="group" aria-label="Range" className="flex flex-wrap" style={{ gap: 8, marginBottom: 16 }}>
+      <div role="group" aria-label="Range" className={PILL_ROW} style={{ gap: 8, marginBottom: 16 }}>
         {offered.map((r) => (
           <button key={r.value} type="button" aria-pressed={range === r.value} onClick={() => choose(r.value)} style={pressPill(range === r.value)}>
             {r.label}
@@ -156,7 +156,7 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
   if (loaded.kind === "error") {
     return (
       <ListPage>
-        {top(null)}
+        {top(<FailedMeta />)}
         <LoadError title="Couldn't load the insights." detail={loaded.error} onRetry={() => void retry()} busy={busy} />
       </ListPage>
     );
@@ -356,9 +356,7 @@ export function InsightsView({ transport = insightsTransport }: { transport?: In
       </section>
 
       <details style={{ marginTop: 8 }}>
-        <summary style={{ ...T.body, fontWeight: 600, minHeight: TAP, display: "flex", alignItems: "center", cursor: "pointer", color: "var(--color-text-secondary)" }}>
-          How these numbers work
-        </summary>
+        <FoldSummary>How these numbers work</FoldSummary>
         <Card>
           <ul style={{ ...T.bodyDim, lineHeight: 1.7, paddingLeft: 18, margin: 0, listStyle: "disc" }}>
             <li>

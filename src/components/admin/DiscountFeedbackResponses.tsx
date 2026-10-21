@@ -5,7 +5,8 @@
  * questions' order. The Survey page (/admin/feedback/survey) is the only
  * user since the 30% page reads its answers itself (src/lib/admin/
  * thirty-data.ts). In the brand kit's dark look since admin rebuild 2
- * (WI-9).
+ * (WI-9). Since the render review's fix round the answers sit in the
+ * application's own card under a hairline: they were a card inside a card.
  */
 
 import type {
@@ -28,14 +29,7 @@ export function DiscountFeedbackResponses({
   const sortedQs = [...questions].sort((a, b) => a.order_num - b.order_num);
   const answered = sortedQs.filter((q) => byId.has(q.id));
   return (
-    <div
-      style={{
-        padding: 14,
-        borderRadius: "var(--radius-control)",
-        background: "var(--color-bg-elevated)",
-        border: "1px solid var(--color-border)",
-      }}
-    >
+    <div data-answers="" style={{ paddingTop: 12, borderTop: "1px solid var(--color-border)" }}>
       {answered.length === 0 ? (
         <p style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>
           No answer matches a question the survey has now.

@@ -57,9 +57,10 @@ const LESSONS = [
   { id: 'a9l01', region_id: 'a9', title: 'Under an unknown area', type: 'watch', sort_order: 8, feature_key: null },
 ]
 const STUDENTS = [
-  { id: 's-1', name: 'Ana Example', email: 's-1@example.com' },
-  { id: 's-2', name: null, email: 's-2@example.com' },
-  { id: 's-3', name: '  ', email: 's-3@example.com' },
+  // The username too, which the page shows after the name (the render review's fix round).
+  { id: 's-1', name: 'Ana Example', email: 's-1@example.com', discord_username: 'ana.example' },
+  { id: 's-2', name: null, email: 's-2@example.com', discord_username: null },
+  { id: 's-3', name: '  ', email: 's-3@example.com', discord_username: null },
 ]
 let n = 0
 const rating = (lesson, student, stars, comment, hours, editedHours) => ({

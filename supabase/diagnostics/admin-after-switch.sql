@@ -158,9 +158,8 @@ with
            (select count(*)::text from public.student_lesson_completions),
            'the switch emptied this table: every row came after it', 'INFO'
     union all
-    -- The filter of /admin/not-activated (no team test accounts, no one the
-    -- Day-10 tier already marked), before its cohort and tier pickers. The
-    -- page went in admin rebuild 2's review fix round; the count stands.
+    -- /admin/not-activated's own filter (no team test accounts, no one the
+    -- Day-10 tier already marked), before its cohort and tier pickers.
     select 15, 'not activated', 'paid, active, never logged in to the app',
            (select count(*)::text from public.students s
              where s.membership_status = 'active' and not s.high_churn_risk and not s.csm_exempt
@@ -168,7 +167,7 @@ with
                and s.first_paid_at >= timestamptz '2026-05-25 00:00:00+00'
                and not exists (select 1 from public.student_milestones m
                                 where m.student_id = s.id and m.first_sprint_login_at is not null)),
-           'what the Total tile on /admin/not-activated counted (the page is gone since admin rebuild 2)', 'INFO'
+           'the Total tile on /admin/not-activated; far more there means its read of first logins failed', 'INFO'
     union all
     select 20, 'snapshot', 'today''s row, ' || (select d::text from today) || ' (UTC)',
            coalesce((select 'avg ' || avg || '% · active ' || coalesce(active_count_cohort::text, '?')

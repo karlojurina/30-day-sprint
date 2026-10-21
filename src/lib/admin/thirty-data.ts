@@ -86,8 +86,14 @@ export interface ThirtyRequest extends DiscountRequestRow {
   reviewed_by: string | null;
   applied_at: string | null;
   applied_by: string | null;
+  /**
+   * The Whop promo id of the 30% code Approve made (the approve route stores
+   * it beside promo_code). A coupon with this id on the membership is the
+   * request's own code: never warned about (the render review's fix round).
+   */
+  whop_promo_id?: string | null;
 }
-export const LISTED_REQUEST_COLUMNS = `${REQUEST_COLUMNS}, student_id, reviewed_at, reviewed_by, applied_at, applied_by`;
+export const LISTED_REQUEST_COLUMNS = `${REQUEST_COLUMNS}, student_id, reviewed_at, reviewed_by, applied_at, applied_by, whop_promo_id`;
 
 /** A completion on a lesson the offer asks for. */
 export interface ThirtyCompletion {

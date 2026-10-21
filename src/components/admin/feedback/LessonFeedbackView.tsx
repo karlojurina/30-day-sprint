@@ -1,9 +1,9 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button, Card, EmptyState, T } from "@/components/admin/ui";
-import { ListHeader, ListPage, LoadError, STALE_TEXT, SkeletonRows, TAP } from "@/components/admin/list-parts";
+import { FailedMeta, ListHeader, ListPage, LoadError, STALE_TEXT, SkeletonRows, TAP } from "@/components/admin/list-parts";
+import { StudentName } from "@/components/admin/student-name";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { lessonFeedbackTransport } from "@/lib/admin/lesson-feedback-transport";
@@ -41,6 +41,10 @@ import type {
  * The call goes through `transport`, so the dev page
  * /dev/admin/feedback/lessons renders this same component with made-up
  * data and no login.
+ *
+ * A comment's writer is named as on every admin page (student-name.tsx: a
+ * link to the student's page, @username after it; the render review's fix
+ * round, where it was a small Airy Blue link).
  */
 
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; data: Payload };
@@ -129,7 +133,7 @@ export function LessonFeedbackView({ transport = lessonFeedbackTransport }: { tr
   if (loaded.kind === "error") {
     return (
       <ListPage>
-        {header(null, refreshButton)}
+        {header(<FailedMeta />, refreshButton)}
         <LoadError title="Couldn't load lesson feedback." detail={loaded.error} onRetry={() => void reload()} busy={reloading} />
       </ListPage>
     );
@@ -386,20 +390,11 @@ function CommentItem({ comment }: { comment: FeedbackComment }) {
         background: "var(--color-bg-elevated)",
       }}
     >
-      <div className="flex flex-wrap items-center" style={{ gap: "4px 10px", marginBottom: 6 }}>
+      <div className="flex flex-wrap items-baseline" style={{ gap: "4px 10px", marginBottom: 6 }}>
         <Stars value={comment.stars} small />
         <span className="sr-only">{comment.stars} of 5 stars.</span>
-        <span style={{ ...T.bodyDim, fontSize: 12 }}>
-          {who ? (
-            <Link href={`/admin/students/${encodeURIComponent(who.id)}`} style={{ color: "var(--color-accent-dark)", textDecoration: "none" }}>
-              {name}
-            </Link>
-          ) : (
-            name
-          )}
-          {" · "}
-          {dayLabel(comment.at)}
-        </span>
+        <StudentName id={who?.id} name={name} username={who?.discord_username} size={13} />
+        <span style={{ ...T.bodyDim, fontSize: 12 }}>{dayLabel(comment.at)}</span>
       </div>
       <p style={{ ...T.body, lineHeight: 1.55, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{comment.comment}</p>
     </li>

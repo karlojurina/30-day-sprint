@@ -37,7 +37,8 @@ import { Field, INPUT, SubHeading, WarningLine } from "./form-parts";
  * first template is on the first screen; the warnings say what to fix and
  * the button is one press away. The one sentence about who can change it
  * is here. SettingsBody is exported for the client tests, which render it
- * open.
+ * open. The button says whether the panel is open (aria-expanded) and which
+ * one it opens (aria-controls), since the render review's fix round.
  */
 
 type Saver = (key: EditableConfigKey, value: string) => Promise<string | null>;
@@ -78,7 +79,14 @@ export function MessageSettings({
             </p>
           </div>
           {settings.ok && (
-            <Button variant="raised" size="md" onClick={() => setOpen((v) => !v)} title={open ? "Hide the links and the switches" : "Show the links and the switches"}>
+            <Button
+              variant="raised"
+              size="md"
+              onClick={() => setOpen((v) => !v)}
+              title={open ? "Hide the links and the switches" : "Show the links and the switches"}
+              expanded={open}
+              controls={panelId}
+            >
               {open ? "Hide settings" : "Show settings"}
               <svg aria-hidden="true" width="14" height="14" viewBox="0 0 16 16" style={{ flex: "none", transform: open ? "rotate(180deg)" : undefined, transition: "transform 150ms" }}>
                 <path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />

@@ -106,11 +106,12 @@ export function TrendChart({
   guideFormat?: (v: number) => string;
   /** Room in px left of the plot for the guides' labels; 0 puts each label on its line. */
   gutter?: number;
-  /** The readout for a day with no reading. */
-  emptyText?: string;
+  /** The readout for a day with no reading, or the words for each such day (Avg progress: "Before the switch"). */
+  emptyText?: string | ((date: string) => string);
 }) {
   const [active, setActive] = useState<number | null>(null);
   const n = points.length;
+  const emptyOf = (date: string) => (typeof emptyText === "function" ? emptyText(date) : emptyText);
   const values = points.map((p) => p.value).filter((v): v is number => v !== null);
   const [lo, hi] = range(values, kind, domain);
   const padTop = kind === "bars" ? 20 : 6;
@@ -178,7 +179,7 @@ export function TrendChart({
 
   const readout = (i: number) => {
     const p = points[i];
-    return `${pointDay(p.date)}: ${p.value === null ? emptyText : format(p.value)}`;
+    return `${pointDay(p.date)}: ${p.value === null ? emptyOf(p.date) : format(p.value)}`;
   };
 
   const nearest = (clientX: number, el: HTMLElement): number | null => {
@@ -404,7 +405,7 @@ export function TrendChart({
               }}
             >
               <strong style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>
-                {shownPoint!.value === null ? emptyText : format(shownPoint!.value)}
+                {shownPoint!.value === null ? emptyOf(shownPoint!.date) : format(shownPoint!.value)}
               </strong>{" "}
               {pointDay(shownPoint!.date)}
             </div>
@@ -449,7 +450,7 @@ export function TrendChart({
             {points.map((p) => (
               <tr key={p.date}>
                 <td>{pointDay(p.date)}</td>
-                <td>{p.value === null ? emptyText : format(p.value)}</td>
+                <td>{p.value === null ? emptyOf(p.date) : format(p.value)}</td>
               </tr>
             ))}
           </tbody>

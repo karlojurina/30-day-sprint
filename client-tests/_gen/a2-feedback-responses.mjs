@@ -6,12 +6,7 @@ export function DiscountFeedbackResponses({ responses, questions, }) {
         byId.set(r.question_id, r);
     const sortedQs = [...questions].sort((a, b) => a.order_num - b.order_num);
     const answered = sortedQs.filter((q) => byId.has(q.id));
-    return (_jsx("div", { style: {
-            padding: 14,
-            borderRadius: "var(--radius-control)",
-            background: "var(--color-bg-elevated)",
-            border: "1px solid var(--color-border)",
-        }, children: answered.length === 0 ? (_jsx("p", { style: { fontSize: 13, color: "var(--color-text-secondary)" }, children: "No answer matches a question the survey has now." })) : (_jsx("dl", { className: "flex flex-col", style: { gap: 12 }, children: answered.map((q) => {
+    return (_jsx("div", { "data-answers": "", style: { paddingTop: 12, borderTop: "1px solid var(--color-border)" }, children: answered.length === 0 ? (_jsx("p", { style: { fontSize: 13, color: "var(--color-text-secondary)" }, children: "No answer matches a question the survey has now." })) : (_jsx("dl", { className: "flex flex-col", style: { gap: 12 }, children: answered.map((q) => {
                 const r = byId.get(q.id);
                 let value;
                 if (q.question_type === "scale" && r.answer_scale != null) {

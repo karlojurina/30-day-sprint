@@ -63,8 +63,8 @@ export interface SurveyApplication {
   /** discount_requests.status: pending, approved, rejected or applied. */
   status: string;
   created_at: string;
-  /** Null when the student's row could not be found. */
-  student: { id: string; name: string | null; email: string | null } | null;
+  /** Null when the student's row could not be found. The username is shown after the name, as on every admin page. */
+  student: { id: string; name: string | null; email: string | null; discord_username?: string | null } | null;
   /** In question order. */
   answers: SurveyAnswer[];
 }
@@ -126,12 +126,12 @@ export async function loadSurveyData(supabase: SupabaseClient): Promise<Answer<S
   if (requestError) return failed("The applications", requestError.message);
   const requests = requestReads.flatMap((r) => r.data);
 
-  type StudentRow = { id: string; name: string | null; email: string | null };
+  type StudentRow = { id: string; name: string | null; email: string | null; discord_username: string | null };
   const studentIds = [...new Set(requests.map((r) => r.student_id).filter((id): id is string => !!id))].sort();
   const studentReads = await Promise.all(
     batches(studentIds).map((ids) =>
       fetchAllRowsByKey<StudentRow>(
-        () => supabase.from("students").select("id, name, email").in("id", ids).order("id"),
+        () => supabase.from("students").select("id, name, email, discord_username").in("id", ids).order("id"),
         "id",
       ),
     ),

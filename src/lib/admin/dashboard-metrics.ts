@@ -470,14 +470,21 @@ export function churned(rows: SnapshotRow[], days: string[]): Churned {
 export type AvgProgress =
   | {
       kind: "value";
-      /** The newest row's avg_progress_cohort: the line's last point. */
+      /** The newest row's avg_progress_cohort: the line's last reading. */
       value: number;
       /** That row's date. */
       date: string;
       /** When that row was written, null when unknown. */
       builtAt: string | null;
-      /** From the switch's date (or the 14 days' first) to today. */
+      /**
+       * The 14 days, as every trend line: the days before the switch's date
+       * hold no reading (null), so the line from the switch sits at the right
+       * end of the same axis instead of stretching across the tile (the
+       * render review's fix round).
+       */
       line: Point[];
+      /** The switch's date when it falls after the 14 days' first: the line counts from it ("from Mon 19 Oct"). Null otherwise. */
+      from: string | null;
     }
   | {
       kind: "none";
@@ -487,20 +494,24 @@ export type AvgProgress =
 
 /**
  * D3's Avg progress: the snapshot's avg_progress_cohort for the number and
- * the line alike. The line keeps the days from the switch's date on
+ * the line alike. The line reads the days from the switch's date on
  * (resetDateUtc, the date the snapshot writers and their trigger use; the
- * rows before it hold the old course); the number is its last reading.
- * Throws when curriculum_reset_at is not a date (resetDateUtc does).
+ * rows before it hold the old course), on the 14 days' axis: an earlier day
+ * holds no reading. The number is its last reading. Throws when
+ * curriculum_reset_at is not a date (resetDateUtc does).
  */
 export function avgProgress(rows: SnapshotRow[], days: string[], resetAt: string | null): AvgProgress {
   const floor = resetDateUtc(resetAt);
   const shown = floor ? days.filter((d) => d >= floor) : days;
   const since = shown[0] ?? floor ?? days[0];
-  const line = lineOf(rows, shown, (r) => pick(r, "avg_progress_cohort", "avg_progress"));
+  const read = lineOf(rows, days, (r) => pick(r, "avg_progress_cohort", "avg_progress"));
+  // Before the switch's date: no reading, never the old course's.
+  const line = floor ? read.map((p) => (p.date < floor ? { date: p.date, value: null } : p)) : read;
   const last = [...line].reverse().find((p) => p.value !== null);
   if (!last) return { kind: "none", since };
   const row = rows.find((r) => String(r.snapshot_date).slice(0, 10) === last.date);
-  return { kind: "value", value: last.value!, date: last.date, builtAt: row?.created_at ?? null, line };
+  const from = floor && days.length > 0 && floor > days[0] ? since : null;
+  return { kind: "value", value: last.value!, date: last.date, builtAt: row?.created_at ?? null, line, from };
 }
 
 // ── Change over the window ──────────────────────────────────────────────────

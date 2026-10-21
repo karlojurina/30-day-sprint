@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, EmptyState, T } from "@/components/admin/ui";
-import { ListHeader, ListPage, LoadError, MembershipPill, SkeletonRows, pressPill } from "@/components/admin/list-parts";
+import { FailedMeta, ListHeader, ListPage, LoadError, MembershipPill, PILL_ROW, SkeletonRows, pressPill } from "@/components/admin/list-parts";
 import { ActivityPill, Meter, SearchField } from "@/components/admin/people-parts";
 import { ProblemNotice } from "@/components/admin/review-parts";
+import { StudentName } from "@/components/admin/student-name";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { agoText } from "@/lib/admin/people-common";
@@ -35,6 +36,13 @@ import {
  *
  * The rows come 100 at a time ("Show 100 more"), so a phone is not handed
  * every student at once; the search and the filters work on all of them.
+ *
+ * The render review's fix round: a row's name looks as on every admin page
+ * (student-name.tsx; the whole row is the link to the student's page), a
+ * student with no username has an empty Username cell (a screen reader
+ * hears "No username"; it read "None"), the filters and the sorts stay on one
+ * line that scrolls on a phone (PILL_ROW), and a failed read says so in the
+ * header too.
  */
 
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; data: StudentsList };
@@ -98,9 +106,13 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
       title="All students"
       description="Everyone with a first payment, on any plan, newest first payment first."
       meta={
-        data
-          ? `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${count} ${count === 1 ? "student" : "students"}`
-          : "Loading"
+        data ? (
+          `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${count} ${count === 1 ? "student" : "students"}`
+        ) : loaded.kind === "error" ? (
+          <FailedMeta />
+        ) : (
+          "Loading"
+        )
       }
       // Kept while the list loads or failed, so the header never jumps (the review's fix round).
       action={
@@ -154,7 +166,7 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
             }}
           />
         </div>
-        <div role="group" aria-label="Membership" className="flex flex-wrap" style={{ gap: 8 }}>
+        <div role="group" aria-label="Membership" className={PILL_ROW} style={{ gap: 8 }}>
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
@@ -171,8 +183,8 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
             </button>
           ))}
         </div>
-        <div role="group" aria-label="Sort" className="flex flex-wrap items-center" style={{ gap: 8 }}>
-          <span style={{ ...T.bodyDim, fontSize: 12 }}>Sort by</span>
+        <div role="group" aria-label="Sort" className={`${PILL_ROW} items-center`} style={{ gap: 8 }}>
+          <span style={{ ...T.bodyDim, fontSize: 12, flex: "none" }}>Sort by</span>
           {SORTS.map((s) => (
             <button key={s.value} type="button" aria-pressed={sort === s.value} onClick={() => setSort(s.value)} style={pressPill(sort === s.value)}>
               {s.label}
@@ -248,7 +260,10 @@ function StudentRow({ row, nowMs, courseIsNew }: { row: StudentListRow; nowMs: n
       {/* Wide: one line of columns. */}
       <div className="hidden lg:grid" style={{ gridTemplateColumns: GRID, gap: 12, alignItems: "center" }}>
         <div style={{ minWidth: 0 }}>
-          <p style={{ ...T.body, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.name}</p>
+          {/* The name as on every admin page; the row itself is the link, so no second one inside it. */}
+          <p style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <StudentName id={row.id} name={row.name} size={13} asText />
+          </p>
           {row.email && row.email !== row.name && (
             <p style={{ fontSize: 12, color: "var(--color-text-secondary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {row.email}
@@ -256,7 +271,7 @@ function StudentRow({ row, nowMs, courseIsNew }: { row: StudentListRow; nowMs: n
           )}
         </div>
         <span style={{ ...T.bodyDim, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {row.username ? `@${row.username}` : "None"}
+          {row.username ? `@${row.username}` : <span className="sr-only">No username</span>}
         </span>
         <div>
           <p style={{ ...T.body, fontVariantNumeric: "tabular-nums" }}>{dayLabel(row.firstPaidAt)}</p>
@@ -273,8 +288,7 @@ function StudentRow({ row, nowMs, courseIsNew }: { row: StudentListRow; nowMs: n
           in the class names only: an inline display would beat lg:hidden. */}
       <div className="flex flex-col lg:hidden" style={{ gap: 8 }}>
         <div className="flex flex-wrap items-baseline" style={{ gap: "2px 8px" }}>
-          <p style={{ ...T.body, fontSize: 15, fontWeight: 600, overflowWrap: "anywhere" }}>{row.name}</p>
-          {row.username && <span style={{ ...T.bodyDim, overflowWrap: "anywhere" }}>@{row.username}</span>}
+          <StudentName id={row.id} name={row.name} username={row.username} asText />
         </div>
         <div className="flex flex-wrap items-center" style={{ gap: 6 }}>
           <MembershipPill status={row.status} />

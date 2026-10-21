@@ -4,10 +4,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button, Card, EmptyState, Modal, Pill, T } from "@/components/admin/ui";
 import type { PillTone } from "@/components/admin/ui";
-import { ListHeader, ListPage, LoadError, NoticeStack, STALE_TEXT, SkeletonRows, TAP } from "@/components/admin/list-parts";
+import { FailedMeta, ListHeader, ListPage, LoadError, NoticeStack, RowSplit, STALE_TEXT, SkeletonRows, TAP } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
 import { FactsLine, SearchField, STATUS_WORDS, TabStrip, Warning } from "@/components/admin/people-parts";
 import { TextLink } from "@/components/admin/review-parts";
+import { StudentName } from "@/components/admin/student-name";
 import { useAuth } from "@/contexts/AuthContext";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { clockLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
@@ -59,6 +60,13 @@ import type { TeamMember } from "@/types/database";
  * /admin/tasks/insights (the pills that did were the status tabs' twins).
  * What a button did, or why it failed, shows at the bottom of the window
  * (NoticeStack).
+ *
+ * A row (admin rebuild 2, the render review's fix round): the student's name
+ * as on every admin page (student-name.tsx: a link to the student's page,
+ * @username after it), the day and the pills; under it why the task fired
+ * and how long it has waited. Its actions sit on the right from 768px wide
+ * and under the words on a phone (RowSplit); "Details" opens the task with
+ * its DM, which the name opened before.
  *
  * The calls go through `transport` (people-transport.ts), so the dev page
  * /dev/admin/tasks renders this same view with made-up data and no login.
@@ -242,7 +250,15 @@ export function TasksView({
     <ListHeader
       title="Tasks"
       description="Copy a DM, send it in Discord, then mark it sent."
-      meta={data ? `Updated ${clockLabel(data.generatedAt)}${reloading || checking ? " · Updating" : ""}` : "Loading"}
+      meta={
+        data ? (
+          `Updated ${clockLabel(data.generatedAt)}${reloading || checking ? " · Updating" : ""}`
+        ) : loaded.kind === "error" ? (
+          <FailedMeta />
+        ) : (
+          "Loading"
+        )
+      }
       actions={[
         <TextLink key="insights" href="/admin/tasks/insights">
           Outreach insights <span aria-hidden="true">→</span>
@@ -505,120 +521,119 @@ function TaskItem({
   const adminOnly = row.template?.is_admin_only === true;
   const edge = !archived && row.status === "open" ? edgeOf(row) : null;
   const wait = !archived && row.status === "open" ? waitingText(row.created_at, now) : null;
+  const actions = (
+    <>
+      {!archived && row.status === "open" && !adminOnly && (
+        <>
+          <Button variant="raised" size="md" disabled={busy} onClick={onCopy}>
+            Copy DM
+          </Button>
+          <Button variant="raised" size="md" busy={busy} onClick={onMarkSent}>
+            Mark sent
+          </Button>
+          <Button variant="ghost" size="md" disabled={busy} onClick={onDismiss}>
+            Dismiss
+          </Button>
+        </>
+      )}
+      {!archived && row.status === "open" && adminOnly && (
+        <Link
+          href="/admin/discounts"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            minHeight: TAP,
+            padding: "0 16px",
+            borderRadius: "var(--radius-pill)",
+            border: "1px solid var(--color-border)",
+            background: "var(--color-bg-elevated)",
+            color: "var(--color-text-primary)",
+            fontSize: 13,
+            fontWeight: 600,
+            textDecoration: "none",
+          }}
+        >
+          Open the 30% page
+        </Link>
+      )}
+      {!archived && row.status === "completed" && (
+        <>
+          <OutcomeButton active={row.outcome === "replied"} busy={busy} onClick={() => onOutcome(row.outcome === "replied" ? null : "replied")}>
+            Replied
+          </OutcomeButton>
+          <OutcomeButton active={row.outcome === "no_reply"} busy={busy} onClick={() => onOutcome(row.outcome === "no_reply" ? null : "no_reply")}>
+            No reply
+          </OutcomeButton>
+        </>
+      )}
+      {!archived && row.status !== "open" && (
+        <Button variant="ghost" size="md" disabled={busy} onClick={onReopen}>
+          Move to To do
+        </Button>
+      )}
+      <button type="button" onClick={onOpen} style={DETAILS_BUTTON}>
+        Details
+      </button>
+    </>
+  );
   return (
     <div
       className="list-row"
       style={{
-        flexDirection: "column",
-        alignItems: "stretch",
-        gap: 8,
+        display: "block",
         padding: "12px 16px",
         boxShadow: edge ? `inset 3px 0 0 ${edge}` : undefined,
       }}
     >
-      <div className="flex flex-wrap items-center" style={{ gap: "4px 10px" }}>
-        <button
-          type="button"
-          onClick={onOpen}
-          style={{
-            minHeight: TAP,
-            display: "inline-flex",
-            alignItems: "center",
-            padding: 0,
-            border: "none",
-            background: "transparent",
-            cursor: "pointer",
-            fontSize: 15,
-            fontWeight: 600,
-            letterSpacing: "-0.011em",
-            color: "var(--color-text-primary)",
-            textDecoration: "underline",
-            textDecorationColor: "var(--color-border-strong)",
-            textUnderlineOffset: 3,
-            textAlign: "left",
-            overflowWrap: "anywhere",
-          }}
-        >
-          {taskStudentName(row)}
-        </button>
-        {day != null && <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>Day {day}</span>}
-        {archived && <Pill tone="neutral">{row.status === "completed" ? "Sent" : row.status === "dismissed" ? "Dismissed" : "Open"}</Pill>}
-        {!archived && <StudentPills row={row} now={now} />}
-        {wait && (
-          <span
-            style={{
-              marginLeft: "auto",
-              fontSize: 12,
-              fontWeight: wait.level === "calm" ? 400 : 600,
-              color: wait.level === "urgent" ? "var(--color-warning)" : wait.level === "warn" ? "var(--color-text-primary)" : "var(--color-text-secondary)",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {wait.text}
-          </span>
-        )}
-      </div>
-      <FactsLine
-        parts={[row.student?.discord_username ? `@${row.student.discord_username.replace(/^@/, "")}` : null, whyOf(row)]}
-        style={{ overflowWrap: "anywhere" }}
+      <RowSplit
+        main={
+          <>
+            <div className="flex flex-wrap items-baseline" style={{ gap: "4px 10px", minWidth: 0 }}>
+              <StudentName id={row.student?.id} name={taskStudentName(row)} username={row.student?.discord_username} />
+              {day != null && <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>Day {day}</span>}
+              {archived && <Pill tone="neutral">{row.status === "completed" ? "Sent" : row.status === "dismissed" ? "Dismissed" : "Open"}</Pill>}
+              {!archived && <StudentPills row={row} now={now} />}
+            </div>
+            <p style={{ ...T.bodyDim, lineHeight: 1.6, overflowWrap: "anywhere" }}>
+              {whyOf(row)}
+              {wait && (
+                <>
+                  <span aria-hidden="true"> · </span>
+                  <span
+                    data-wait={wait.level}
+                    style={{
+                      fontWeight: wait.level === "calm" ? 400 : 600,
+                      color: wait.level === "urgent" ? "var(--color-warning)" : wait.level === "warn" ? "var(--color-text-primary)" : "var(--color-text-secondary)",
+                      fontVariantNumeric: "tabular-nums",
+                    }}
+                  >
+                    {wait.text}
+                  </span>
+                </>
+              )}
+            </p>
+            {(archived || row.status !== "open") && <p style={{ ...T.bodyDim, fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>{closedLine(row)}</p>}
+          </>
+        }
+        actions={actions}
       />
-      {(archived || row.status !== "open") && <p style={{ ...T.bodyDim, fontSize: 12, lineHeight: 1.5, overflowWrap: "anywhere" }}>{closedLine(row)}</p>}
-
-      {!archived && (
-        <div className="flex flex-wrap items-center" style={{ gap: 8 }}>
-          {row.status === "open" && !adminOnly && (
-            <>
-              <Button variant="raised" size="md" disabled={busy} onClick={onCopy}>
-                Copy DM
-              </Button>
-              <Button variant="raised" size="md" busy={busy} onClick={onMarkSent}>
-                Mark sent
-              </Button>
-              <Button variant="ghost" size="md" disabled={busy} onClick={onDismiss}>
-                Dismiss
-              </Button>
-            </>
-          )}
-          {row.status === "open" && adminOnly && (
-            <Link
-              href="/admin/discounts"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                minHeight: TAP,
-                padding: "0 16px",
-                borderRadius: "var(--radius-pill)",
-                border: "1px solid var(--color-border)",
-                background: "var(--color-bg-elevated)",
-                color: "var(--color-text-primary)",
-                fontSize: 13,
-                fontWeight: 600,
-                textDecoration: "none",
-              }}
-            >
-              Open the 30% page
-            </Link>
-          )}
-          {row.status === "completed" && (
-            <>
-              <OutcomeButton active={row.outcome === "replied"} busy={busy} onClick={() => onOutcome(row.outcome === "replied" ? null : "replied")}>
-                Replied
-              </OutcomeButton>
-              <OutcomeButton active={row.outcome === "no_reply"} busy={busy} onClick={() => onOutcome(row.outcome === "no_reply" ? null : "no_reply")}>
-                No reply
-              </OutcomeButton>
-            </>
-          )}
-          {row.status !== "open" && (
-            <Button variant="ghost" size="md" disabled={busy} onClick={onReopen}>
-              Move to To do
-            </Button>
-          )}
-        </div>
-      )}
     </div>
   );
 }
+
+/** "Details": the quiet way into a task (its DM, why it fired), 44px tall, in Airy Blue words as the page's other text actions. */
+const DETAILS_BUTTON: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  minHeight: TAP,
+  padding: "0 6px",
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 600,
+  color: "var(--color-accent-dark)",
+};
 
 /** Replied or No reply: pressed when it is the outcome marked; pressing it again clears it. */
 function OutcomeButton({ active, busy, onClick, children }: { active: boolean; busy: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -681,11 +696,17 @@ function TaskDetail({
     <div aria-labelledby={headingId} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div className="flex items-start justify-between" style={{ gap: 12 }}>
         <div style={{ minWidth: 0 }}>
-          <h2 id={headingId} style={{ ...T.heading, overflowWrap: "anywhere" }}>
-            {taskStudentName(row)}
+          {/* The name as on every admin page: the student's page, @username after it. */}
+          <h2 id={headingId} className="flex flex-wrap items-baseline" style={{ ...T.heading, gap: "2px 10px", overflowWrap: "anywhere" }}>
+            <StudentName id={s?.id} name={taskStudentName(row)} username={s?.discord_username} size={20} />
           </h2>
           <FactsLine
-            parts={[day != null ? `Day ${day}` : null, s?.membership_status ? (STATUS_WORDS[s.membership_status] ?? s.membership_status) : null, s?.email]}
+            parts={[
+              day != null ? `Day ${day}` : null,
+              s?.membership_status ? (STATUS_WORDS[s.membership_status] ?? s.membership_status) : null,
+              s?.email,
+              s?.discord_username ? null : "No username on file",
+            ]}
             style={{ marginTop: 2, overflowWrap: "anywhere" }}
           />
         </div>
@@ -693,15 +714,6 @@ function TaskDetail({
           Close
         </Button>
       </div>
-
-      <p style={{ ...T.body, padding: "10px 14px", borderRadius: "var(--radius-control)", background: "var(--color-bg-elevated)", border: "1px solid var(--color-border)" }}>
-        <span style={{ color: "var(--color-text-secondary)" }}>Username: </span>
-        {s?.discord_username ? (
-          <span style={{ fontWeight: 600 }}>@{s.discord_username.replace(/^@/, "")}</span>
-        ) : (
-          <span style={{ color: "var(--color-text-secondary)" }}>none on file</span>
-        )}
-      </p>
 
       <div>
         <div className="flex flex-wrap items-center" style={{ gap: 8, marginBottom: 6 }}>
@@ -753,14 +765,6 @@ function TaskDetail({
           <Button variant="ghost" size="md" busy={busy} onClick={onReopen}>
             Move to To do
           </Button>
-        )}
-        {s?.id && (
-          <Link
-            href={`/admin/students/${encodeURIComponent(s.id)}`}
-            style={{ display: "inline-flex", alignItems: "center", minHeight: TAP, padding: "0 4px", color: "var(--color-accent-dark)", fontSize: 13, fontWeight: 600 }}
-          >
-            Open the student
-          </Link>
         )}
       </div>
     </div>

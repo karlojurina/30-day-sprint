@@ -31,9 +31,12 @@
  * WHERE IT IS STORED. student_membership_discounts (migration v111), one row
  * per student, written by the service role only:
  *   - the cron route /api/cron/refresh-membership-discounts every 2 hours
- *     (refreshMembershipDiscounts below), for the students in the 30%'s
- *     window: a first payment from DISCOUNT_ELIGIBLE_FROM, active or
- *     past_due, with no approved or applied request;
+ *     (refreshMembershipDiscounts below), for the students whose 30% window
+ *     is still open (discountWindowOpen: a first payment from
+ *     DISCOUNT_ELIGIBLE_FROM and a deadline not past), active or past_due,
+ *     with no approved or applied request. Since the render review's fix
+ *     round: before it, every student who first paid from 1 October, a list
+ *     that grew with each new student while their windows closed;
  *   - the request routes and the approve route, after a live read
  *     (checkMembershipDiscount below), so the map and the admin page catch
  *     up at their next read.
@@ -50,7 +53,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
+import { discountWindowOpen, earliestOpenFirstPayment } from "@/lib/world/discount";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { waitAfter429Ms } from "@/lib/first-payment";
 
@@ -424,7 +427,7 @@ export interface RefreshAnswer {
   ok: boolean;
   mode: RefreshMode;
   run_started_at: string;
-  /** Students in the window: first paid from 1 October, active or past_due. */
+  /** Students whose 30% window is still open (discountWindowOpen at the run's start), active or past_due. */
   in_window: number;
   /** Left out: an approved or applied request. */
   have_the_30: number;
@@ -450,10 +453,13 @@ export interface RefreshAnswer {
 
 /**
  * The cron's run (GET /api/cron/refresh-membership-discounts): every student
- * in the window with no approved or applied request, those never
+ * whose 30% window is still open at the run's start (discountWindowOpen),
+ * active or past_due, with no approved or applied request; those never
  * checked first, then the longest unchecked; each read live and stored, 25
- * rows at a time. "dry" reads and writes nothing. A run that cannot read who
- * is in the window, or whose every read failed, answers ok: false.
+ * rows at a time. A student whose window has closed is not read again: no
+ * request can be made then, and a pending one is decided by the approve
+ * route's own live read. "dry" reads and writes nothing. A run that cannot
+ * read who is in the window, or whose every read failed, answers ok: false.
  */
 export async function refreshMembershipDiscounts(
   db: SupabaseClient,
@@ -479,17 +485,23 @@ export async function refreshMembershipDiscounts(
   };
   const done = (more: Partial<RefreshAnswer> = {}): RefreshAnswer => ({ ...answer, ...more, ms: Date.now() - startedAtMs });
 
-  type Member = { id: string; whop_membership_id: string | null };
+  type Member = { id: string; whop_membership_id: string | null; first_paid_at: string | null };
+  // The read starts at the earliest first payment whose window can still be open, so it stays as short as the
+  // window; the window's own rule (discount.ts) then decides each student it holds.
   const inWindow = await fetchAllRowsPaginated<Member>(() =>
     db
       .from("students")
-      .select("id, whop_membership_id")
-      .gte("first_paid_at", DISCOUNT_ELIGIBLE_FROM)
+      .select("id, whop_membership_id, first_paid_at")
+      .gte("first_paid_at", earliestOpenFirstPayment(startedAtMs))
       .in("membership_status", ["active", "past_due"])
       .order("id"),
   );
   if (inWindow.error) return done({ error: `students: ${inWindow.error.message}` });
-  const members = [...new Map(inWindow.data.map((s) => [s.id, s] as const)).values()];
+  const members = [
+    ...new Map(
+      inWindow.data.filter((s) => discountWindowOpen(s.first_paid_at, startedAtMs)).map((s) => [s.id, s] as const),
+    ).values(),
+  ];
   answer.in_window = members.length;
 
   const ids = members.map((m) => m.id);

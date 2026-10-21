@@ -1,7 +1,7 @@
 "use client";
 
 import { Pill, T } from "@/components/admin/ui";
-import { TAP, pressPill } from "@/components/admin/list-parts";
+import { PILL_ROW, TAP, pressPill } from "@/components/admin/list-parts";
 import { ACTIVITY_TEXT, ACTIVITY_TONE } from "@/lib/useJourneyPaceCounts";
 import type { ActivityLabel } from "@/lib/curriculum-reset";
 
@@ -11,7 +11,8 @@ import type { ActivityLabel } from "@/lib/curriculum-reset";
  * dark look of admin-tokens.module.css, beside list-parts.tsx (the 30%
  * page's): the same 44px pills and taps, the same 12px floor for words.
  *
- *   TabStrip      tabs as pills with their counts, wrapping on a phone
+ *   TabStrip      tabs as pills with their counts, wrapping on a wide
+ *                 screen and on one line that scrolls on a phone (PILL_ROW)
  *   Warning       a lasting problem with the whole page, above it
  *   SearchField   the search box: 44px tall, 16px words so a phone does not zoom
  *   Meter         a share as a bar and its number, or "Couldn't load"
@@ -31,7 +32,7 @@ export function TabStrip<K extends string>({
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="flex flex-wrap" style={{ gap: 8, marginBottom: 12 }}>
+    <div role="tablist" aria-label={label} className={PILL_ROW} style={{ gap: 8, marginBottom: 12 }}>
       {tabs.map((t) => {
         const active = t.value === value;
         return (

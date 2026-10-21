@@ -162,7 +162,8 @@ export function NewTemplateDialog({
           <Button variant="ghost" size="md" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="raised" size="md" busy={busy} onClick={() => void create()}>
+          {/* The dialog's one primary action: the kit's ink button (the render review's fix round). */}
+          <Button variant="ink" size="md" busy={busy} onClick={() => void create()}>
             {busy ? "Creating" : "Create template"}
           </Button>
         </div>

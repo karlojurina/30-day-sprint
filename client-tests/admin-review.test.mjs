@@ -32,8 +32,10 @@
 //                 only re-reads, the header's actions under the words on a
 //                 phone, the guard's dark loading screen, the student side's
 //                 one filled button
-//   removals      the not-activated page, plans.ts and the helpers only the
-//                 removed pages used; "the owner" in the three new lines
+//   removals      plans.ts and the helpers only the removed pages used;
+//                 "the owner" in the three new lines (the not-activated page,
+//                 removed here too, is back since the render review's fix
+//                 round: admin-render-fixes.test.mjs)
 //
 // Run by `npm run test:client`, after client-tests/build.mjs (which copies
 // read-failure.ts and discount-status.ts). The views it renders it compiles
@@ -181,8 +183,11 @@ console.log('\n=== Insights: Avg progress from the switch, in points, on true gr
   const delta = DASH.deltaOf(line)
   ok(delta.change === 0.05 && delta.from === '2026-10-19', 'its change: 0.05 points since the switch, as the Dashboard counts it (deltaOf)', show(delta))
   const dashAvg = DASH.avgProgress(rows.map((r) => ({ ...r, created_at: null })), DASH.trendDays(Date.parse('2026-10-20T08:30:00.000Z')), RESET)
-  ok(dashAvg.kind === 'value' && show(dashAvg.line) === show(line) && DASH.deltaOf(dashAvg.line).change === delta.change,
-     'the same rows give the Dashboard\'s tile the very same line and change', show(dashAvg.line))
+  // The render review's fix round: the Dashboard draws the line on its 14 days, the days before the switch
+  // empty; its readings are Insights' line.
+  ok(dashAvg.kind === 'value' && show(dashAvg.line.filter((p) => p.value !== null)) === show(line) && dashAvg.line.length === 14
+       && DASH.deltaOf(dashAvg.line).change === delta.change,
+     'the same rows give the Dashboard\'s tile the very same readings and change, on its 14 days', show(dashAvg.line))
   const view = fromSrc('src/components/admin/insights/InsightsView.tsx')
   ok(view.includes('const delta = deltaOf(line);') && view.includes('unit: ["pt", "pts"],') && !/def\.suffix/.test(view),
      'the change is written in points ("0.05 pts since Mon 19 Oct"), never "%" on a change of a share')
@@ -217,7 +222,7 @@ console.log('\n=== Insights: Avg progress from the switch, in points, on true gr
   ok(view.includes('import { TrendChart, pointDay } from "@/components/admin/dashboard/TrendChart";') && !/function Chart\(|function Sparkline\(/.test(view)
        && !view.includes('var(--color-success)",\n    mode') && !/color: "var\(--color-danger\)",\n\s*mode/.test(view),
      'Insights draws with the Dashboard\'s chart (Airy Blue marks, its glow, bars for a count per day, days like "Wed 7 Oct"); green and red only in the change\'s arrow')
-  ok(view.includes('<div className="xl:col-span-2" style={{ minWidth: 0 }}>') && view.includes('metric="churned_count"') && /meta=\{updatedAt \? `Updated \$\{clockLabel\(updatedAt\)\}/.test(view),
+  ok(view.includes('<div className="xl:col-span-2" style={{ minWidth: 0 }}>') && view.includes('metric="churned_count"') && /updatedAt \? \(\s*`Updated \$\{clockLabel\(updatedAt\)\}/.test(view),
      'Churned takes the whole width; the header has its Updated line')
 }
 
@@ -414,26 +419,31 @@ console.log("\n=== The 30% page: every row's coupon check ===")
      'GET /api/admin/thirty asks Whop about the Approved rows, hands the answers to the page, and logs a read that gave none')
 
   const page = fromSrc('src/components/admin/thirty/ThirtyView.tsx')
+  // The render review's fix round: a row the coupon refuses has no Approve, so no "Approve asks Whop again first"
+  // (admin-render-fixes.test.mjs renders it).
   ok(page.includes('Coupon not checked yet. Approve asks Whop first.') && page.includes('"Couldn\'t ask Whop about a coupon on this membership."')
-       && page.includes('Check Whop before you add the 30% code.') && page.includes(' Approve asks Whop again first.'),
-     'the rows say it: "Coupon not checked yet" on an Applied row, "Couldn\'t ask Whop" on an Approved one, and Approve asks Whop again beside the coupon\'s verdict')
+       && page.includes('Check Whop before you add the 30% code.') && !page.includes(' Approve asks Whop again first.'),
+     'the rows say it: "Coupon not checked yet" on an Applied row, "Couldn\'t ask Whop" on an Approved one; no "Approve asks Whop again" since a coupon row has no Approve')
   ok(/row\.couponCheck === "no-membership" && \([\s\S]{0,400}?Coupon not checked: the student&apos;s Whop membership is not on file, so Approve can&apos;t ask Whop\. Check\s+Whop before you approve\./.test(page)
        && page.includes('"Couldn\'t ask Whop about a coupon: the student\'s Whop membership is not on file."')
-       && /const unchecked = approved && !coupon && \(row\.couponCheck === "failed" \|\| row\.couponCheck === "no-membership"\);/.test(page),
+       && /const unchecked = approved && !row\.coupon && \(row\.couponCheck === "failed" \|\| row\.couponCheck === "no-membership"\);/.test(page),
      'with no membership on file, an Applied row never says Approve asks Whop: it says to check Whop by hand, and so does an Approved row')
   const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/** The 30% code, and a button that copies it. */'))
-  ok(/disabled=\{locked \|\| \(busy !== null && busy !== "approve"\)\}/.test(pending) && !/disabled=\{!verdict\.ok/.test(pending),
-     'Approve stays on beside the coupon\'s verdict (the route asks Whop and refuses with no override while the discount is there)')
-  ok(/\{canOverride \? \(\s*<button[\s\S]*?Approve anyway[\s\S]*?\) : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),
+  // The render review's fix round changed the coupon's row: no Approve at all beside the coupon's verdict (it
+  // was kept on, for the route to refuse), and Reject is that row's one action, raised.
+  ok(/disabled=\{locked \|\| \(busy !== null && busy !== "approve"\)\}/.test(pending) && !/disabled=\{!verdict\.ok/.test(pending)
+       && /\) : coupon \? null : \(\s*<Button/.test(pending),
+     'Approve is on wherever it can approve, and gone beside the coupon\'s verdict (the route refuses it with no override)')
+  ok(/\{canOverride \? \(\s*<button[\s\S]*?Approve anyway[\s\S]*?\) : coupon \? null : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),
      'Approve anyway takes Approve\'s place in the row, as tall as Reject, never a disabled Approve beside a link')
-  ok(/<Button\s+variant="ghost"\s+size="md"\s+disabled=\{off\}\s+onClick=\{\(\) => setConfirm\(\(c\) => \(c === "reject" \? null : "reject"\)\)\}\s*>\s*Reject/.test(pending)
+  ok(/<Button\s+variant=\{coupon \? "raised" : "ghost"\}\s+size="md"\s+disabled=\{off\}\s+expanded=\{confirm === "reject"\}/.test(pending)
        && /variant="danger"[\s\S]{0,400}Reject the request/.test(pending),
-     'Reject is ghost, the row\'s "no", as Dismiss is on Tasks; "Reject the request", which the student cannot ask again after, is the danger button')
+     'Reject is ghost, the row\'s "no", as Dismiss is on Tasks (raised on the coupon\'s row, its one action); "Reject the request", which the student cannot ask again after, is the danger button')
   ok(page.includes('max-[399px]:flex-nowrap max-[399px]:overflow-x-auto max-[399px]:gap-1 max-[399px]:[--tab-pad:8px] max-[399px]:[--tab-gap:4px] max-[399px]:[--tab-font:12px]') && page.includes('padding: "0 var(--tab-pad, 12px)"'),
      'under 400px the tabs narrow to one line, and scroll sideways rather than wrap')
   ok(/\{header\("Loading", <RefreshButton onPress=\{\(\) => \{\}\} busy disabled \/>\)\}\s*\{blankTabs\}/.test(page)
-       && page.includes('{header(null, <RefreshButton onPress={() => void retry()} busy={retrying} />)}') && /count: null/.test(page),
-     'while it loads or failed, the header keeps Refresh and the tabs stay, with no counts')
+       && page.includes('{header(<FailedMeta />, <RefreshButton onPress={() => void retry()} busy={retrying} />)}') && /count: null/.test(page),
+     'while it loads or failed, the header keeps Refresh and the tabs stay, with no counts (failed, the header says so: the render review\'s fix round)')
 }
 
 console.log('\n=== The coupon rule: a stored id that is not a membership, and a cron Whop never answered ===')
@@ -532,7 +542,7 @@ console.log('\n=== Buttons, "Refresh", the header, the guard, the student side =
        && fromSrc('src/components/admin/tasks/InsightsView.tsx').includes('<TextLink href="/admin/tasks">'),
      'Tasks links to its outreach insights in words, and the insights back to the queue; no pill row that looked like the tabs')
   const tasksInsights = fromSrc('src/components/admin/tasks/InsightsView.tsx')
-  ok(/<details style=\{\{ marginTop: 8 \}\}>\s*<summary[^>]*>\s*How these numbers work/.test(tasksInsights) && tasksInsights.includes('<ul className="sm:hidden" aria-label="Templates">')
+  ok(/<details style=\{\{ marginTop: 8 \}\}>\s*<FoldSummary>How these numbers work<\/FoldSummary>/.test(tasksInsights) && tasksInsights.includes('<ul className="sm:hidden" aria-label="Templates">')
        && tasksInsights.includes('label="Time to send"') && tasksInsights.includes('graded sends did what the DM asked'),
      'outreach insights: the notes folded, a card per template on a phone, "Time to send", "did what the DM asked"')
   ok(/if \(tier === "canceling"\) return "var\(--color-danger\)";/.test(tasks) && !tasks.includes('New program since'), 'the canceling tier\'s edge is red; the meta no longer says "New program since"')
@@ -568,11 +578,13 @@ console.log('\n=== Buttons, "Refresh", the header, the guard, the student side =
 // ── Removals ────────────────────────────────────────────────────────────────
 console.log('\n=== What the round removed ===')
 {
-  ok(!exists('src/app/admin/(authenticated)/not-activated') && !exists('src/lib/admin/plans.ts'), 'the not-activated page and plans.ts are gone')
+  // The render review's fix round put the not-activated page back, exactly as at d0ebe76 (it was not one of D2's
+  // removals): admin-render-fixes.test.mjs checks it byte for byte. plans.ts and the helpers stay gone.
+  ok(exists('src/app/admin/(authenticated)/not-activated/page.tsx') && !exists('src/lib/admin/plans.ts'), 'plans.ts is gone; the not-activated page is back (the render review\'s fix round)')
   const walk = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(`${dir}/${e.name}`) : [`${dir}/${e.name}`]))
-  const gone = /["'`]\/admin\/not-activated|from "@\/lib\/admin\/plans"|\b(planLabel|timeLeftText|DiscordReach|WhopNotPulled|lastContactText|PillLinks|thirtyReasonText|aboutHoursWords|PacePill|IconButton)\b/
+  const gone = /from "@\/lib\/admin\/plans"|\b(planLabel|timeLeftText|DiscordReach|WhopNotPulled|lastContactText|PillLinks|thirtyReasonText|aboutHoursWords|PacePill|IconButton)\b/
   const src = walk(here('../src')).filter((f) => /\.(ts|tsx)$/.test(f) && gone.test(fs.readFileSync(f, 'utf8'))).map((f) => f.slice(f.indexOf('/src/') + 1))
-  ok(src.length === 0, 'nothing in src/ links to the page, imports plans.ts or keeps the helpers only the removed pages used', src.slice(0, 4).join(' | '))
+  ok(src.length === 0, 'nothing in src/ imports plans.ts or keeps the helpers only the removed pages used', src.slice(0, 4).join(' | '))
   ok(fromSrc('supabase/migrations/2026_v109_tasks_reset.sql').includes('The owner pastes it in the SQL editor.')
        && fromSrc('client-tests/admin-routes.test.mjs').includes("the owner's decision")
        && fromSrc('system_contracts.md').includes('not on production; the owner pastes it):**'),

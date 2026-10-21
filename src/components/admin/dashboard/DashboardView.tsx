@@ -34,13 +34,22 @@ import { TrendChart, pointDay } from "./TrendChart";
  * the brand kit's dark look.
  *
  * Top: Today, what waits for the team (open tasks, 30% requests to decide),
- * each tile a link to its page. Then the program's two numbers, Month 2
- * conversion and the Bounty Program: until the first Month 2 rate is in,
- * Month 2 is a compact tile beside the Bounty Program's chart (when the
- * first renewals come and how many paid since the launch); from then on, its
- * full tile with its chart. Then the trends of the last 14 days. Every tile
- * says where its number comes from, and the ones with a chart have "How it's
- * counted" with the whole rule.
+ * each tile a link to its page. Then the program's two numbers, the Bounty
+ * Program on the left and Month 2 conversion on the right in every state, the
+ * two cards as tall as each other: until the first Month 2 rate is in, Month
+ * 2 is a compact tile (when the first renewals come and how many paid since
+ * the launch) beside the Bounty Program's wider chart; from then on, its full
+ * tile with its chart, the two halves of the row. Then the trends of the
+ * last 14 days. Every tile says where its number comes from, and the ones
+ * with a chart have "How it's counted" with the whole rule.
+ *
+ * The render review's fix round: the program row's order and heights above;
+ * the three sections the same distance apart (each title row 20px tall, the
+ * Insights link's 44px target hanging over it); Avg progress drawn on the
+ * same 14 days as the other lines, its readings from the switch at the right
+ * end and "From Mon 19 Oct" over them; the Today tiles' links named after the
+ * pages they open; Month 2's countdown a plain bar, no knob that reads as a
+ * slider.
  *
  * The numbers are worked out by src/lib/admin/dashboard-metrics.ts from what
  * `source` reads: the page (src/app/admin/(authenticated)/page.tsx) reads the
@@ -231,62 +240,62 @@ export function DashboardView({
             href="/admin/tasks"
             title="Open tasks"
             tile={model.openTasks}
-            go="Open the queue"
+            go="Go to Tasks"
             none="All caught up"
-            source={(v) => (v.since ? `Created since the reset, ${momentDay(v.since)}` : "Every open task in the queue")}
+            source={(v) => (v.since ? `Created since the reset, ${momentDay(v.since)}` : "Every task still to do")}
           />
           <CountTile
             tileName="to-decide"
             href="/admin/discounts"
             title="30% to decide"
             tile={model.toDecide}
-            go="Open the 30% page"
+            go="Go to 30% off"
             none="Nothing to decide"
             source={(v) => `Applied since ${dayLabel(v.since)}, waiting for a yes or no`}
           />
         </div>
       </section>
 
-      <section style={{ marginTop: 40 }} aria-labelledby="dash-program">
+      <section style={{ marginTop: SECTION_GAP }} aria-labelledby="dash-program">
         <SectionTitle id="dash-program">The program</SectionTitle>
-        {waiting ? (
-          // Until the first Month 2 rate: the Bounty Program's chart, and Month 2 as a compact tile beside it.
-          <div className="grid grid-cols-1 md:grid-cols-3 items-start" style={{ gap: 16 }}>
-            <div className="md:col-span-2" style={{ minWidth: 0 }}>
-              <BountyCard tile={model.bounty} />
-            </div>
-            <MonthTwoCompact m={waiting} nowMs={Date.parse(model.generatedAt)} />
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 16 }}>
-            <MonthTwoCard tile={model.monthTwo} />
+        {/* Bounty left, Month 2 right, in every state; the grid stretches both cards to the row's height. Until
+            the first Month 2 rate, Month 2 is the compact third beside the Bounty Program's wider chart. */}
+        <div className={waiting ? "grid grid-cols-1 md:grid-cols-3" : "grid grid-cols-1 md:grid-cols-2"} style={{ gap: 16 }}>
+          <div data-program-slot="bounty" className={waiting ? "flex md:col-span-2" : "flex"} style={{ minWidth: 0 }}>
             <BountyCard tile={model.bounty} />
           </div>
-        )}
+          <div data-program-slot="month2" className="flex" style={{ minWidth: 0 }}>
+            {waiting ? <MonthTwoCompact m={waiting} nowMs={Date.parse(model.generatedAt)} /> : <MonthTwoCard tile={model.monthTwo} />}
+          </div>
+        </div>
       </section>
 
-      <section style={{ marginTop: 40 }} aria-labelledby="dash-trends">
-        <div className="flex items-center justify-between" style={{ gap: 12, marginBottom: 4 }}>
-          <SectionTitle id="dash-trends" flush>
-            Trends · last 14 days
-          </SectionTitle>
-          <Link
-            href="/admin/insights/progress"
-            style={{
-              minHeight: TAP,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              fontSize: 13,
-              fontWeight: 600,
-              color: ACCENT,
-              textDecoration: "none",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Open Insights <span aria-hidden="true">→</span>
-          </Link>
-        </div>
+      <section style={{ marginTop: SECTION_GAP }} aria-labelledby="dash-trends">
+        <SectionTitle
+          id="dash-trends"
+          action={
+            <Link
+              href="/admin/insights/progress"
+              style={{
+                minHeight: TAP,
+                // A 44px target that takes no more of the row than its words: the three titles stay as tall as each other.
+                margin: "-12px 0",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                fontSize: 13,
+                fontWeight: 600,
+                color: ACCENT,
+                textDecoration: "none",
+                whiteSpace: "nowrap",
+              }}
+            >
+              Open Insights <span aria-hidden="true">→</span>
+            </Link>
+          }
+        >
+          Trends · last 14 days
+        </SectionTitle>
         <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12 }}>
           <ActiveTile tile={model.active} />
           <CancelingTile tile={model.canceling} />
@@ -300,11 +309,22 @@ export function DashboardView({
 
 // ── Page pieces ─────────────────────────────────────────────────────────────
 
-function SectionTitle({ id, children, flush = false }: { id: string; children: React.ReactNode; flush?: boolean }) {
+/** The space above the program and the trends: the three sections sit the same distance apart. */
+const SECTION_GAP = 40;
+
+/**
+ * A section's title row: 20px tall and 12px above the section's cards on
+ * every section, so the three sit the same distance apart; an action (the
+ * trends' "Open Insights") on its right, its 44px target hanging over the row.
+ */
+function SectionTitle({ id, children, action }: { id: string; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <h2 id={id} style={{ ...T.eyebrow, marginBottom: flush ? 0 : 12 }}>
-      {children}
-    </h2>
+    <div data-section-title="" className="flex items-center justify-between" style={{ gap: 12, minHeight: 20, marginBottom: 12 }}>
+      <h2 id={id} style={T.eyebrow}>
+        {children}
+      </h2>
+      {action}
+    </div>
   );
 }
 
@@ -522,9 +542,13 @@ function useInfo(): Info {
   return { id, open, place, onToggle };
 }
 
-/** The line under a chart that says where its number comes from. */
-function SourceLine({ children }: { children: React.ReactNode }) {
-  return <p style={{ marginTop: 12, fontSize: 12, lineHeight: 1.45, color: "var(--color-text-secondary)" }}>{children}</p>;
+/** The line under a chart that says where its number comes from; `foot` puts it at the foot of a card stretched taller than its words. */
+function SourceLine({ children, foot = false }: { children: React.ReactNode; foot?: boolean }) {
+  return (
+    <p style={{ marginTop: foot ? "auto" : 12, paddingTop: foot ? 12 : 0, fontSize: 12, lineHeight: 1.45, color: "var(--color-text-secondary)" }}>
+      {children}
+    </p>
+  );
 }
 
 /** A big number, in proportional figures (the kit's rule for a number that stands alone). */
@@ -592,11 +616,11 @@ function DeltaLine({
 
 // ── The two north-star numbers ──────────────────────────────────────────────
 
-/** A hero card: the kit's card, 20px of air on a phone, 24px on a wide screen. */
+/** A hero card: the kit's card, 20px of air on a phone, 24px on a wide screen; as tall as its slot in the program row. */
 function HeroCard({ tile, children }: { tile?: string; children: React.ReactNode }) {
   return (
-    <Card padding={0} style={{ minWidth: 0 }}>
-      <div data-tile={tile} className="p-5 sm:p-6" style={{ position: "relative", display: "flex", flexDirection: "column", height: "100%" }}>
+    <Card padding={0} style={{ minWidth: 0, flex: "1 1 auto", display: "flex", flexDirection: "column" }}>
+      <div data-tile={tile} className="p-5 sm:p-6" style={{ position: "relative", display: "flex", flexDirection: "column", flex: "1 1 auto" }}>
         {children}
       </div>
     </Card>
@@ -622,7 +646,7 @@ function MonthTwoCard({ tile }: { tile: Tile<MonthTwo> }) {
     <HeroCard tile="month2">
       <TileHead title="Month 2 conversion" level={2} info={info} />
       {!tile.ok ? <Failed big /> : tile.value.kind === "rate" ? <MonthTwoRate m={tile.value} /> : null}
-      <SourceLine>Students on the monthly plan who first paid from {LAUNCH_DAY}.</SourceLine>
+      <SourceLine foot>Students on the monthly plan who first paid from {LAUNCH_DAY}.</SourceLine>
       <HowCounted info={info} top={56}>
         <MonthTwoHow />
       </HowCounted>
@@ -670,7 +694,7 @@ function MonthTwoCompact({ m, nowMs }: { m: Extract<MonthTwo, { kind: "waiting" 
     <HeroCard tile="month2">
       <TileHead title="Month 2 conversion" level={2} info={info} />
       <MonthTwoWaiting m={m} nowMs={nowMs} />
-      <SourceLine>Students on the monthly plan who first paid from {LAUNCH_DAY}.</SourceLine>
+      <SourceLine foot>Students on the monthly plan who first paid from {LAUNCH_DAY}.</SourceLine>
       <HowCounted info={info} top={56}>
         <MonthTwoHow />
       </HowCounted>
@@ -712,7 +736,9 @@ function MonthTwoWaiting({ m, nowMs }: { m: Extract<MonthTwo, { kind: "waiting" 
           <p style={stat}>{daysLeft === 0 ? "the first rate shows" : `${daysLeft === 1 ? "day" : "days"} until the first rate`}</p>
         </div>
       </div>
-      <div style={{ paddingTop: 20 }}>
+      {/* At the foot of the card, level with the Bounty Program's chart beside it. A plain bar: no knob, which
+          read as a slider to drag. */}
+      <div style={{ marginTop: "auto", paddingTop: 20 }}>
         <div
           role="meter"
           aria-label="Time until the first Month 2 rate"
@@ -720,24 +746,9 @@ function MonthTwoWaiting({ m, nowMs }: { m: Extract<MonthTwo, { kind: "waiting" 
           aria-valuemax={100}
           aria-valuenow={Math.round(done * 100)}
           aria-valuetext={`${plural(daysLeft, "day", "days")} until ${rateDay}`}
-          style={{ position: "relative", height: 6, borderRadius: 999, background: "var(--color-fill-secondary)" }}
+          style={{ height: 6, borderRadius: 999, background: "var(--color-fill-secondary)", overflow: "hidden" }}
         >
           <div style={{ width: `${done * 100}%`, height: "100%", borderRadius: 999, background: ACCENT }} />
-          <div
-            aria-hidden="true"
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: `${done * 100}%`,
-              width: 12,
-              height: 12,
-              marginLeft: -6,
-              marginTop: -6,
-              borderRadius: 999,
-              background: ACCENT,
-              boxShadow: "0 0 0 2px var(--color-bg-card)",
-            }}
-          />
         </div>
         <div className="flex justify-between" style={{ gap: 12, marginTop: 10, fontSize: 12, color: "var(--color-text-secondary)" }}>
           <span>{LAUNCH_DAY}</span>
@@ -771,7 +782,7 @@ function BountyCard({ tile }: { tile: Tile<Bounty> }) {
           </div>
         </>
       )}
-      <SourceLine>Students on the monthly plan since Mon 25 May who joined on the bounty site.</SourceLine>
+      <SourceLine foot>Students on the monthly plan since Mon 25 May who joined on the bounty site.</SourceLine>
       <HowCounted info={info} top={56}>
         Students who joined the Bounty Program, by the day the bounty site stamped them (in UTC), among the students on
         the monthly plan who first paid on or after Mon 25 May. The same count as before the new program.
@@ -885,24 +896,43 @@ function TrendCard({
   );
 }
 
-/** A trend tile's line at the foot of the tile, or why there is none. */
+/**
+ * A trend tile's line at the foot of the tile, or why there is none. Every
+ * line is the 14 days; `from` (Avg progress after the switch) is the day its
+ * readings start, said in a small note over the line's right end, where they
+ * are drawn.
+ */
 function Spark({
   line,
   label,
   format,
   kind = "line",
+  from = null,
 }: {
   line: Tile<{ date: string; value: number | null }[]>;
   label: string;
   format: (v: number) => string;
   kind?: "line" | "bars";
+  from?: string | null;
 }) {
   const note: React.CSSProperties = { marginTop: "auto", paddingTop: 14, fontSize: 12, lineHeight: 1.45, color: "var(--color-text-secondary)", overflowWrap: "anywhere" };
   if (!line.ok) return <p style={note}>Couldn&apos;t load the line</p>;
   if (!line.value.some((p) => p.value !== null)) return <p style={note}>No snapshot in these 14 days</p>;
   return (
-    <div style={{ marginTop: "auto", paddingTop: 22 }}>
-      <TrendChart points={line.value} kind={kind} height={44} label={label} format={format} emptyText="No snapshot" />
+    <div style={{ marginTop: "auto", paddingTop: from ? 8 : 22 }}>
+      {from && (
+        <p data-line-from="" style={{ textAlign: "right", fontSize: 12, lineHeight: "14px", color: "var(--color-text-secondary)", marginBottom: 0 }}>
+          From {pointDay(from)}
+        </p>
+      )}
+      <TrendChart
+        points={line.value}
+        kind={kind}
+        height={44}
+        label={label}
+        format={format}
+        emptyText={from ? (date) => (date < from ? "Before the switch" : "No snapshot") : "No snapshot"}
+      />
     </div>
   );
 }
@@ -1021,13 +1051,14 @@ function AvgProgressTile({ tile }: { tile: Tile<AvgProgress> }) {
             : `The nightly snapshot of ${pointDay(v.date)}`
           : "The nightly snapshot"
       }
-      chart={v ? <Spark line={{ ok: true, value: v.line }} label="Avg progress" format={pct2} /> : null}
+      chart={v ? <Spark line={{ ok: true, value: v.line }} label="Avg progress" format={pct2} from={v.from} /> : null}
       how={
         <>
           One number for the tile and its line: the nightly snapshot&apos;s average progress. That is the lessons that
           count, finished by the students on the monthly plan since Mon 25 May whose access has not ended, divided by
-          those students times the lessons that count. The number is the newest snapshot; the line starts on the day of
-          the switch to the new course. Refresh rebuilds today&apos;s.
+          those students times the lessons that count. The number is the newest snapshot; the line, on the same 14 days
+          as the others, starts on the day of the switch to the new course. Founders and admins rebuild today&apos;s with
+          Sync Whop and rebuild.
         </>
       }
     >
@@ -1080,20 +1111,22 @@ export function DashboardSkeleton() {
             ))}
           </div>
         </div>
-        <div style={{ marginTop: 40 }}>
+        <div style={{ marginTop: SECTION_GAP }}>
           <Bar w="120px" h={11} />
-          <div className="grid grid-cols-1 md:grid-cols-2" style={{ gap: 16, marginTop: 12 }}>
+          <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: 16, marginTop: 12 }}>
             {[0, 1].map((i) => (
-              <HeroCard key={i}>
-                <Bar w="38%" h={11} />
-                <Bar w="30%" h={48} mt={18} />
-                <Bar w="55%" mt={14} />
-                <Bar w="100%" h={112} mt={32} />
-              </HeroCard>
+              <div key={i} className={i === 0 ? "flex md:col-span-2" : "flex"} style={{ minWidth: 0 }}>
+                <HeroCard>
+                  <Bar w="38%" h={11} />
+                  <Bar w="30%" h={48} mt={18} />
+                  <Bar w="55%" mt={14} />
+                  <Bar w="100%" h={112} mt={32} />
+                </HeroCard>
+              </div>
             ))}
           </div>
         </div>
-        <div style={{ marginTop: 40 }}>
+        <div style={{ marginTop: SECTION_GAP }}>
           <Bar w="160px" h={11} />
           <div className="grid grid-cols-2 lg:grid-cols-4" style={{ gap: 12, marginTop: 12 }}>
             {[0, 1, 2, 3].map((i) => (

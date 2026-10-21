@@ -18,6 +18,10 @@ import { hasDetails, plainReadError, plainReadErrors } from "@/lib/admin/read-fa
  *                  Details naming every read with its raw text
  *   TextLink       a link to another page as Airy Blue words in a header
  *                  ("Outreach insights", "Queue"), 44px tall
+ *   FoldSummary    the line that opens a fold of a page ("How these numbers
+ *                  work"): 13px words with the browser's triangle, pointing
+ *                  right while closed and down while open (the render
+ *                  review's fix round: those folds had no marker at all)
  *
  * The summary is 44px tall (the kit's touch target) in 12px words, with the
  * browser's triangle, so it reads as something to press.
@@ -46,6 +50,31 @@ const RAW: React.CSSProperties = {
   overflowWrap: "anywhere",
   whiteSpace: "pre-wrap",
 };
+
+/**
+ * The line that opens a fold of a page: a list item, so the browser draws its
+ * own triangle (right while closed, down while open), 44px tall with its
+ * padding, in the secondary 13px words.
+ */
+export function FoldSummary({ children }: { children: React.ReactNode }) {
+  return (
+    <summary
+      data-fold-summary=""
+      style={{
+        display: "list-item",
+        padding: "12px 0",
+        lineHeight: "20px",
+        fontSize: 13,
+        fontWeight: 600,
+        letterSpacing: "-0.005em",
+        color: "var(--color-text-secondary)",
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </summary>
+  );
+}
 
 /** The raw text of one or more failed reads, closed until pressed. */
 export function ErrorDetails({ lines }: { lines: string[] }) {

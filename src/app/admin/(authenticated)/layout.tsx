@@ -5,7 +5,7 @@ import tokens from "@/components/admin/admin-tokens.module.css";
 import { TeamGuard } from "@/components/auth/TeamGuard";
 import { useAuth } from "@/contexts/AuthContext";
 import { isRebuiltPage } from "@/lib/admin/admin-frame";
-import { usePathname } from "next/navigation";
+import { useParams, usePathname } from "next/navigation";
 // v75.51: AdminScopeProvider + ScopeToggle removed. Every admin
 // surface is now LAUNCH COHORT only. Pre-launch customers stay out
 // of the operational view via the hardcoded first_paid_at filters.
@@ -25,6 +25,13 @@ import { usePathname } from "next/navigation";
  * "/admin" (the Dashboard), which covers itself only (isRebuiltPage,
  * src/lib/admin/admin-frame.ts). Each lane of admin rebuild 2 adds its pages
  * under its own line, so the lanes' additions merge without touching.
+ *
+ * An admin address with no page (the removed pages' old ones among them:
+ * /admin/today, /admin/etfb, /admin/stats, /admin/settings, /admin/discord)
+ * is the catch-all [...missing], whose not-found page is drawn here, in the
+ * frame (not-found.tsx, admin rebuild 2, the render review's fix round). It
+ * has no address of its own to list, so the frame knows it by that route's
+ * param and gives it the dark look too.
  */
 const REBUILT_PAGES: readonly string[] = [
   "/admin/discounts",
@@ -45,6 +52,11 @@ const REBUILT_PAGES: readonly string[] = [
   "/admin/feedback/survey",
   "/admin/team",
   "/admin/insights/progress",
+
+  // The render review's fix round: the course switch's status page, and Not
+  // activated, put back as it was at d0ebe76 (it was not one of D2's removals).
+  "/admin/cutover",
+  "/admin/not-activated",
 ];
 
 export default function AdminLayout({
@@ -53,8 +65,11 @@ export default function AdminLayout({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const params = useParams();
   const { teamMember, signOut } = useAuth();
-  const mainClass = isRebuiltPage(pathname, REBUILT_PAGES)
+  // The catch-all's param: an address with no page, drawn by not-found.tsx.
+  const missing = params?.missing !== undefined;
+  const mainClass = missing || isRebuiltPage(pathname, REBUILT_PAGES)
     ? `flex-1 overflow-auto ${tokens.tokens}`
     : "flex-1 overflow-auto";
   return (

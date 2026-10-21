@@ -24,6 +24,11 @@
  *          novideos   full, with the course's videos unreadable
  *          nocoupons  full, with the stored coupons unreadable and Whop
  *                     giving no answer about the Approved rows' coupons
+ *          owncode    full, with the team's own 30% codes already added in
+ *                     Whop for the two Approved rows (Mark code applied not
+ *                     pressed yet): Ethan's named ECOM30-3F9A21, Nora's with
+ *                     no name read, only the request's own Whop promo id. No
+ *                     coupon warning on either (the render review's fix round)
  *
  * The Approved rows' coupon is what Whop says now (liveCoupons, as
  * GET /api/admin/thirty asks it): Ethan was approved before the coupon rule
@@ -77,10 +82,16 @@ const VIDEOS: VideoRow[] = REQUIRED.map((lesson_id) => ({ lesson_id, created_at:
 // ── The made-up database ────────────────────────────────────────────────────
 /** A Whop membership as the coupon rule reads it: a code, the next renewal's price and the plan's. */
 interface Membership {
+  /** The code's name; null with no code, or when its name could not be read (then `promoId` is the code). */
   code: string | null;
+  /** The code's Whop promo id, when it is not promoIdOf(code). */
+  promoId?: string | null;
   renewal: number;
   plan: number;
 }
+
+/** A made-up Whop promo id for a code: "promo_dev" and the code's letters and digits. */
+const promoIdOf = (code: string) => `promo_dev${code.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
 
 interface Person {
   id: string;
@@ -113,6 +124,8 @@ interface Ask {
   appliedAt?: string | null;
   appliedBy?: string | null;
   promoCode?: string | null;
+  /** The Whop promo id of promoCode, as the approve route stores it (whop_promo_id). */
+  promoId?: string | null;
   reason?: string | null;
 }
 
@@ -174,21 +187,21 @@ function fullDb(): FixtureDb {
       { id: "r-priya", studentId: "p-priya", status: "pending", createdAt: "2026-10-20T07:10:00.000Z" },
       {
         id: "r-ethan", studentId: "p-ethan", status: "approved", createdAt: "2026-10-17T08:00:00.000Z",
-        reviewedAt: "2026-10-18T09:00:00.000Z", reviewedBy: "tm-robin", promoCode: "ECOM30-3F9A21",
+        reviewedAt: "2026-10-18T09:00:00.000Z", reviewedBy: "tm-robin", promoCode: "ECOM30-3F9A21", promoId: promoIdOf("ECOM30-3F9A21"),
       },
       {
         id: "r-nora", studentId: "p-nora", status: "approved", createdAt: "2026-10-19T19:00:00.000Z",
-        reviewedAt: "2026-10-20T07:45:00.000Z", reviewedBy: "tm-jamie", promoCode: "ECOM30-7B20C4",
+        reviewedAt: "2026-10-20T07:45:00.000Z", reviewedBy: "tm-jamie", promoCode: "ECOM30-7B20C4", promoId: promoIdOf("ECOM30-7B20C4"),
       },
       {
         id: "r-omar", studentId: "p-omar", status: "applied", createdAt: "2026-10-13T08:00:00.000Z",
         reviewedAt: "2026-10-14T09:00:00.000Z", reviewedBy: "tm-robin", appliedAt: "2026-10-15T10:00:00.000Z", appliedBy: "tm-jamie",
-        promoCode: "ECOM30-A1D9E0",
+        promoCode: "ECOM30-A1D9E0", promoId: promoIdOf("ECOM30-A1D9E0"),
       },
       {
         id: "r-lena", studentId: "p-lena", status: "applied", createdAt: "2026-10-15T08:00:00.000Z",
         reviewedAt: "2026-10-16T09:00:00.000Z", reviewedBy: "tm-jamie", appliedAt: "2026-10-17T10:00:00.000Z", appliedBy: "tm-jamie",
-        promoCode: "ECOM30-C55E10",
+        promoCode: "ECOM30-C55E10", promoId: promoIdOf("ECOM30-C55E10"),
       },
       {
         id: "r-ruby", studentId: "p-ruby", status: "rejected", createdAt: "2026-10-14T10:00:00.000Z",
@@ -206,6 +219,22 @@ function fullDb(): FixtureDb {
 
 function emptyDb(): FixtureDb {
   return { people: [], asks: [] };
+}
+
+/**
+ * The full fixture, with the team's own 30% codes already on the two Approved
+ * memberships in Whop (added there, Mark code applied not pressed yet):
+ * Ethan's read with its name, Nora's with only its Whop promo id, the
+ * request's own whop_promo_id.
+ */
+function ownCodeDb(): FixtureDb {
+  const db = fullDb();
+  const ethan = db.people.find((p) => p.id === "p-ethan")!;
+  const nora = db.people.find((p) => p.id === "p-nora")!;
+  ethan.live = { code: "ECOM30-3F9A21", renewal: 67.9, plan: 97 };
+  nora.live = { code: null, promoId: promoIdOf("ECOM30-7B20C4"), renewal: 67.9, plan: 97 };
+  nora.liveFails = false;
+  return db;
 }
 
 /** The full fixture plus one student whose progress cannot be read, with a request waiting. */
@@ -227,14 +256,16 @@ const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id 
 const membershipOf = (p: Person) => `mem_dev${p.id.replace(/[^a-z]/g, "")}`;
 
 function couponRow(p: Person, m: Membership, checkedAt: string): ThirtyCouponRow {
+  const promoId = m.promoId !== undefined ? m.promoId : m.code ? promoIdOf(m.code) : null;
   return {
     student_id: p.id,
     whop_membership_id: membershipOf(p),
-    promo_code_id: m.code ? `promo_dev${m.code}` : null,
+    promo_code_id: promoId,
     promo_code: m.code,
     renewal_price: m.renewal,
     plan_renewal_price: m.plan,
-    discounted: m.code !== null && Math.round(m.renewal * 100) < Math.round(m.plan * 100),
+    // THE RULE (membership-discount.ts): a code on the membership, and a next renewal below the plan's.
+    discounted: promoId !== null && Math.round(m.renewal * 100) < Math.round(m.plan * 100),
     checked_at: checkedAt,
   };
 }
@@ -258,6 +289,7 @@ function toData(db: FixtureDb, opts: { videosFail?: boolean; couponsFail?: boole
     reviewed_by: a.reviewedBy ?? null,
     applied_at: a.appliedAt ?? null,
     applied_by: a.appliedBy ?? null,
+    whop_promo_id: a.promoId ?? null,
   }));
   // The page lists the requests from 1 October, as loadThirtyData reads them.
   const requests = all.filter((r) => r.created_at >= DISCOUNT_ELIGIBLE_FROM).sort(byId);
@@ -327,9 +359,9 @@ function liveCoupons(db: FixtureDb, failAll: boolean): Map<string, LiveCoupon> {
 }
 
 // ── The stand-in for the server ─────────────────────────────────────────────
-export type FixtureState = "full" | "empty" | "loading" | "error" | "partial" | "novideos" | "nocoupons";
+export type FixtureState = "full" | "empty" | "loading" | "error" | "partial" | "novideos" | "nocoupons" | "owncode";
 
-const STATES: FixtureState[] = ["full", "empty", "loading", "error", "partial", "novideos", "nocoupons"];
+const STATES: FixtureState[] = ["full", "empty", "loading", "error", "partial", "novideos", "nocoupons", "owncode"];
 
 export function parseFixtureState(value: string | null): FixtureState {
   return STATES.find((s) => s === value) ?? "full";
@@ -357,7 +389,8 @@ export function fixtureThirtyTransport(opts: {
   conflict: boolean;
   reloadFails?: boolean;
 }): ThirtyTransport & { calls: FixtureCall[] } {
-  const db = opts.state === "empty" ? emptyDb() : opts.state === "partial" ? partialDb() : fullDb();
+  const db =
+    opts.state === "empty" ? emptyDb() : opts.state === "partial" ? partialDb() : opts.state === "owncode" ? ownCodeDb() : fullDb();
   const calls: FixtureCall[] = [];
   let minute = 0;
   let served = false;
@@ -432,7 +465,7 @@ export function fixtureThirtyTransport(opts: {
           return later<{ promoCode: string | null }>({ ok: false, status: 400, error: "Cannot approve: the rule says no." });
         }
       }
-      Object.assign(a, { status: "approved", promoCode: codeFor(a.studentId), reviewedAt: at(), reviewedBy: ME });
+      Object.assign(a, { status: "approved", promoCode: codeFor(a.studentId), promoId: promoIdOf(codeFor(a.studentId)), reviewedAt: at(), reviewedBy: ME });
       return later({ ok: true, status: 200, data: { promoCode: a.promoCode ?? null } });
     },
 

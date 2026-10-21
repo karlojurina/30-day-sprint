@@ -2,11 +2,11 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Card, Pill, Stat, T } from "@/components/admin/ui";
+import { Card, Pill, T } from "@/components/admin/ui";
 import type { PillTone } from "@/components/admin/ui";
 import { CopyButton, ListPage, LoadError, MembershipPill, SkeletonRows, TAP } from "@/components/admin/list-parts";
 import { ActivityPill, Dot, FactsLine, Meter } from "@/components/admin/people-parts";
-import { ProblemNotice, ReadFailure } from "@/components/admin/review-parts";
+import { FoldSummary, ProblemNotice, ReadFailure } from "@/components/admin/review-parts";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { dayLabel, dayTimeLabel } from "@/lib/admin/croatia-dates";
 import { agoText, type Read } from "@/lib/admin/people-common";
@@ -31,6 +31,14 @@ import { quickDms, type StudentDetail, type SyncView } from "@/lib/admin/student
  * "Ad submissions verified", which approving the 30% no longer needs (the
  * review's fix round). The quick DMs are the messages draft's words
  * (student-detail.ts quickDms).
+ *
+ * The render review's fix round: the four numbers keep to one line on a
+ * phone (20px there, 28px from 640px wide), and a number whose read failed
+ * is a warning dot and "Couldn't load" in the body's size, never a value's;
+ * Progress is in the primary ink (Airy Blue is for links). The Whop sync is
+ * one line (synced since the switch or not, when, how many lessons it
+ * brought in), and its counts, its note or error and the Whop lessons with
+ * no lesson here are folded under "Sync details".
  */
 
 type Loaded =
@@ -173,19 +181,52 @@ export function Block({ title, children }: { title: string; children: React.Reac
   );
 }
 
-function readValue<T>(r: Read<T>, show: (v: T) => string): string {
-  return r.ok ? show(r.data) : COULD_NOT_LOAD;
-}
-
-/** Progress, streak, first payment, last activity. A failed read reads "Couldn't load". */
+/** Progress, streak, first payment, last activity. A failed read reads "Couldn't load", plainly not a value. */
 export function StatGrid({ student: s, nowMs, compact = false }: { student: StudentDetail; nowMs: number; compact?: boolean }) {
   return (
     <div className={compact ? "grid grid-cols-2" : "grid grid-cols-2 lg:grid-cols-4"} style={{ gap: 12, marginBottom: 20 }}>
-      <Stat label="Progress" value={readValue(s.progress, (p) => `${p}%`)} tone={s.progress.ok ? "accent" : "default"} />
-      <Stat label="Streak" value={readValue(s.streak, (d) => `${d} ${d === 1 ? "day" : "days"}`)} />
-      <Stat label="First paid" value={s.firstPaidAt ? dayLabel(s.firstPaidAt) : "None"} />
-      <Stat label="Last active" value={s.lastActiveAt ? agoText(s.lastActiveAt, nowMs) : "Never"} />
+      <Fact label="Progress" read={s.progress} show={(p) => `${p}%`} />
+      <Fact label="Streak" read={s.streak} show={(d) => `${d} ${d === 1 ? "day" : "days"}`} />
+      <Fact label="First paid" read={{ ok: true, data: s.firstPaidAt }} show={(d) => (d ? dayLabel(d) : "None")} />
+      <Fact label="Last active" read={{ ok: true, data: s.lastActiveAt }} show={(d) => (d ? agoText(d, nowMs) : "Never")} />
     </div>
+  );
+}
+
+/**
+ * One of the four numbers: its name, then the value on one line (20px on a
+ * phone, 28px from 640px wide), or, when its read failed, a warning dot and
+ * "Couldn't load" in the body's size, so it never reads as a value.
+ */
+function Fact<T>({ label, read, show }: { label: string; read: Read<T>; show: (v: T) => string }) {
+  return (
+    <Card>
+      <p style={T.eyebrow}>{label}</p>
+      {read.ok ? (
+        <p
+          data-fact-value=""
+          className="stat-value text-[20px] sm:text-[28px]"
+          style={{
+            marginTop: 8,
+            fontWeight: 600,
+            lineHeight: 1.1,
+            letterSpacing: "-0.024em",
+            color: "var(--color-text-primary)",
+            fontVariantNumeric: "tabular-nums",
+            whiteSpace: "nowrap",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+          }}
+        >
+          {show(read.data)}
+        </p>
+      ) : (
+        <p data-failed="" style={{ marginTop: 10, display: "flex", gap: 8, alignItems: "center", ...T.body, fontWeight: 600, lineHeight: 1.3 }}>
+          <span aria-hidden="true" style={{ flex: "none", width: 8, height: 8, borderRadius: 999, background: "var(--color-warning)" }} />
+          {COULD_NOT_LOAD}
+        </p>
+      )}
+    </Card>
   );
 }
 
@@ -300,56 +341,77 @@ function SyncBlock({ sync }: { sync: StudentDetail["sync"] }) {
     );
   }
   const pill = SYNC_PILL[v.state];
+  // The one line: synced since the switch or not (the pill), when, and the lessons it brought in (the Whop
+  // lessons it matched to lessons here); a failed last run says so. The rest is under "Sync details".
+  const brought = v.matched == null ? null : `${v.matched} ${v.matched === 1 ? "lesson" : "lessons"} brought in`;
+  const failedRun = v.error && !v.error.note;
   return (
     <Card padding={16}>
-      <div className="flex flex-wrap items-center" style={{ gap: 8, marginBottom: 12 }}>
+      <div data-sync-line="" className="flex flex-wrap items-center" style={{ gap: "6px 10px" }}>
         <Pill tone={pill.tone}>{pill.text}</Pill>
-        <span style={{ ...T.bodyDim, fontSize: 12 }}>Last synced {dayTimeLabel(v.lastSyncAt)} (Croatia time)</span>
+        <span style={{ ...T.body, lineHeight: 1.5 }}>
+          Last synced {dayTimeLabel(v.lastSyncAt)}
+          {brought && (
+            <>
+              <span aria-hidden="true"> · </span>
+              {brought}
+            </>
+          )}
+          {failedRun && (
+            <>
+              <span aria-hidden="true"> · </span>
+              <span style={{ fontWeight: 600 }}>the last run failed</span>
+            </>
+          )}
+        </span>
       </div>
       {v.state === "stale" && (
-        <p style={{ ...T.bodyDim, lineHeight: 1.5, marginBottom: 12 }}>
+        <p style={{ ...T.bodyDim, lineHeight: 1.5, marginTop: 8 }}>
           These numbers are from before the course switch. They change at the next sync.
         </p>
       )}
-      <div className="grid grid-cols-3" style={{ gap: 12, marginBottom: 12 }}>
-        <SyncNumber label="Fetched" value={v.fetched} />
-        <SyncNumber label="Matched" value={v.matched} />
-        <SyncNumber label="Unmatched" value={v.unmatched.length} />
-      </div>
-      {/* The backfill's note (lessons opened on Whop, none finished) is not a
-          failure: a grey dot and "Note:". Anything else is the last error: a
-          red dot and "Last error:". The words stay in the readable colour; red
-          words measure under 4.5:1 on the dark surfaces. */}
-      {v.error && (
-        <p
-          className="flex items-start"
-          style={{ ...T.body, gap: 10, lineHeight: 1.5, padding: "8px 10px", borderRadius: "var(--radius-chip)", background: "var(--color-bg-elevated)", overflowWrap: "anywhere" }}
-        >
-          <Dot color={v.error.note ? "var(--color-neutral)" : "var(--color-danger)"} />
-          <span>
-            {v.error.note ? "Note: " : "Last error: "}
-            {v.error.text}
-            {v.error.note ? " (lessons opened on Whop, none finished yet)" : ""}
-            {v.error.at ? `, ${dayTimeLabel(v.error.at)}` : ""}
-          </span>
-        </p>
-      )}
-      {v.unmatched.length > 0 ? (
-        <details style={{ marginTop: 12 }}>
-          <summary style={{ ...T.body, fontWeight: 600, cursor: "pointer", padding: "12px 0", lineHeight: "20px" }}>
-            Whop lessons with no lesson here ({v.unmatched.length})
-          </summary>
-          <div style={{ padding: 12, borderRadius: "var(--radius-chip)", background: "var(--color-bg-elevated)", maxHeight: 192, overflowY: "auto" }}>
-            {v.unmatched.map((id) => (
-              <p key={id} className="select-all" style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)" }}>
-                {id}
-              </p>
-            ))}
+      <details data-sync-details="" style={{ marginTop: 4 }}>
+        <FoldSummary>Sync details</FoldSummary>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, paddingBottom: 4 }}>
+          <div className="grid grid-cols-3" style={{ gap: 12 }}>
+            <SyncNumber label="Fetched" value={v.fetched} />
+            <SyncNumber label="Matched" value={v.matched} />
+            <SyncNumber label="Unmatched" value={v.unmatched.length} />
           </div>
-        </details>
-      ) : (
-        <p style={{ ...T.bodyDim, fontSize: 12 }}>Every Whop lesson this student watched has a lesson here.</p>
-      )}
+          {/* The backfill's note (lessons opened on Whop, none finished) is not a
+              failure: a grey dot and "Note:". Anything else is the last error: a
+              red dot and "Last error:". The words stay in the readable colour; red
+              words measure under 4.5:1 on the dark surfaces. */}
+          {v.error && (
+            <p
+              className="flex items-start"
+              style={{ ...T.body, gap: 10, lineHeight: 1.5, padding: "8px 10px", borderRadius: "var(--radius-chip)", background: "var(--color-bg-elevated)", overflowWrap: "anywhere" }}
+            >
+              <Dot color={v.error.note ? "var(--color-neutral)" : "var(--color-danger)"} />
+              <span>
+                {v.error.note ? "Note: " : "Last error: "}
+                {v.error.text}
+                {v.error.note ? " (lessons opened on Whop, none finished yet)" : ""}
+                {v.error.at ? `, ${dayTimeLabel(v.error.at)}` : ""}
+              </span>
+            </p>
+          )}
+          {v.unmatched.length > 0 ? (
+            <div>
+              <p style={{ ...T.body, fontWeight: 600, marginBottom: 6 }}>Whop lessons with no lesson here ({v.unmatched.length})</p>
+              <div style={{ padding: 12, borderRadius: "var(--radius-chip)", background: "var(--color-bg-elevated)", maxHeight: 192, overflowY: "auto" }}>
+                {v.unmatched.map((id) => (
+                  <p key={id} className="select-all" style={{ fontSize: 12, fontFamily: "var(--font-mono)", color: "var(--color-text-secondary)" }}>
+                    {id}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p style={{ ...T.bodyDim, fontSize: 12 }}>Every Whop lesson this student watched has a lesson here.</p>
+          )}
+        </div>
+      </details>
     </Card>
   );
 }

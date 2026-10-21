@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, EmptyState, Pill, T } from "@/components/admin/ui";
-import { ListHeader, ListPage, LoadError, SkeletonRows } from "@/components/admin/list-parts";
+import { FailedMeta, ListHeader, ListPage, LoadError, SkeletonRows } from "@/components/admin/list-parts";
+import { StudentName } from "@/components/admin/student-name";
 import { DiscountFeedbackResponses } from "@/components/admin/DiscountFeedbackResponses";
 import type { Answer } from "@/lib/admin/admin-transport";
 import { dayLabel } from "@/lib/admin/croatia-dates";
@@ -33,6 +34,11 @@ import type { SurveyData } from "@/lib/admin/survey-data";
  * `load` is the page's one read (loadSurveyData in src/lib/admin/
  * survey-data.ts, or the dev page's made-up one): a failed read shows what
  * could not be read and Retry, never an empty list.
+ *
+ * The render review's fix round: a card's name is the name of every admin
+ * page (student-name.tsx: a link to the student's page, @username after it),
+ * and the answers sit in the card itself under a hairline, no longer in a
+ * second card inside it.
  */
 
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; data: SurveyData };
@@ -97,7 +103,7 @@ export function SurveyView({ load }: { load: () => Promise<Answer<SurveyData>> }
   if (loaded.kind === "error") {
     return (
       <ListPage>
-        {header(null, refreshButton)}
+        {header(<FailedMeta />, refreshButton)}
         <LoadError title="Couldn't load the survey." detail={loaded.error} onRetry={() => void again()} busy={busy} />
       </ListPage>
     );
@@ -164,7 +170,9 @@ export function SurveyView({ load }: { load: () => Promise<Answer<SurveyData>> }
                   <article aria-label={`${name}, ${status.label}`} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     <div className="flex flex-wrap items-start justify-between" style={{ gap: "8px 12px" }}>
                       <div style={{ minWidth: 0, flex: "1 1 200px" }}>
-                        <p style={{ ...T.body, fontSize: 15, fontWeight: 600, overflowWrap: "anywhere" }}>{name}</p>
+                        <p className="flex flex-wrap items-baseline" style={{ gap: "2px 8px", minWidth: 0 }}>
+                          <StudentName id={app.student?.id} name={name} username={app.student?.discord_username} />
+                        </p>
                         <p style={{ ...T.bodyDim, overflowWrap: "anywhere" }}>{app.student?.email || "No email on file"}</p>
                       </div>
                       <div className="flex items-center" style={{ gap: 10, flex: "none" }}>

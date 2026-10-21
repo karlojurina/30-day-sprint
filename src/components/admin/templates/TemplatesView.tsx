@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Card, EmptyState, T } from "@/components/admin/ui";
 import {
+  FailedMeta,
   ListHeader,
   ListPage,
   LoadError,
   NoticeStack,
   SkeletonRows,
-  TAP,
 } from "@/components/admin/list-parts";
+import { FoldSummary } from "@/components/admin/review-parts";
 import type { Notice } from "@/components/admin/list-parts";
 import {
   BUCKET_MEANING,
@@ -256,7 +257,7 @@ export function TemplatesView({ transport, role }: { transport: TemplatesTranspo
   if (loaded.kind === "error") {
     return (
       <ListPage>
-        {header(null, false)}
+        {header(<FailedMeta />, false)}
         <LoadError title="Couldn't load the templates." detail={loaded.error} onRetry={() => void retry()} busy={retrying} />
       </ListPage>
     );
@@ -339,23 +340,11 @@ function settingSaved(key: EditableConfigKey, value: string): string {
   return `${SWITCH_TEXT[key].title} is ${value === "true" ? "on" : "off"}.`;
 }
 
-/** What the bucket words mean, folded under one line. */
+/** What the bucket words mean, folded under one line with the browser's triangle (the render review's fix round: it had no marker). */
 function BucketKey() {
   return (
     <details style={{ marginBottom: 20 }}>
-      <summary
-        style={{
-          ...T.body,
-          fontWeight: 600,
-          minHeight: TAP,
-          display: "flex",
-          alignItems: "center",
-          cursor: "pointer",
-          color: "var(--color-text-secondary)",
-        }}
-      >
-        What the buckets mean
-      </summary>
+      <FoldSummary>What the buckets mean</FoldSummary>
       <dl className="grid grid-cols-1 sm:grid-cols-2" style={{ gap: "10px 24px", marginTop: 4 }}>
         {(Object.keys(BUCKET_MEANING) as Array<keyof typeof BUCKET_MEANING>).map((b) => (
           <div key={b}>

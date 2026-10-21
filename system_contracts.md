@@ -1042,9 +1042,14 @@ When adding a new table, append it here. When deleting a field, scan
 - **Written by (the service role only; row level security has no write
   policy, and `anon` and `authenticated` hold no write privilege):** the
   cron `GET /api/cron/refresh-membership-discounts` (every 2 hours at
-  minute 40, pinned to `iad1`: students with `first_paid_at` from
-  `DISCOUNT_ELIGIBLE_FROM`, `membership_status` active or past_due, and no
-  approved or applied request; reads `students.id, whop_membership_id`),
+  minute 40, pinned to `iad1`: since the render review's fix round,
+  2026-10-21, the students whose 30% window is still open at the run's
+  start (`discountWindowOpen` of `src/lib/world/discount.ts`: a
+  `first_paid_at` from `DISCOUNT_ELIGIBLE_FROM` and a deadline not past;
+  the read itself from `earliestOpenFirstPayment`), `membership_status`
+  active or past_due, and no approved or applied request; it read every
+  student from `DISCOUNT_ELIGIBLE_FROM`, a list that only grew; reads
+  `students.id, whop_membership_id, first_paid_at`),
   and `POST /api/discounts/request`, `POST /api/discounts/submit-feedback`
   and `POST /api/discounts/approve` after a live read
   (`checkMembershipDiscount`). One row per student, upserted on
@@ -1095,13 +1100,22 @@ When adding a new table, append it here. When deleting a field, scan
 
 ### `tasks` (CSM task queue)
 - **Depends on:** `students`, `templates`
-- **Depended on by:** `/admin/tasks`, the 30% page's last contact
-  (`GET /api/admin/thirty`, until admin rebuild 2, D4, removed the last
-  contact: it reads no `tasks` since), (`/admin/today` through `GET
-  /api/admin/today` and `POST`/`DELETE /api/admin/today/mark`, admin
-  rebuild, branch `night/admin`, until admin rebuild 2 removed them), `src/lib/csm-events.ts`
-  (`recentTaskScenarios` dedupe), optional ops digest. (`/admin/kanban`,
-  listed here until 2026-10-20, does not exist.)
+- **Depended on by** (read in the source of `night/admin2`, 2026-10-21):
+  `/admin/tasks` through `GET /api/admin/tasks` and the
+  `/api/admin/tasks/[id]` routes (read, copy, transition, dismiss,
+  outcome, refire); `/admin/tasks/insights` through
+  `GET /api/admin/tasks/insights` (`src/lib/outreach-insights.ts`); the
+  Dashboard's Open tasks tile (`src/app/admin/(authenticated)/page.tsx`,
+  a count); the crons `check-csm-tasks` (reads and writes it) and
+  `check-na-tasks` (writes it); `src/lib/csm-events.ts` (the event tasks: it writes them, and reads
+  and closes a student's open ones when an event comes);
+  `src/lib/csm-task-evaluation.ts` (`reEvaluateStudentOpenTasks`, which
+  dismisses a student's open tasks whose rule no longer holds). Nothing
+  else reads it: the 30% page has read no `tasks` since admin rebuild 2
+  (D4) took its last contact away, and Today (`/admin/today`, its `GET
+  /api/admin/today` and `POST`/`DELETE /api/admin/today/mark`) was
+  removed by admin rebuild 2 (D2). (`/admin/kanban`, listed here until
+  2026-10-20, does not exist.)
 - **Support records (admin rebuild, branch `night/admin`, not on
   production; nothing writes them since admin rebuild 2 removed Today
   and its mark route, branch `night/admin2`, and the rows already
@@ -1116,29 +1130,25 @@ When adding a new table, append it here. When deleting a field, scan
   crons and the one-open-task index never meet one. They were written
   only by `POST /api/admin/today/mark` (from Today, or Mark messaged on
   the 30% page's Can still earn) and deleted only by
-  `DELETE /api/admin/today/mark`, both removed in admin rebuild 2; the
-  30% loader still reads a completed one as the last contact.
-  `GET /api/admin/tasks` drops every task with no
-  template after its query (v59), so a support record never shows in the
-  Tasks tabs; on this branch it still takes one of that query's 100 rows,
-  until lane G1's change (`night/hf-admin`, `5bc5e27`) moves the filter
-  into the query. Merge G1 before this branch or with it, then run
-  `npm run test:client` again: without it a busy day of marks pushes
-  older sends off the Sent tab and the Tasks page's "N sent today"
-  undercounts (review of 2026-10-20). Outreach insights count template sends only, so a mark
-  for a reason the app computed is not in them either.
+  `DELETE /api/admin/today/mark`, both removed in admin rebuild 2;
+  nothing reads them as a last contact since D4 took that off the 30%
+  page. `GET /api/admin/tasks` filters on `template_id is not null` in
+  the query itself, before its limit and in every count, so a support
+  record never shows in the Tasks tabs and never takes one of a list's
+  rows. Outreach insights count template sends only, so a mark for a
+  reason the app computed is not in them either.
 - **Stable contract:** `student_id`, `scenario_id`, `template_id`,
   `status` (open/completed/dismissed), `behavior_summary`,
   `created_at`, `completed_at`, `dismissed_at`, `dismissed_by`,
   `notes`, `outcome` (v85 — replied/no_reply/NULL, written only by
   `POST /api/admin/tasks/[id]/outcome`, read by
   `GET /api/admin/templates/stats` for per-template reply rates)
-- **CSM cron filters (v75.15+):** `check-csm-tasks`,
-  `check-engagement`, `check-na-tasks` all gate on
-  `joined_at >= csmSprintWindowCutoffIso()` (= `now() - 30d`) AND
+- **CSM cron filters (v75.15+; `first_paid_at` since v75.18):**
+  `check-csm-tasks`, `check-engagement`, `check-na-tasks` all gate on
+  `first_paid_at >= csmSprintWindowCutoffIso()` (= `now() - 30d`) AND
   `whop_plan_id IN PAYING_WHOP_PLAN_IDS`. So no task fires for a
-  student past day 30 of their sprint or on a free plan. Day-28 DM
-  has its own tight 1-day window.
+  student past day 30 since their first payment or on a free plan.
+  Day-28 DM has its own tight 1-day window.
 - **Note:** Not to be confused with the legacy curriculum `tasks`
   table (`student_task_completions`'s parent, predates `lessons`).
   The CSM `tasks` table is a *queue*.
@@ -1174,8 +1184,8 @@ When adding a new table, append it here. When deleting a field, scan
   is a 500 in both routes, never "no reset". The Dashboard's Open tasks
   tile draws the same line (D7): it reads the key itself and checks it
   with `configReads` of `src/lib/admin/dashboard-metrics.ts`, apart from
-  `getTasksResetAt` (see `admin_config`). The 30% loader's last contact
-  and the crons read tasks of any date, as before.
+  `getTasksResetAt` (see `admin_config`). The crons, `csm-events.ts` and
+  `csm-task-evaluation.ts` read tasks of any date, as before.
 
 ### `daily_progress_snapshots`
 - **Depends on:** `students`, `lessons`
@@ -2056,7 +2066,8 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
 - **Depends on:** `getCurriculumResetAt`, then `loadThirtyData`
   (`src/lib/admin/thirty-data.ts`): `discount_requests` made from
   `DISCOUNT_ELIGIBLE_FROM` on, whatever their status (the pending ones,
-  then the decided ones; a request on both is kept once, decided), the
+  then the decided ones; a request on both is kept once, decided; with
+  its `whop_promo_id` since the render review's fix round), the
   `students` holding them (`id, name, email, discord_username,
   membership_status, first_paid_at, whop_membership_id`), the catalog
   (`LESSONS_TABLE`, by `sort_order`), `lesson_videos` (`lesson_id,
@@ -2083,9 +2094,13 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     reviewedAt, reviewedBy, appliedAt, appliedBy, promoCode,
     rejectionReason`, `student` (`id, name, email, username, status,
     whopPulled`; no plan, no ads tick), `facts` and `verdict` on a pending
-    row (null on the others), `coupon` (`code, discounted,
-    renewalPrice, planRenewalPrice, checkedAt`, or null) for the
-    membership the student holds now, and `couponCheck`, where it comes
+    row (null on the others), `coupon` (`code, promoCodeId, discounted,
+    ours, renewalPrice, planRenewalPrice, checkedAt`, or null) for the
+    membership the student holds now (`ours`, since the render review's
+    fix round: an Approved or Code Applied row's coupon is the request's
+    own 30% code, an ECOM30 code or its own `whop_promo_id`, which the
+    page never warns about; always false on a pending row, whose coupon
+    decides as the approve route decides), and `couponCheck`, where it comes
     from: `live` (Whop answered now; an Approved row), `stored` (the
     stored row for that membership; on an Approved row, Whop gave no
     answer now), `not-checked` (no stored row applies: never checked, or
@@ -2163,7 +2178,8 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
 - **Survey (`/admin/feedback/survey`):** reads
   `discount_feedback_questions` and `discount_feedback_responses` paged on
   `id`, then `discount_requests` (`id, student_id, status, created_at`) and
-  `students` (`id, name, email`) by id, at most 100 ids per `.in()`
+  `students` (`id, name, email, discord_username`; the username since the
+  render review's fix round, for the name part) by id, at most 100 ids per `.in()`
   (`loadSurveyData`, `src/lib/admin/survey-data.ts`). Any failed read
   fails the page with what failed. Writes nothing.
 - **Team (`/admin/team`):** the existing founder-only routes,
@@ -2265,8 +2281,9 @@ against a real database.
   order_num`), `lessons` (`id, region_id, title, type, sort_order,
   feature_key`), `student_lesson_ratings` with `created_at` on or after
   the switch (every row while there is no switch), paged by `updated_at`
-  then `id`, and `students` (`id, name, email`) of those who rated, in
-  batches of 100 ids.
+  then `id`, and `students` (`id, name, email, discord_username`; the
+  username since the render review's fix round, shown after the name) of
+  those who rated, in batches of 100 ids.
 - **Produces:** 200 `LessonFeedbackView`: `{ generatedAt, since,
   totals: { ratings, comments, average, lessonsRated, lessons }, areas,
   unplaced }`. `areas` in `order_num` order, each `{ id, number, name,

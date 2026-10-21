@@ -2,7 +2,7 @@
 import { jsx as _jsx, jsxs as _jsxs, Fragment as _Fragment } from "react/jsx-runtime";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Button, Card, EmptyState, Pill, T } from "./a2-ui.mjs";
-import { ListHeader, ListPage, LoadError, NoticeStack, SkeletonRows } from "./a2-list-parts.mjs";
+import { FailedMeta, ListHeader, ListPage, LoadError, NoticeStack, SkeletonRows } from "./a2-list-parts.mjs";
 import { Field, INPUT } from "./a2-form-parts.mjs";
 import { dayLabel } from "./croatia-dates.ts";
 import { INVITE_PLACEHOLDER, ROLE_OPTIONS, canRemove, inviteProblem, roleLocked } from "./team-data.ts";
@@ -83,7 +83,7 @@ export function TeamView({ transport, me, }) {
         return null;
     }
     const header = (meta) => (_jsx(ListHeader, { title: "Team", description: "Who can sign in to the admin, and their roles. Founders only.", meta: meta }));
-    return (_jsxs(ListPage, { children: [header(loaded.kind === "ready" ? `${loaded.members.length} ${loaded.members.length === 1 ? "member" : "members"}` : "Loading"), _jsx(InviteCard, { onInvite: invite }), _jsx("h2", { style: { ...T.eyebrow, color: "var(--color-text-secondary)", margin: "24px 0 8px" }, children: "Members" }), loaded.kind === "loading" && _jsx(SkeletonRows, { rows: 3, label: "Loading the team" }), loaded.kind === "error" && (_jsx(LoadError, { title: "Couldn't load the team.", detail: loaded.error, busy: retrying, onRetry: async () => {
+    return (_jsxs(ListPage, { children: [header(loaded.kind === "ready" ? (`${loaded.members.length} ${loaded.members.length === 1 ? "member" : "members"}`) : loaded.kind === "error" ? (_jsx(FailedMeta, {})) : ("Loading")), _jsx(InviteCard, { onInvite: invite }), _jsx("h2", { style: { ...T.eyebrow, color: "var(--color-text-secondary)", margin: "24px 0 8px" }, children: "Members" }), loaded.kind === "loading" && _jsx(SkeletonRows, { rows: 3, label: "Loading the team" }), loaded.kind === "error" && (_jsx(LoadError, { title: "Couldn't load the team.", detail: loaded.error, busy: retrying, onRetry: async () => {
                     setRetrying(true);
                     await read();
                     setRetrying(false);

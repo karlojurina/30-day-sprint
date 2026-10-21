@@ -16,6 +16,8 @@ import type { FixtureCall } from "../fixtures";
  *          partial | novideos | nocoupons   one student's progress, the
  *                               course's videos, or the stored coupons,
  *                               unreadable (fixtures.ts)
+ *          owncode              the team's own 30% codes already on the
+ *                               Approved memberships in Whop (fixtures.ts)
  *   ?conflict=1   the decision buttons answer as if another team member
  *                 decided the request first (fixtures.ts says how)
  *   ?reload=fail  the list loads once, then every read of it fails

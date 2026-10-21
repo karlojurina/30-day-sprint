@@ -55,7 +55,7 @@ import {
   type PosterManifest,
 } from "@/lib/world-v6/poster";
 import { benchText, runBench, type BenchResult } from "./bench";
-import { clockSetting, watchClock } from "@/lib/world-v6/clock";
+import { clockSetting, markPosterTod, posterNight, watchClock, writePosterTod } from "@/lib/world-v6/clock";
 import tokens from "./tokens.module.css";
 import s from "./world.module.css";
 
@@ -189,8 +189,8 @@ const HOOKS = process.env.NODE_ENV !== "production";
  * (about 1093x490 on a 1366x768 laptop at 125%, 911x435 zoomed to 150%) keeps
  * the 3D it could already draw, and no longer swaps it for the list when a
  * browser bar or devtools opens. Its twins in the stylesheets
- * (world.module.css, world-ui.module.css) and the landing poster's <source>
- * say the same, so client-tests/phone-view.test.mjs and
+ * (world.module.css, world-ui.module.css) and the landing poster's rule
+ * (world.module.css .posterLanding) say the same, so client-tests/phone-view.test.mjs and
  * phone-view-laptops.test.mjs check them together. WorldPreload.tsx reads it
  * too, so a screen that gets the list never downloads the 3D map's code.
  */
@@ -415,7 +415,7 @@ const PLAIN_HOOKS = [
   "__worldCheckpoint",
 ] as const;
 
-/** A transparent pixel: the landing poster's fallback on a phone's size (NARROW_QUERY), where the page is a list and needs no poster. */
+/** A transparent pixel: the landing poster's src until the page runs (the stylesheet draws the poster behind it, .posterLanding), and on a phone's size (NARROW_QUERY), where the page is a list and needs no poster. */
 const BLANK_GIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 const NP = POSTER_IDS.length;
 
@@ -720,10 +720,34 @@ function WorldV6View({
   // and on coming back to the tab, for the scene's light. A scene made later
   // takes the last value as it is built (the scene effect below).
   const nightRef = useRef(0);
+  // The posters' day or night (clock.ts posterNight: the night set once the
+  // live map is nearer its night). On <html> for the stylesheets, where the
+  // page head's script put it before the first paint; written again here
+  // with this map's own liveClock before it paints, kept in a ref for the
+  // posters' code and in state for the phone's picture.
+  const nightPostersRef = useRef(false);
+  const [nightPosters, setNightPosters] = useState(false);
+  useLayoutEffect(() => {
+    const n = markPosterTod(liveClock);
+    nightPostersRef.current = n;
+    setNightPosters(n);
+  }, [liveClock]);
   useEffect(() => {
     return watchClock(clockSetting(window.location.search, liveClock), (n) => {
       nightRef.current = n;
       sceneRef.current?.setNight(n);
+      // The clock crossed the posters' line with the page open: the other set,
+      // on every poster that has its file (and the stylesheets' by <html>).
+      const pn = posterNight(n);
+      if (pn === nightPostersRef.current) return;
+      nightPostersRef.current = pn;
+      writePosterTod(pn);
+      setNightPosters(pn);
+      posterImgs.current.forEach((img, i) => {
+        const was = img?.getAttribute("src");
+        const next = posterSrc(POSTER_IDS[i], pn);
+        if (img && was && was !== BLANK_GIF && was !== next) img.src = next;
+      });
     });
   }, [liveClock]);
 
@@ -1434,7 +1458,7 @@ function WorldV6View({
     if (layer) layer.dataset.show = "";
     if (!all) return;
     posterImgs.current.forEach((img, i) => {
-      if (img && i > 0 && !img.getAttribute("src")) img.src = posterSrc(POSTER_IDS[i]);
+      if (img && i > 0 && !img.getAttribute("src")) img.src = posterSrc(POSTER_IDS[i], nightPostersRef.current);
     });
   }, []);
 
@@ -1464,17 +1488,18 @@ function WorldV6View({
 
   useLayoutEffect(() => {
     if (view !== "world") return;
-    // The nearest poster to where the page opened (scroll restored on reload).
+    // The nearest poster to where the page opened (scroll restored on reload),
+    // day or night by the clock. The opening's is the stylesheet's until here
+    // (.posterLanding); its file goes in the src too, drawn exactly over it,
+    // so the posters' code finds it loaded and can swap it.
     const max = document.documentElement.scrollHeight - window.innerHeight;
     const k = max > 0 && window.scrollY > 0 ? landingPoster(window.scrollY / max, depthsRef.current) : 0;
-    if (k > 0) {
-      const img = posterImgs.current[k];
-      if (img) {
-        img.src = posterSrc(POSTER_IDS[k]);
-        img.dataset.on = "";
-      }
-      if (posterImgs.current[0]) delete posterImgs.current[0].dataset.on;
+    const img = posterImgs.current[k];
+    if (img) {
+      img.src = posterSrc(POSTER_IDS[k], nightPostersRef.current);
+      img.dataset.on = "";
     }
+    if (k > 0 && posterImgs.current[0]) delete posterImgs.current[0].dataset.on;
     const first = posterImgs.current[k];
     if (first?.complete && first.naturalWidth > 1) setPosterReady(true);
   }, [view]);
@@ -2836,18 +2861,19 @@ function WorldV6View({
       {view === "world" && <div ref={stageRef} className={s.stage} aria-hidden="true" />}
       {/* Long travel: the frozen frame the camera jumps under (LONG_HOP). */}
       {view === "world" && <canvas ref={snapRef} className={s.snap} aria-hidden="true" />}
-      {/* Cheap laptops: the posters (poster.ts). In the server HTML, so the opening shows before any script runs. */}
+      {/* Cheap laptops: the posters (poster.ts). In the server HTML, so the opening shows before any script runs:
+          the stylesheet draws it (.posterLanding), day or night by the clock the page's head read (clock.ts CLOCK_BOOT).
+          Its <picture> no longer chooses a file (a <source> did until 2026-10-21); the world tests find the layer by it. */}
       {view !== "list" && (
         <div ref={posterRef} className={s.poster} data-show="" aria-hidden="true">
           {POSTER_IDS.map((id, i) =>
             i === 0 ? (
               <picture key={id}>
-                <source media="(min-width: 760px) and (min-height: 500px), (min-width: 760px) and (pointer: fine), (min-width: 760px) and (pointer: none)" srcSet={posterSrc(id)} />
                 <img
                   ref={(el) => {
                     posterImgs.current[0] = el;
                   }}
-                  className={s.posterImg}
+                  className={`${s.posterImg} ${s.posterLanding}`}
                   src={BLANK_GIF}
                   alt=""
                   data-on=""
@@ -3300,7 +3326,7 @@ function WorldV6View({
         </span>
       </header>
 
-      {view === "list" && <PhoneWorld place={study.place} />}
+      {view === "list" && <PhoneWorld place={study.place} night={nightPosters} />}
       {view === "list" && (
         <div className={s.list} inert={isOpen}>
           {phase === "failed" && <p className={s.note}>The 3D map could not load in this browser, so here is the list.</p>}
@@ -3523,9 +3549,11 @@ const HERO_TY = 130;
  * block, cropped so its landmark sits in the open band under the header. One
  * image, no WebGL, no per-frame work: the crop is computed once per place and
  * width from the manifest's landmark position (fx, fy), zooming in at most
- * 1.5x past "cover" when the landmark sits near a poster edge.
+ * 1.5x past "cover" when the landmark sits near a poster edge. After dark on
+ * the student's clock (`night`, clock.ts posterNight) the night poster, which
+ * the same markers crop.
  */
-function PhoneWorld({ place }: { place: number }) {
+function PhoneWorld({ place, night }: { place: number; night: boolean }) {
   const id = `a${Math.min(N, Math.max(1, place + 1))}`;
   const boxRef = useRef<HTMLDivElement | null>(null);
   const [mark, setMark] = useState<{ id: string; fx: number; fy: number } | null>(null);
@@ -3584,7 +3612,7 @@ function PhoneWorld({ place }: { place: number }) {
         // eslint-disable-next-line @next/next/no-img-element
         <img
           key={id}
-          src={posterSrc(id)}
+          src={posterSrc(id, night)}
           alt=""
           decoding="async"
           draggable={false}

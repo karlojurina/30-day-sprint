@@ -6,7 +6,9 @@
 // repeat the rule where JavaScript cannot reach: the map's stylesheet hides
 // the poster layer on a phone (world.module.css), the screens over the map
 // take their phone look (world-ui.module.css), and the landing poster's
-// <source> loads the opening's still only where the 3D draws. The query used
+// stylesheet rule (.posterLanding in world.module.css, a <source> until the
+// night posters of 2026-10-21) loads the opening's still only where the 3D
+// draws. The query used
 // to be width alone, so a phone held sideways (780 to 932 px wide, 304 to 430
 // px tall) got the 3D layout, which was never measured below 700 px tall.
 // Since the 2026-10-20 review the height applies to touch screens only
@@ -31,11 +33,11 @@ const ok = (c, label, detail = '') => {
 const show = (v) => JSON.stringify(v)
 
 // ── The four, read from the source ──────────────────────────────────────────
-const { narrow, source, posterHide, uiPhone } = phoneQueries()
+const { narrow, landing, posterHide, uiPhone } = phoneQueries()
 
 console.log('\nThe four are in the source')
 ok(narrow !== null, 'WorldV6.tsx NARROW_QUERY', show(narrow))
-ok(source !== null, "WorldV6.tsx, the landing poster's <source media>", show(source))
+ok(landing !== null, "world.module.css, the landing poster's @media (.posterLanding)", show(landing))
 ok(posterHide !== null, 'world.module.css, the poster layer hidden on a phone', show(posterHide))
 ok(uiPhone !== null, "world-ui.module.css, the phone's look of the screens over the map", show(uiPhone))
 // Media Queries Level 4 ranges, as the rest of the map's stylesheets write them.
@@ -77,7 +79,7 @@ const WORLDS = [
   [3428, 1230, 'fine', "Lovro's ultrawide"],
 ]
 
-if (narrow && source && posterHide && uiPhone) {
+if (narrow && landing && posterHide && uiPhone) {
   console.log('\nPhones, upright and sideways, get the list')
   for (const [width, height, pointer, name] of PHONES) ok(matches(narrow, { width, height, pointer }), `${width}x${height}, ${name}: the list`, `matchMedia(${show(narrow)})`)
 
@@ -87,20 +89,20 @@ if (narrow && source && posterHide && uiPhone) {
   console.log('\nThe twins agree with NARROW_QUERY at every size (and either side of both lines), for every pointer')
   const edges = [[759, 900], [760, 900], [1200, 499], [1200, 500], [759, 499], [760, 500]]
   const all = [...PHONES, ...WORLDS].map(([w, h]) => [w, h]).concat(edges)
-  const off = { posterHide: [], uiPhone: [], source: [] }
+  const off = { posterHide: [], uiPhone: [], landing: [] }
   for (const pointer of POINTERS) {
     for (const [width, height] of all) {
       const screen = { width, height, pointer }
       const phone = matches(narrow, screen)
       if (matches(posterHide, screen) !== phone) off.posterHide.push(`${width}x${height} ${pointer}`)
       if (matches(uiPhone, screen) !== phone) off.uiPhone.push(`${width}x${height} ${pointer}`)
-      if (matches(source, screen) === phone) off.source.push(`${width}x${height} ${pointer}`)
+      if (matches(landing, screen) === phone) off.landing.push(`${width}x${height} ${pointer}`)
     }
   }
   const n = all.length * POINTERS.length
   ok(off.posterHide.length === 0, 'world.module.css hides the poster layer exactly on a phone', off.posterHide.length ? `differs at ${off.posterHide.join(', ')}` : `${n} screens`)
   ok(off.uiPhone.length === 0, 'world-ui.module.css gives the screens over the map their phone look exactly on a phone', off.uiPhone.length ? `differs at ${off.uiPhone.join(', ')}` : `${n} screens`)
-  ok(off.source.length === 0, "the landing poster's <source> loads the still exactly where the 3D draws", off.source.length ? `differs at ${off.source.join(', ')}` : `${n} screens`)
+  ok(off.landing.length === 0, "the landing poster's stylesheet rule (.posterLanding) loads the still exactly where the 3D draws", off.landing.length ? `differs at ${off.landing.join(', ')}` : `${n} screens`)
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

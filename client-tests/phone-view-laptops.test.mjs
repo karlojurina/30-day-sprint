@@ -12,8 +12,9 @@
 //
 // Since the fix the height applies to touch screens only: NARROW_QUERY is
 // "(width < 760px), (height < 500px) and (pointer: coarse)", its two
-// stylesheet twins say the same, and the landing poster's <source> is its exact
-// complement. This test asks the four (read from the source, media-query.mjs)
+// stylesheet twins say the same, and the landing poster's stylesheet rule
+// (.posterLanding, a <source> until 2026-10-21) is its exact complement. This
+// test asks the four (read from the source, media-query.mjs)
 // about those windows with a mouse and with a finger.
 //
 //   node --experimental-strip-types client-tests/phone-view-laptops.test.mjs
@@ -27,8 +28,8 @@ const ok = (c, label, detail = '') => {
 }
 const show = (v) => JSON.stringify(v)
 
-const { narrow, source, posterHide, uiPhone } = phoneQueries()
-ok(narrow !== null && source !== null && posterHide !== null && uiPhone !== null, 'the four are in the source', show({ narrow, source, posterHide, uiPhone }))
+const { narrow, landing, posterHide, uiPhone } = phoneQueries()
+ok(narrow !== null && landing !== null && posterHide !== null && uiPhone !== null, 'the four are in the source', show({ narrow, landing, posterHide, uiPhone }))
 
 // The review's laptop windows (CSS px inside the browser), and the two the verifiers measured.
 const LAPTOPS = [
@@ -49,7 +50,7 @@ const TOUCH = [
   [962, 480, 'an 8" Android tablet, sideways, under its browser bars'],
 ]
 
-if (narrow && source && posterHide && uiPhone) {
+if (narrow && landing && posterHide && uiPhone) {
   console.log('\nWith a mouse, the laptop windows keep the 3D')
   for (const [width, height, name] of LAPTOPS) {
     ok(!matches(narrow, { width, height, pointer: 'fine' }), `${width}x${height}, ${name}: the 3D`, `matchMedia(${show(narrow)})`)
@@ -70,20 +71,20 @@ if (narrow && source && posterHide && uiPhone) {
 
   console.log('\nThe twins agree with NARROW_QUERY for every pointer')
   const sizes = [...LAPTOPS, ...TOUCH].map(([w, h]) => [w, h]).concat([[759, 900], [760, 900], [1200, 499], [1200, 500], [759, 499], [760, 500], [760, 499]])
-  const off = { posterHide: [], uiPhone: [], source: [] }
+  const off = { posterHide: [], uiPhone: [], landing: [] }
   for (const pointer of POINTERS) {
     for (const [width, height] of sizes) {
       const screen = { width, height, pointer }
       const phone = matches(narrow, screen)
       if (matches(posterHide, screen) !== phone) off.posterHide.push(`${width}x${height} ${pointer}`)
       if (matches(uiPhone, screen) !== phone) off.uiPhone.push(`${width}x${height} ${pointer}`)
-      if (matches(source, screen) === phone) off.source.push(`${width}x${height} ${pointer}`)
+      if (matches(landing, screen) === phone) off.landing.push(`${width}x${height} ${pointer}`)
     }
   }
   const n = sizes.length * POINTERS.length
   ok(off.posterHide.length === 0, 'world.module.css hides the poster layer exactly where the list shows', off.posterHide.length ? `differs at ${off.posterHide.join(', ')}` : `${n} screens`)
   ok(off.uiPhone.length === 0, 'world-ui.module.css gives the screens over the map their phone look exactly where the list shows', off.uiPhone.length ? `differs at ${off.uiPhone.join(', ')}` : `${n} screens`)
-  ok(off.source.length === 0, "the landing poster's <source> loads the still exactly where the 3D draws", off.source.length ? `differs at ${off.source.join(', ')}` : `${n} screens`)
+  ok(off.landing.length === 0, "the landing poster's stylesheet rule (.posterLanding) loads the still exactly where the 3D draws", off.landing.length ? `differs at ${off.landing.join(', ')}` : `${n} screens`)
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

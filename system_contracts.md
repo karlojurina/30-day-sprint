@@ -186,8 +186,11 @@ When adding a new table, append it here. When deleting a field, scan
   yet (it reads `last_streak_date` first, so its change log leaves out a
   member whose day already counted). A failed read writes nothing. Read by the
   data route (`current_streak` through `currentStreakAsOf`), and so by
-  `StudentContext` (`streak`); `src/lib/achievements.ts`;
-  `src/lib/day28-embed.ts` and the journal page (longest only); and the
+  `StudentContext` (`streak`); `src/lib/achievements.ts` (since v112
+  Habit Builder reads `current_streak` and `last_streak_date` to count
+  the run's days from the switch's date, and `longest_streak` only while
+  the old course is live; it writes nothing, so the flame keeps its
+  number); `src/lib/day28-embed.ts` and the journal page (longest only); and the
   admin student page and Journey drawer (through `currentStreakAsOf`).
 - **Rule:** `current_streak` means nothing without `last_streak_date`;
   show it through `currentStreakAsOf` (`src/lib/streak.ts`).
@@ -335,7 +338,9 @@ When adding a new table, append it here. When deleting a field, scan
   saved Discord link, an action done first) is finished too:
   `completed_at` now, `skipped_at` cleared, the link and the action half
   kept, a watched row left alone. On the delivery that finished the
-  lesson, and never on a retry, it then runs `afterCompletionWrite`
+  lesson, and never on a retry, it then marks the row's `completed_at`
+  as the real moment (`completed_at_real`, v112, best-effort, never a
+  500) and runs `afterCompletionWrite`
   (`src/lib/complete-lesson.ts`, lesson-watched's chain: the streak, the
   "came back" check, the badges, the CSM tasks). A failed write answers
   500 so Whop retries.
@@ -861,6 +866,21 @@ When adding a new table, append it here. When deleting a field, scan
   on the update). Every row it adds or finishes is in its write answer's
   change log (`changes.inserted`, `changes.promoted`), for an undo. It
   never writes `discord_message_link` or `action_completed_at`.
+- **`completed_at_real` (v112, built 2026-10-21, not on production):**
+  true when `completed_at` is the moment the lesson was really finished.
+  Written after the row's own write, best-effort (a failure is logged and
+  fails nothing), by `stampWatchCompletion` (lesson-watched) on the row it
+  writes, by the Whop webhook on the lesson its delivery finished, and by
+  the catch-up on the rows it adds with Whop's own time (not on one given
+  the run's clock, nor on a row it only finishes). `watch-sync.ts` never
+  writes it: it stamps one time, its own, on every row it adds. v112
+  judged the rows already there (a `completed_at` another row of the same
+  student holds is a sync's: false; one no other row holds: true). Read by
+  `src/lib/achievements.ts` (Triple Threat, through
+  `src/lib/achievement-rules.ts`) in a read of its own, so a database
+  without the column judges every other badge. Its undo keeps the values
+  in its archive and drops the column. A writer that changes
+  `completed_at` without knowing the real moment must set it back to null.
 - **Who may write (v105, built 2026-10-16, not on production):** a
   student reads their own rows ("Students can read own lesson
   completions", FOR SELECT) and writes none; v3's FOR ALL policy is
@@ -892,9 +912,10 @@ When adding a new table, append it here. When deleting a field, scan
   `src/lib/world/catalog.ts` (an unfinished lesson with a row counts
   as in progress), `POST /api/student/lesson-watched` (re-reads the
   row and decides completion through `judgeWatch` in
-  `src/lib/world/watch-rules.ts`), the `achievement_unlock_stats` view
-  (v93: a row here is one of the three things that put a launch-cohort
-  student in its denominator)
+  `src/lib/world/watch-rules.ts`), and from v93 until v112 the
+  `achievement_unlock_stats` view (a row here was one of the three
+  things that put a launch-cohort student in its denominator; v112's
+  view counts every active member and reads no watch row)
 - **Stable contract:** `student_id` + `lesson_id` (primary key),
   `max_position_seconds` (the furthest point reached; it only moves
   forward), `last_position_seconds` (where the playhead was on the last

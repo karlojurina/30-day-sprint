@@ -21,8 +21,34 @@ Exit code 0 = every assertion passed. Failures print first and last.
 
 `npm test` runs `run.mjs`, then `v111.test.mjs` (v111 and its undo, admin
 rebuild 2, D5, in a file of its own so the lanes that added v109 and v110
-to `run.mjs` merged without touching it). On `night/admin2` with the 5
-lanes merged: `PASS 702   FAIL 0`, then `PASS 22   FAIL 0`.
+to `run.mjs` merged without touching it), then `v112.test.mjs` (below), with
+`--experimental-strip-types` because it imports `src/lib/achievement-rules.ts`.
+On `night/admin2` with the 5 lanes merged: `PASS 702   FAIL 0`, then
+`PASS 22   FAIL 0`. On `night/achievements`: the same two, then
+`PASS 65   FAIL 0`.
+
+`v112.test.mjs` (2026-10-21, the badges for the new course) builds its own
+database: `base.sql`, Supabase's default privileges, the badge tables made
+by the real v53, v56, v76, v90 and v91, v93's watch table and view lifted
+verbatim, and what the switch did to the catalog. Made-up students stand on
+each edge of each rule. It pastes v112 as the owner does and reads its
+table (the sentence, each badge's holders before, taken away and now with
+its share, the counts); checks the catalog's eight and their words, every
+badge row taken away and kept in `archive_v112` with its reason and its own
+`unlocked_at`, Habit Builder's cut at 00:00 on the 25th, Triple Threat kept
+for exactly the holders `src/lib/achievement-rules.ts` says meet the rule
+(the app's own function over the database's rows), every lesson row judged
+as its time says, the view's types and options, and each badge's share
+against `countsInShare` and `sharePercent`; then a second paste changing
+nothing, the old code's awards after it taken by a later paste and the new
+code's kept, the undo putting the catalog, every badge row, the view and its
+comment back and keeping the flags, a second undo, v112 again, five
+refusals and a missing table, the undo's refusal, and both files' lock and
+its timeout. Each of 15 breaks of v112 and its undo (the action item rule,
+every time taken as real, Triple Threat at 2, the cut a day early, the
+judging of times, the share's three conditions and its scoping, the words,
+the catalog rows, the judging gate, the undo's order, its column and its
+comment) fails it.
 
 ## What it actually checks
 

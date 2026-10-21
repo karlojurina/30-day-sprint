@@ -2,13 +2,16 @@
  * All students, /admin/students (admin rebuild 2, D9): what the page reads
  * and the list it shows.
  *
- * WHO IS ON IT. The course's members on a $97 monthly plan who have paid at
- * least once: students.whop_plan_id is one of MONTHLY_97_PLAN_IDS (the
- * visible plan and the hidden one, src/lib/constants.ts) and
- * students.first_paid_at is not null, whatever their membership status or
- * date. The owner's answer of 2026-10-21: course members only, and only the
- * $97 ones, so a yearly plan, an ETfB owner who paid, an Apex seat or a free
- * plan is never on it, nor is a student with no plan on file. Since the
+ * WHO IS ON IT. The course's members on a $97 monthly plan whose first real
+ * payment is on or after 1 October 2026 in Croatia: students.whop_plan_id is
+ * one of MONTHLY_97_PLAN_IDS (the visible plan and the hidden one,
+ * src/lib/constants.ts) and students.first_paid_at is on or after
+ * DISCOUNT_ELIGIBLE_FROM (2026-09-30T22:00Z, the 30%'s first day), whatever
+ * their membership status. The owner's answers of 2026-10-21: course members
+ * only, and only the $97 ones, so a yearly plan, an ETfB owner who paid, an
+ * Apex seat or a free plan is never on it, nor is a student with no plan on
+ * file; and only the students from 1 October (the list held every $97
+ * member who ever paid). Since the
  * first-paid fix (2026-10-20) first_paid_at is the first real Whop payment,
  * so a member who never paid, who holds null, is left out too. Both lines are
  * drawn in the database; the plan is never read as a column or shown on a
@@ -16,8 +19,13 @@
  *
  * Before admin rebuild 2 the list held the visible $97 plan only, from 25
  * May, without saying so; the rebuild opened it to every plan; the owner's
- * answer brings the $97 plans back, both of them, at any date. The Student
- * journey (journey-board.ts) reads the same two plans, so the pages agree.
+ * answers bring the $97 plans back, both of them, from 1 October. The
+ * Student journey (journey-board.ts) reads the same two plans from the
+ * launch, 9 October, so every student on the board is on the list.
+ *
+ * THE FILTERS (the owner's review, 2026-10-21). Active, Payment failed
+ * (past_due) and Ended (canceled and expired together), each with its
+ * count, Active first and open when the page opens (statusFilterOf).
  *
  * THE ORDER. By first payment, newest first; the page can sort by name,
  * progress or last activity instead.
@@ -27,20 +35,24 @@
  * course read leaves that column unknown (null), with a sentence in
  * `problems`, never 0%.
  *
- *   readStudentsList   the reads, each one's result kept apart (people-common.ts's Read)
+ *   readStudentsList   the reads, each one's result kept apart (people-common.ts's
+ *                      Read): the students and the lesson count, then the
+ *                      progress of those students alone (readForStudents)
  *   buildStudentsList  the rows, from those reads, the course and the clock
  *
- * The course (which one is live, and each student's last counted lesson)
- * comes from loadCourseActivity (src/lib/useJourneyPaceCounts.ts), which the
- * transport reads beside these. No React, no Next.
+ * The course (which one is live, and each listed student's last counted
+ * lesson) comes from loadCourseActivity (src/lib/useJourneyPaceCounts.ts),
+ * which the transport reads for the listed students once they are known. No
+ * React, no Next.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { fetchAllRowsByKey } from "@/lib/supabase-pagination";
 import { MONTHLY_97_PLAN_IDS, progressPercent } from "@/lib/constants";
+import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
 import { activityLabel, type ActivityLabel } from "@/lib/curriculum-reset";
 import type { CourseActivity } from "@/lib/useJourneyPaceCounts";
-import { bareUsername, dayNumber, failed, ok, readCountingLessons, type Problem, type Read } from "./people-common";
+import { bareUsername, dayNumber, failed, ok, readCountingLessons, readForStudents, type Problem, type Read } from "./people-common";
 
 /** The columns the list needs, and no more: `*` would carry every column of every student to the browser. No plan: the plan is the read's filter, never a column. */
 export const LIST_COLUMNS = "id, name, email, discord_username, membership_status, first_paid_at, last_active_at";
@@ -61,9 +73,14 @@ export interface StudentsListReads {
   countingLessons: Read<number>;
 }
 
-/** Every student on a $97 monthly plan with a first payment, and the two things their progress needs. */
+/**
+ * Every student on a $97 monthly plan with a first payment from 1 October,
+ * and the two things their progress needs: the lesson count beside the
+ * students read, then the progress of the students it listed, and nobody
+ * else's. With the students read failed, their progress is not read.
+ */
 export async function readStudentsList(supabase: SupabaseClient): Promise<StudentsListReads> {
-  const [students, progress, countingLessons] = await Promise.all([
+  const [students, countingLessons] = await Promise.all([
     // By key, not by offset: a student whose row changes while the pages
     // are read never makes another one drop off (supabase-pagination.ts).
     fetchAllRowsByKey<ListStudent>(
@@ -71,22 +88,27 @@ export async function readStudentsList(supabase: SupabaseClient): Promise<Studen
         supabase
           .from("students")
           .select(LIST_COLUMNS)
-          .not("first_paid_at", "is", null)
+          .gte("first_paid_at", DISCOUNT_ELIGIBLE_FROM)
           .in("whop_plan_id", MONTHLY_97_PLAN_IDS)
           .order("id"),
       "id",
     ),
-    fetchAllRowsByKey<{ student_id: string; completed_count: number }>(
-      () => supabase.from("student_progress_counts").select("student_id, completed_count").order("student_id"),
-      "student_id",
-    ),
     readCountingLessons(supabase),
   ]);
-  return {
-    students: students.error ? failed(students.error) : ok(students.data),
-    progress: progress.error ? failed(progress.error) : ok(progress.data),
-    countingLessons,
-  };
+  if (students.error) {
+    return {
+      students: failed(students.error),
+      progress: failed("not read: the students could not be read"),
+      countingLessons,
+    };
+  }
+  const progress = await readForStudents<{ student_id: string; completed_count: number }>(
+    supabase,
+    "student_progress_counts",
+    "student_id, completed_count",
+    students.data.map((s) => s.id),
+  );
+  return { students: ok(students.data), progress, countingLessons };
 }
 
 export interface StudentListRow {
@@ -192,23 +214,47 @@ export function sortStudents(rows: StudentListRow[], sort: StudentSort): Student
   return keyed.map((k) => k.r);
 }
 
-/** The status filter: every status, or one. Payment failed is past_due. */
+/**
+ * The membership filter (the owner's review, 2026-10-21): Active, Payment
+ * failed (past_due) and Ended (canceled and expired together), Active first
+ * and the one the page opens on. No "All": every student is under one of the
+ * three (students.membership_status holds one of the four statuses).
+ */
 export const STATUS_FILTERS = [
-  { value: "all", label: "All" },
   { value: "active", label: "Active" },
   { value: "past_due", label: "Payment failed" },
-  { value: "canceled", label: "Canceled" },
-  { value: "expired", label: "Expired" },
+  { value: "ended", label: "Ended" },
 ] as const;
 
 export type StatusFilter = (typeof STATUS_FILTERS)[number]["value"];
 
-/** The rows a search (name, email or username, any case) and a status keep. */
+/** The filter the page opens on. */
+export const DEFAULT_STATUS_FILTER: StatusFilter = "active";
+
+/** The filter a membership status is under: canceled and expired are both Ended; null for a status outside the four. */
+export function statusFilterOf(status: string): StatusFilter | null {
+  if (status === "active") return "active";
+  if (status === "past_due") return "past_due";
+  if (status === "canceled" || status === "expired") return "ended";
+  return null;
+}
+
+/** How many rows each filter holds, before any search: the counts on the pills. */
+export function statusCounts(rows: readonly StudentListRow[]): Record<StatusFilter, number> {
+  const counts: Record<StatusFilter, number> = { active: 0, past_due: 0, ended: 0 };
+  for (const r of rows) {
+    const f = statusFilterOf(r.status);
+    if (f) counts[f] += 1;
+  }
+  return counts;
+}
+
+/** The rows a search (name, email or username, any case) and a membership filter keep. */
 export function filterStudents(rows: StudentListRow[], search: string, status: StatusFilter): StudentListRow[] {
   const q = (bareUsername(search) ?? "").toLowerCase();
   return rows.filter(
     (r) =>
-      (status === "all" || r.status === status) &&
+      statusFilterOf(r.status) === status &&
       (!q ||
         r.name.toLowerCase().includes(q) ||
         (r.email ?? "").toLowerCase().includes(q) ||

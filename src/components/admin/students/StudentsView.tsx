@@ -12,20 +12,25 @@ import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { agoText } from "@/lib/admin/people-common";
 import { peopleTransport, type PeopleTransport } from "@/lib/admin/people-transport";
 import {
+  DEFAULT_STATUS_FILTER,
   STATUS_FILTERS,
   filterStudents,
   sortStudents,
+  statusCounts,
   type StatusFilter,
   type StudentListRow,
   type StudentSort,
   type StudentsList,
 } from "@/lib/admin/students-list";
+import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
 
 /**
  * All students, /admin/students (admin rebuild 2, D9), in the brand kit's
- * dark look: the course's members on a $97 monthly plan who have paid at
- * least once (the owner's answer of 2026-10-21), newest first payment first,
- * and the header's line says so. The rules and the reads are in
+ * dark look: the course's members on a $97 monthly plan whose first payment
+ * is on or after 1 October (the owner's answers of 2026-10-21), newest first
+ * payment first, and the header's line says so. The membership pills are
+ * Active, Payment failed and Ended (canceled and expired together), each with
+ * its count, Active open first. The rules and the reads are in
  * src/lib/admin/students-list.ts; this file shows them.
  *
  * Username is students.discord_username, which holds a Whop or a Discord
@@ -58,6 +63,9 @@ const SORTS: Array<{ value: StudentSort; label: string }> = [
 
 const PAGE = 100;
 
+/** "Thu 1 Oct": the first payment the list starts at, as the header says it. */
+const FROM_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
+
 /** The grid of a row on a wide screen; on a phone each row stacks. */
 const GRID = "minmax(0, 2.2fr) minmax(0, 1.2fr) 112px 112px minmax(120px, 1fr) 104px 128px";
 
@@ -65,7 +73,7 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
   const [busy, setBusy] = useState(false);
   const [search, setSearch] = useState("");
-  const [status, setStatus] = useState<StatusFilter>("all");
+  const [status, setStatus] = useState<StatusFilter>(DEFAULT_STATUS_FILTER);
   const [sort, setSort] = useState<StudentSort>("paid");
   const [shown, setShown] = useState(PAGE);
   /** A refresh of the list on screen that failed: the list stays, and a line says it may be out of date. */
@@ -106,7 +114,7 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
   const header = (data: StudentsList | null, count: number | null) => (
     <ListHeader
       title="All students"
-      description="Course members on a $97 monthly plan who have paid at least once, newest first payment first."
+      description={`Course members on a $97 monthly plan who first paid on or after ${FROM_DAY}, newest first payment first.`}
       meta={
         data ? (
           `Updated ${clockLabel(data.generatedAt)}${busy ? " · Updating" : ""} · ${count} ${count === 1 ? "student" : "students"}`
@@ -144,7 +152,7 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
 
   const data = loaded.data;
   const filtered = sortStudents(filterStudents(data.rows, search, status), sort);
-  const countOf = (v: StatusFilter) => (v === "all" ? data.rows.length : data.rows.filter((r) => r.status === v).length);
+  const counts = statusCounts(data.rows);
   const nowMs = Date.parse(data.generatedAt);
 
   return (
@@ -181,7 +189,7 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
               style={pressPill(status === f.value)}
             >
               {f.label}
-              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)" }}>{countOf(f.value)}</span>
+              <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)" }}>{counts[f.value]}</span>
             </button>
           ))}
         </div>
@@ -198,7 +206,7 @@ export function StudentsView({ transport = peopleTransport }: { transport?: Peop
       {filtered.length === 0 ? (
         <Card>
           <EmptyState
-            title={data.rows.length === 0 ? "No course member on a $97 monthly plan has paid yet." : "No student matches."}
+            title={data.rows.length === 0 ? `No course member on a $97 monthly plan has paid since ${FROM_DAY}.` : "No student matches."}
             description={data.rows.length === 0 ? undefined : "Clear the search or pick another membership."}
           />
         </Card>

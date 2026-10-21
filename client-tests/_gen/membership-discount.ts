@@ -51,9 +51,12 @@
  * who moved to another membership since has no stored answer.
  *
  * WHO READS IT. The request routes and the approve route check live, then
- * fall back to the stored row, then let the request through
- * (checkMembershipDiscount). The map reads the stored flag through
- * /api/student/data. The admin's 30% page reads the stored rows.
+ * fall back to the stored row (checkMembershipDiscount). With neither, the
+ * approve route goes on; the request routes, since the owner's review of
+ * 2026-10-21, write nothing and ask the student to try again in a minute
+ * (membershipUncheckedRefusal in discount-server.ts). The map reads the
+ * stored flag through /api/student/data. The admin's 30% page reads the
+ * stored rows.
  *
  * No answer names a student, an email or a Whop id: student ids only. A
  * failure comes back as a kind, never as Whop's words.
@@ -342,7 +345,11 @@ export interface CouponCheck {
   discounted: boolean;
   /** The code (codeOf), when there is one. */
   code: string | null;
-  /** live: Whop answered now. stored: the stored row for this membership. none: neither, so nothing blocks. */
+  /**
+   * live: Whop answered now. stored: the stored row for this membership.
+   * none: neither, so this check blocks nothing; the request routes then
+   * refuse (the owner's review, 2026-10-21) and the approve route goes on.
+   */
   source: "live" | "stored" | "none";
   /** Why Whop gave no answer now, for the route's log line; null when it did. */
   liveFail: MembershipReadFail | "no_membership" | "student_unread" | null;
@@ -357,10 +364,11 @@ export interface CouponCheck {
 
 /**
  * The request routes, the approve route (D5) and "Check Whop again": Whop
- * now, then the stored row for this membership, then nothing (the request
- * goes through). A live answer is stored, best effort, so the map and the
- * admin page catch up. Never throws. `apiKey` defaults to WHOP_API_KEY;
- * without one there is no live read.
+ * now, then the stored row for this membership, then nothing (source "none":
+ * the request routes refuse on it, the approve route goes on). A live answer
+ * is stored, best effort, so the map and the admin page catch up. Never
+ * throws. `apiKey` defaults to WHOP_API_KEY; without one there is no live
+ * read.
  */
 export async function checkMembershipDiscount(
   db: SupabaseClient,
@@ -419,20 +427,23 @@ export async function checkMembershipDiscount(
       answer = { discounted: row.discounted === true, code: codeOf(row), source: "stored", liveFail, saved: false };
     }
   } catch {
-    // No stored answer: nothing blocks (the PRD's fallback).
+    // No stored answer: source "none", and the caller decides (the request
+    // routes refuse since the owner's review of 2026-10-21; the approve route
+    // goes on, as the PRD's fallback had it).
   }
   // A Whop read that was tried and gave no answer is worth a line, and so is a
   // stored Whop id that is not a membership's (the webhook has stored a
-  // payment's id there): Whop is never asked then, nothing is stored for it,
-  // and nothing blocks, so without this line the request goes through
-  // unseen. With no key or no membership there was nothing to try.
+  // payment's id there): Whop is never asked then and nothing is stored for
+  // it, so without this line an approval that went on, or an application
+  // refused, would be unexplained. With no key or no membership there was
+  // nothing to try.
   if (liveFail === "not_a_membership") {
     console.warn(
-      `[membership discount] student ${studentId}: the stored Whop id is not a membership id, so Whop was not asked and ${answer.source === "stored" ? "the stored row decides" : "nothing blocks"}`,
+      `[membership discount] student ${studentId}: the stored Whop id is not a membership id, so Whop was not asked and ${answer.source === "stored" ? "the stored row decides" : "no answer is on file"}`,
     );
   } else if (liveFail !== null && liveFail !== "no_membership" && liveFail !== "no_api_key" && liveFail !== "student_unread") {
     console.warn(
-      `[membership discount] student ${studentId}: Whop gave no answer (${liveFail}), so ${answer.source === "stored" ? "the stored row decides" : "nothing blocks"}`,
+      `[membership discount] student ${studentId}: Whop gave no answer (${liveFail}), so ${answer.source === "stored" ? "the stored row decides" : "no answer is on file"}`,
     );
   }
   return answer;

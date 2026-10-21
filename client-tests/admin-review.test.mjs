@@ -432,11 +432,14 @@ console.log("\n=== The 30% page: every row's coupon check ===")
   const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/** The 30% code, and a button that copies it. */'))
   // The render review's fix round changed the coupon's row: no Approve at all beside the coupon's verdict (it
   // was kept on, for the route to refuse), and Reject is that row's one action, raised.
-  // Since the render review's second round "Check Whop again" stands in Approve's place on the coupon's row.
+  // Since the render review's second round "Check Whop again" stands on the coupon's row. Since the owner's review
+  // (2026-10-21) a founder's or an admin's Approve anyway stands in Approve's place wherever a check refuses, the
+  // coupon's row too (admin-owner-review.test.mjs holds that round's rules).
   ok(/disabled=\{locked \|\| \(busy !== null && busy !== "approve"\)\}/.test(pending) && !/disabled=\{!verdict\.ok/.test(pending)
-       && /\) : coupon \? \(\s*<button[\s\S]*?"Check Whop again"\}\s*<\/button>\s*\) : \(\s*<Button/.test(pending),
-     'Approve is on wherever it can approve, and gone beside the coupon\'s verdict (the route refuses it with no override)')
-  ok(/\{canOverride \? \(\s*<button[\s\S]*?Approve anyway[\s\S]*?\) : coupon \? \(\s*<button[\s\S]*?Check Whop again[\s\S]*?\) : \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),
+       && /\{coupon && \(\s*<button[\s\S]*?"Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
+       && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button/.test(pending),
+     'Approve is on wherever it can approve, and gone beside the coupon\'s verdict')
+  ok(/\{canOverride && \(\s*<button[\s\S]*?Approve anyway\s*<\/button>\s*\)\}\s*\{!coupon && verdict\.ok && !canOverride && \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),
      'Approve anyway takes Approve\'s place in the row, as tall as Reject, never a disabled Approve beside a link')
   ok(/<Button\s+variant=\{coupon \? "raised" : "ghost"\}\s+size="md"\s+disabled=\{off\}\s+expanded=\{confirm === "reject"\}/.test(pending)
        && /variant="danger"[\s\S]{0,400}Reject the request/.test(pending),
@@ -464,8 +467,8 @@ console.log('\n=== The coupon rule: a stored id that is not a membership, and a 
     console.warn = realWarn
   }
   ok(answer.source === 'none' && !answer.discounted && answer.liveFail === 'not_a_membership'
-       && warned.some((w) => w.includes('student s-pay: the stored Whop id is not a membership id, so Whop was not asked and nothing blocks')),
-     'a payment id where the membership id belongs: nothing blocks, and now a line says so (it was silent)', warned.join(' | '))
+       && warned.some((w) => w.includes('student s-pay: the stored Whop id is not a membership id, so Whop was not asked and no answer is on file')),
+     'a payment id where the membership id belongs: no answer on file (the approve route goes on, the request routes refuse), and now a line says so (it was silent)', warned.join(' | '))
 
   const members = Array.from({ length: 3 }, (_, i) => ({ id: `s-${i}`, whop_membership_id: `mem_${i}`, first_paid_at: '2026-10-10T08:00:00.000Z', membership_status: 'active' }))
   const hung = await MD.refreshMembershipDiscounts(fakeClient(new FakeDb({ students: members, discount_requests: [], student_membership_discounts: [] })), {

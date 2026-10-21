@@ -118,8 +118,10 @@ export const insightsTransport: InsightsTransport = {
 export const peopleTransport: PeopleTransport = {
   async loadStudents() {
     const supabase = createClient();
-    const [reads, course] = await Promise.all([readStudentsList(supabase), loadCourseActivity(supabase)]);
+    // The listed students first; then which course is live and their last lessons, theirs alone (the owner's review, 2026-10-21).
+    const reads = await readStudentsList(supabase);
     if (!reads.students.ok) return fail(`Couldn't load the students (${reads.students.error}).`);
+    const course = await loadCourseActivity(supabase, reads.students.data.map((s) => s.id));
     return { ok: true, status: 200, data: buildStudentsList({ ...reads, students: reads.students }, course, new Date().toISOString()) };
   },
 
@@ -137,8 +139,10 @@ export const peopleTransport: PeopleTransport = {
 
   async loadJourney() {
     const supabase = createClient();
-    const [reads, course] = await Promise.all([readJourney(supabase), loadCourseActivity(supabase)]);
+    // The students on the board first; then which course is live and their last lessons, theirs alone.
+    const reads = await readJourney(supabase);
     if (!reads.students.ok) return fail(`Couldn't load the students on the journey (${reads.students.error}).`);
+    const course = await loadCourseActivity(supabase, reads.students.data.map((s) => s.id));
     return { ok: true, status: 200, data: buildJourney({ ...reads, students: reads.students }, course, new Date().toISOString()) };
   },
 

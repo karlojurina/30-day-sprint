@@ -35,8 +35,13 @@ export type Answer<T> =
 export interface ThirtyTransport {
   /** GET /api/admin/thirty. */
   loadThirty(): Promise<Answer<ThirtyView>>;
-  /** POST /api/discounts/approve. `override` is "Approve anyway": it skips the 30% rule. */
-  approve(requestId: string, override: boolean): Promise<Answer<{ promoCode: string | null }>>;
+  /**
+   * POST /api/discounts/approve. "Approve anyway" (a founder's or an admin's,
+   * the owner's review of 2026-10-21): `override` skips the 30% rule, and
+   * `overrideCoupon` the coupon check too, on a row the coupon refuses. The
+   * route refuses either from a csm.
+   */
+  approve(requestId: string, override: boolean, overrideCoupon: boolean): Promise<Answer<{ promoCode: string | null }>>;
   /** POST /api/discounts/reject. The student sees the reason. */
   reject(requestId: string, reason: string | null): Promise<Answer<null>>;
   /** POST /api/discounts/mark-applied: the code is on the student's membership in Whop. */
@@ -111,10 +116,11 @@ export async function send<T>(
 export const adminTransport: ThirtyTransport = {
   loadThirty: () => send<ThirtyView>("GET", "/api/admin/thirty"),
 
-  async approve(requestId, override) {
+  async approve(requestId, override, overrideCoupon) {
     const r = await send<{ promoCode?: string }>("POST", "/api/discounts/approve", (me) => ({
       requestId,
       override,
+      overrideCoupon,
       reviewerId: me,
     }));
     return r.ok ? { ...r, data: { promoCode: r.data?.promoCode ?? null } } : r;

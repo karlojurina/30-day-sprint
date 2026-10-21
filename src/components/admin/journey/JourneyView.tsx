@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Card, Pill, T } from "@/components/admin/ui";
+import { Button, Card, T } from "@/components/admin/ui";
 import { FailedMeta, ListHeader, ListPage, LoadError, SkeletonRows, TAP } from "@/components/admin/list-parts";
 import { ActivityPill, FactsLine, Meter, STATUS_WORDS } from "@/components/admin/people-parts";
 import { ProblemNotice } from "@/components/admin/review-parts";
@@ -31,13 +31,15 @@ import { ACTIVITY_ORDER, ACTIVITY_TEXT } from "@/lib/useJourneyPaceCounts";
  * student's answers (fix lane G1, admin-2), and an answer that lands after
  * it moved on is dropped (useStudent).
  *
- * The render review's fix round: the board sits in the page's column, as
- * every other page's content does (it broke out to 1584px, and at 1280px wide
- * its Month 2+ column was cut off at the window's edge). From 1120px wide the
- * six columns fit side by side in it; narrower, the board scrolls sideways
- * inside itself, never the page. A card's name is the name of every admin
- * page (student-name.tsx: a link to the student's page, @username after it);
- * the rest of the card is one button under it that opens the drawer.
+ * The owner's review (2026-10-21): the page takes the window's whole width
+ * with the pages' side margins (ListPage `wide`), where the render review's
+ * fix round had put it in the 1084px column and squeezed the columns; the
+ * board still scrolls sideways inside itself where six columns do not fit,
+ * never the page. A card holds the name (a link to the student's page, as on
+ * every admin page), the day, the activity word, the progress as a
+ * percentage and the last activity, and nothing else, so the cards are short;
+ * the rest of the card is one button under it that opens the drawer, which
+ * keeps the student's whole detail.
  */
 
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; data: Journey };
@@ -119,7 +121,7 @@ export function JourneyView({
 
   if (loaded.kind === "loading") {
     return (
-      <ListPage>
+      <ListPage wide>
         {header(null)}
         <SkeletonRows rows={4} label="Loading the journey" />
       </ListPage>
@@ -127,7 +129,7 @@ export function JourneyView({
   }
   if (loaded.kind === "error") {
     return (
-      <ListPage>
+      <ListPage wide>
         {header(null)}
         <LoadError title="Couldn't load the journey." detail={loaded.error} onRetry={() => void refresh()} busy={busy} />
       </ListPage>
@@ -136,7 +138,7 @@ export function JourneyView({
 
   const data = loaded.data;
   return (
-    <ListPage>
+    <ListPage wide>
       {header(data)}
       {refreshError && <ProblemNotice text="Couldn't refresh the board, so it may be out of date. Press Refresh." raw={refreshError} />}
       {data.problems.map((p) => (
@@ -163,9 +165,9 @@ export function JourneyView({
         </div>
       )}
 
-      {/* The board, in the page's column. From 1120px wide its six columns (164px at least, 8px apart) fit in
-          it side by side; narrower, they keep 232px each and the board scrolls sideways inside itself, out to
-          the window's edges on a phone. The page never scrolls sideways. */}
+      {/* The board, across the page's whole width (the owner's review). From 1120px wide its six columns (164px at
+          least, 8px apart) fit side by side, wider as the window is; narrower, they keep 232px each and the board
+          scrolls sideways inside itself, out to the window's edges on a phone. The page never scrolls sideways. */}
       <div
         data-board=""
         className="max-sm:-mx-4 max-sm:px-4"
@@ -213,10 +215,12 @@ export function JourneyView({
 }
 
 /**
- * A card: the student's name (a link to their page, @username after it), the
- * day, the area and the pills, the progress and the last activity. One button
- * lies under the whole card and opens the drawer; the words above it let
- * every press through to it but the name's.
+ * A card (the owner's review, 2026-10-21): the student's name (a link to
+ * their page) with the day at its line's end, under a name too long to share
+ * it; the activity word and the progress as a percentage, then the last
+ * activity; nothing else, so a card is three short lines. One button lies
+ * under the whole card and opens the drawer; the words above it let every
+ * press through to it but the name's.
  */
 function JourneyCardView({ card: c, onOpen }: { card: JourneyCard; onOpen: () => void }) {
   return (
@@ -248,53 +252,31 @@ function JourneyCardView({ card: c, onOpen }: { card: JourneyCard; onOpen: () =>
       >
         <span className="sr-only">Show {c.name}</span>
       </button>
-      <div style={{ position: "relative", pointerEvents: "none", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-        {/* The name and @username wrap as the card's width asks; the day always on the line under them, so the
-            cards of a column read alike. */}
-        <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-          <span className="flex flex-wrap items-baseline" style={{ gap: "0 8px", minWidth: 0 }}>
-            <StudentName id={c.id} name={c.name} username={c.username} size={14} />
+      <div style={{ position: "relative", pointerEvents: "none", padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+        {/* The day at the end of the name's line, so the cards of a column read alike. A name too long to share its
+            line takes the card's whole width and the day goes under it, still at the right: the name then breaks
+            between its words wherever they fit the card (beside the day it broke "Featherstonehau" "gh-Smythe" at
+            1280px). Only a single word wider than the whole card still breaks inside itself. */}
+        <span className="flex flex-wrap items-baseline" style={{ gap: "0 8px", minWidth: 0 }}>
+          <span className="flex flex-wrap items-baseline" style={{ minWidth: 0 }}>
+            <StudentName id={c.id} name={c.name} size={14} />
           </span>
-          <span style={{ fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>Day {c.day}</span>
+          <span
+            data-card-day=""
+            style={{ flex: "none", marginLeft: "auto", fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}
+          >
+            Day {c.day}
+          </span>
         </span>
-        <span className="flex flex-wrap items-center" style={{ gap: 6 }}>
-          {c.area && <AreaChip numeral={c.area.numeral} name={c.area.name} />}
+        <span className="flex flex-wrap items-center" style={{ gap: "4px 8px" }}>
           {c.activity && <ActivityPill label={c.activity} />}
-          {c.canceling && <Pill tone="warning">Canceling</Pill>}
-          {c.status === "past_due" && <Pill tone="warning">Payment failed</Pill>}
-        </span>
-        <span style={{ display: "block", width: "100%" }}>
-          <Meter value={c.progress} />
+          <span data-card-progress="" style={{ fontSize: 12, color: "var(--color-text-secondary)", fontVariantNumeric: "tabular-nums" }}>
+            {c.progress == null ? "Progress couldn't load" : `${c.progress}% done`}
+          </span>
         </span>
         <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>Last active {c.lastActive === "Never" ? "never" : c.lastActive}</span>
       </div>
     </div>
-  );
-}
-
-/**
- * The area a student is in: its numeral, as the map numbers the areas, and
- * its name. A place, not a status, so no dot; the numeral in the primary ink
- * (Airy Blue is for links: the render review's fix round).
- */
-function AreaChip({ numeral, name }: { numeral: string; name: string }) {
-  return (
-    <span
-      className="inline-flex items-center"
-      style={{
-        gap: 6,
-        padding: "2px 10px",
-        borderRadius: "var(--radius-pill)",
-        border: "1px solid var(--color-border)",
-        background: "var(--color-bg-elevated)",
-        fontSize: 12,
-        fontWeight: 500,
-        color: "var(--color-text-secondary)",
-      }}
-    >
-      <span style={{ color: "var(--color-text-primary)", fontWeight: 600 }}>{numeral}</span>
-      {name}
-    </span>
   );
 }
 

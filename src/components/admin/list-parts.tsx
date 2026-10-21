@@ -110,12 +110,14 @@ export function pressPill(pressed: boolean): React.CSSProperties {
 /**
  * The page's frame: AdminPage's width and rhythm (ui.tsx), with a 16px side
  * gutter on a phone instead of 32px, so a row at 390px wide keeps room for
- * its words.
+ * its words. `wide`: the window's whole width with the same side margins,
+ * where the 1084px column would squeeze the page (the Student journey's six
+ * columns, the owner's review of 2026-10-21).
  */
-export function ListPage({ children }: { children: React.ReactNode }) {
+export function ListPage({ children, wide = false }: { children: React.ReactNode; wide?: boolean }) {
   return (
     // pb-28: room under the last row for the notices fixed at the bottom of the window.
-    <div className="px-4 sm:px-8 lg:px-12 pt-4 sm:pt-10 pb-28" style={{ maxWidth: 1180, margin: "0 auto" }}>
+    <div data-list-page={wide ? "wide" : ""} className="px-4 sm:px-8 lg:px-12 pt-4 sm:pt-10 pb-28" style={{ maxWidth: wide ? "none" : 1180, margin: "0 auto" }}>
       {children}
     </div>
   );

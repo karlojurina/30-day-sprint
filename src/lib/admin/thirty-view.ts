@@ -14,8 +14,10 @@
  * (D5 first, then the rule):
  *   1. the coupon: the student's stored membership row says a discount is on
  *      the next renewal (student_membership_discounts, for the membership the
- *      student has now). The approve route refuses that with no override,
- *      in the same words (couponApprovalRefusal).
+ *      student has now). The approve route refuses that in the same words
+ *      (couponApprovalRefusal); since the owner's review (2026-10-21) a
+ *      founder's or an admin's Approve anyway passes it (anywaySkip,
+ *      approveAnywayText).
  *   2. the rule on the new course: approvalVerdict, then
  *      explainOldCourseRequest for a request made before the switch. The page
  *      shows its own fixed sentence for each answer (VERDICT_TEXT): the
@@ -102,7 +104,8 @@ export interface Facts {
 /**
  * Why a request may not be approved. ApprovalRefusal's reasons are the
  * rule's; "has-discount": a discount is already on the student's next Whop
- * renewal (D5, no override); "read-failed": the student's progress could not
+ * renewal (D5; only a founder's or an admin's Approve anyway passes it);
+ * "read-failed": the student's progress could not
  * be read; "unknown": the rule gave no reason (it cannot, today).
  */
 export type VerdictReason = ApprovalRefusal | "has-discount" | "read-failed" | "unknown";
@@ -287,6 +290,41 @@ export function couponWarns(row: Pick<ThirtyRequestRow, "status" | "coupon">): b
  */
 export const COUPON_REJECT_REASON = MEMBERSHIP_DISCOUNT_LINE;
 
+/**
+ * What "Approve anyway" skips on an Applied row (the owner's review,
+ * 2026-10-21: a founder or an admin approves past any check), or null where
+ * nothing refused it: "coupon" on a row the coupon refuses (the coupon check
+ * and the rule: the approve route's `overrideCoupon` and `override`), "rule"
+ * where the rule's verdict says no (`override`), and "check" where the
+ * verdict says yes but the approve route refused this row's Approve with a
+ * check (its code "rule": the rule said no, or could not run).
+ */
+export type AnywaySkip = "coupon" | "rule" | "check";
+
+export function anywaySkip(verdict: Pick<Verdict, "ok" | "reason">, refusal: string | null): AnywaySkip | null {
+  if (verdict.reason === "has-discount") return "coupon";
+  if (!verdict.ok) return "rule";
+  return refusal !== null ? "check" : null;
+}
+
+/**
+ * Approve anyway's confirm, asked once before the code is made: what it
+ * skips, in the row's own words, and what it does. `verdictText` is the
+ * row's verdict line, `refusal` the approve route's refusal the row showed.
+ * A skip of the rule still has the coupon checked first, so a discount found
+ * then turns the row to the coupon, whose Approve anyway names it. The
+ * coupon's confirm says nothing about what Whop does with two codes on one
+ * membership: nobody has checked it.
+ */
+export function approveAnywayText(skip: AnywaySkip, verdictText: string, refusal: string | null): string {
+  if (skip === "coupon") {
+    return `Approve anyway skips the coupon check and the 30% rule, and creates the student's Whop code now. ${verdictText}`;
+  }
+  const what = skip === "rule" ? "the 30% rule" : "the check that refused this approval";
+  const said = skip === "rule" ? `The rule says: ${verdictText}` : `The check said: ${refusal ?? ""}`;
+  return `Approve anyway skips ${what}, and creates the student's Whop code now. ${said} A discount already on the membership is still checked first.`;
+}
+
 /** The first payment and the deadline, with no counts: the progress could not be read. */
 function factsWithoutProgress(firstPaidAt: string | null, now: Date): Facts {
   const w = discountWindow(firstPaidAt);
@@ -424,7 +462,7 @@ export function judgeRequest(
   return { verdict: toVerdict(raw, explained, facts.deadlinePassed), facts };
 }
 
-/** The verdict for a student whose membership already has a discount on its next renewal: the approve route's words, no override. */
+/** The verdict for a student whose membership already has a discount on its next renewal: the approve route's words. */
 export function couponVerdict(coupon: Coupon): Verdict {
   return { ok: false, reason: "has-discount", text: couponApprovalRefusal(coupon.code), oldCourse: false };
 }

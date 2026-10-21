@@ -320,9 +320,10 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   whop.answer = () => json(500, {})
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devFull' }], [MEMBERSHIP_DISCOUNTS_TABLE]: [storedEvolve('s1', 'mem_devOld')] })
   const r = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
-  ok(r.value.discounted === false && r.value.source === 'none', 'a stored row from another membership says nothing about this one: nothing blocks', show(r.value))
+  ok(r.value.discounted === false && r.value.source === 'none', 'a stored row from another membership says nothing about this one: no answer on file', show(r.value))
   const none = await quiet(() => checkMembershipDiscount(fakeClient(new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devFull' }] })), 's1', { apiKey: KEY }))
-  ok(none.value.discounted === false && none.value.source === 'none' && none.lines.some((l) => l.includes('nothing blocks')), 'neither Whop nor a stored row: nothing blocks, and the log says so')
+  ok(none.value.discounted === false && none.value.source === 'none' && none.lines.some((l) => l.includes('no answer is on file')),
+     'neither Whop nor a stored row: no answer on file (the caller decides: the request routes refuse, the approve route goes on), and the log says so')
 }
 {
   resetWhop()
@@ -448,11 +449,30 @@ for (const [name, route, path, body] of [
   ok(r.value.status === 400 && r.value.body.error === LINE && db.rows('discount_requests').length === 0,
      'Whop down, the stored row says discounted: refused with the same line', show(r.value))
 
+  // The owner's review (2026-10-21): a check that cannot run writes nothing. Whop gave no answer and nothing is
+  // stored for the membership: the student reads the exact sentence, 503, and nothing is written (it went in before).
   resetWhop()
   whop.answer = () => 'throw'
   db = readyDb('mem_devEvolve')
   r = await quiet(() => post(route, path, body))
-  ok(r.value.status === 200 && db.rows('discount_requests').length === 1, 'Whop down and nothing stored: the request goes in (the approve route checks again)', show(r.value))
+  ok(r.value.status === 503 && r.value.body.error === "We couldn't check your membership just now. Try again in a minute." && r.value.body.state === 'read-failed'
+       && db.rows('discount_requests').length === 0 && db.calls('submit_discount_with_feedback', 'rpc').length === 0,
+     'Whop down and nothing stored: refused, 503, "We couldn\'t check your membership just now. Try again in a minute.", nothing written (it went in before the owner\'s review)', show(r.value))
+  ok(r.lines.some((l) => l.includes('nothing written, the coupon check could not run (network) and nothing is stored')) && !r.lines.some((l) => /mem_dev|@example/.test(l)),
+     'the server log says why, with no name, email or Whop id', show(r.lines))
+  for (const [why, membership] of [['no Whop membership on file', null], ['a payment\'s id where the membership\'s belongs', 'pay_devNotAMembership']]) {
+    resetWhop()
+    db = readyDb(membership)
+    r = await quiet(() => post(route, path, body))
+    ok(r.value.status === 503 && r.value.body.error === "We couldn't check your membership just now. Try again in a minute." && db.rows('discount_requests').length === 0 && whop.log.length === 0,
+       `${why}: Whop cannot be asked, nothing is stored, so the same refusal and nothing written`, show(r.value))
+  }
+  resetWhop()
+  whop.answer = () => 'throw'
+  db = readyDb('mem_devEvolve', { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...storedEvolve('s1'), promo_code_id: null, promo_code: null, renewal_price: 97, discounted: false }] })
+  r = await quiet(() => post(route, path, body))
+  ok(r.value.status === 200 && db.rows('discount_requests').length === 1,
+     'Whop down, the stored row for this membership says no discount: the request goes in on the stored answer', show(r.value))
 
   resetWhop()
   db = readyDb('mem_devEvolve', { student_lesson_completions: [] })
@@ -462,7 +482,7 @@ for (const [name, route, path, body] of [
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-console.log('\n=== The approve route: Whop now, no override ===')
+console.log('\n=== The approve route: Whop now; Approve anyway on the coupon\'s row passes it (the owner\'s review) ===')
 function approveDb(membership, more = {}) {
   const db = readyDb(membership, {
     discount_requests: [{ id: 'r1', student_id: 's1', status: 'pending', created_at: new Date(Date.parse(NOW) - 3_600_000).toISOString() }],
@@ -471,9 +491,9 @@ function approveDb(membership, more = {}) {
   })
   return db
 }
-async function approve(override = false) {
+async function approve(override = false, overrideCoupon = false) {
   const res = await approveRoute(new Request('http://app/api/discounts/approve', {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'r1', override }),
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'r1', override, overrideCoupon }),
   }))
   return { status: res.status, body: await res.json() }
 }
@@ -484,8 +504,30 @@ async function approve(override = false) {
     const made = promoCodes.length
     const r = await quiet(() => approve(override))
     ok(r.value.status === 400 && r.value.body.error === 'This student already has a discount on their membership (evolve10).' && r.value.body.code === 'has-discount',
-       `${override ? 'Approve anyway' : 'Approve'}: evolve10 on the membership, 400 with the code named and code "has-discount"`, show(r.value))
+       `${override ? 'Approve anyway past the rule alone' : 'Approve'}: evolve10 on the membership, 400 with the code named and code "has-discount"`, show(r.value))
     ok(promoCodes.length === made && db.rows('discount_requests')[0].status === 'pending', 'no Whop code is made, the request stays pending')
+  }
+  // The owner's review (2026-10-21): a founder or an admin approves past any check. Approve anyway on the coupon's row
+  // sends overrideCoupon with override (a founder here: the stand-in's login), and the code is made.
+  {
+    resetWhop()
+    const db = approveDb('mem_devEvolve', { student_lesson_completions: [] })
+    const made = promoCodes.length
+    const r = await quiet(() => approve(true, true))
+    ok(r.value.status === 200 && promoCodes.length === made + 1 && db.rows('discount_requests')[0].status === 'approved' && whop.log.length === 0,
+       'Approve anyway on the coupon\'s row (override and overrideCoupon): approved and the code made past evolve10 and the rule (no video watched), Whop not asked', show(r.value.body))
+    ok(r.lines.some((l) => l.includes('OVERRIDE') && l.includes('Eligibility gates skipped.') && l.includes('The coupon check skipped.')),
+       'the log line says both checks were skipped, and who skipped them', show(r.lines))
+    resetWhop()
+    const db2 = approveDb('mem_devEvolve')
+    const r2 = await quiet(() => approve(false, true))
+    ok(r2.value.status === 200 && db2.rows('discount_requests')[0].status === 'approved' && whop.log.length === 0,
+       'overrideCoupon alone, the rule saying yes: approved, Whop not asked', show(r2.value.body))
+    resetWhop()
+    const db3 = approveDb('mem_devFull', { student_lesson_completions: [] })
+    const r3 = await quiet(() => approve(false, true))
+    ok(r3.value.status === 400 && r3.value.body.code === 'rule' && db3.rows('discount_requests')[0].status === 'pending',
+       'overrideCoupon alone, the rule saying no: refused with code "rule", nothing approved', show(r3.value))
   }
   resetWhop()
   let db = approveDb('mem_devFull')
@@ -497,7 +539,7 @@ async function approve(override = false) {
   db = approveDb('mem_devYearCode', { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...storedEvolve('s1', 'mem_devYearCode'), promo_code: null, promo_code_id: 'promo_devYear10' }] })
   r = await quiet(() => approve(true))
   ok(r.value.status === 400 && r.value.body.error === 'This student already has a discount on their membership (promo_devYear10).',
-     'Whop down, the stored row says discounted with no name: refused, naming the code\'s id', show(r.value.body))
+     'Whop down, the stored row says discounted with no name: refused, naming the code\'s id (with override, past the rule alone)', show(r.value.body))
   resetWhop()
   whop.answer = () => 'throw'
   db = approveDb('mem_devEvolve')

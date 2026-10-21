@@ -97,10 +97,20 @@ const REQUIRED = requiredLessons(LESSONS.map((l) => ({ ...l, has_video: l.id in 
 const GATE = REQUIRED.at(-1)
 
 const OCT_2 = '2026-10-02T10:00:00.000Z'
+/**
+ * The student, their Whop membership checked and holding no discount (the
+ * stored row; no Whop key here): since the owner's review of 2026-10-21 a
+ * coupon check that cannot run writes nothing, so Apply goes in only with an
+ * answer on file.
+ */
 function freshDb(paid = OCT_2, requests = []) {
   setCatalog({ v2: true, lessonsTable: 'lessons' })
   const db = new FakeDb({
-    students: [{ id: 's1', whop_user_id: 'user_1', supabase_user_id: 'auth-1', first_paid_at: paid, joined_at: paid }],
+    students: [{ id: 's1', whop_user_id: 'user_1', supabase_user_id: 'auth-1', first_paid_at: paid, joined_at: paid, whop_membership_id: 'mem_devClean' }],
+    student_membership_discounts: [{
+      student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null,
+      renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-01T08:00:00.000Z',
+    }],
     lessons: LESSONS,
     lesson_videos: Object.keys(lengths).map((lesson_id) => ({ lesson_id, created_at: '2026-10-12T00:00:00.000Z' })),
     student_lesson_completions: [],

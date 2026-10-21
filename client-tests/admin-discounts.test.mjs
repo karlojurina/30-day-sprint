@@ -311,6 +311,15 @@ for (const v of ['now', 'old']) {
   await t.approve('r1')
   await t.markApplied('r1')
   await t.reject('r2')
+  // The owner's review (2026-10-21): Generate anyway (the 30% page's Approve anyway) is a founder's or an admin's.
+  // A csm's is refused before anything is read or made; then an admin sends it.
+  let csmOverride = null
+  if (v === 'now') {
+    const made = promoCodes.length
+    const tried = await t.approve('r3', true)
+    csmOverride = { made: promoCodes.length - made, status: row(db, 'r3').status, logged: tried.lines.some((l) => l.includes('OVERRIDE')) }
+    setTeam({ id: 'team-admin-1', role: 'admin' })
+  }
   const { lines } = await t.approve('r3', true)
   const [r1, r2, r3] = ['r1', 'r2', 'r3'].map((id) => row(db, id))
   const override = lines.find((l) => l.includes('OVERRIDE')) ?? ''
@@ -318,8 +327,10 @@ for (const v of ['now', 'old']) {
     ok(r1.status === 'applied' && r1.reviewed_by === 'team-csm-1' && r1.applied_by === 'team-csm-1',
        'Approve, then Mark applied: reviewed_by and applied_by are the login, whatever the page sends', show({ reviewed_by: r1.reviewed_by, applied_by: r1.applied_by }))
     ok(r2.status === 'rejected' && r2.reviewed_by === 'team-csm-1', 'Reject records the login as the reviewer (it recorded nobody)', show(r2.reviewed_by))
-    ok(r3.status === 'approved' && r3.reviewed_by === 'team-csm-1' && override.includes('team-csm-1') && !override.includes('team-founder-1'),
-       'Generate anyway: the row and the log line name the login', override)
+    ok(csmOverride.made === 0 && csmOverride.status === 'pending' && !csmOverride.logged,
+       'a csm\'s Generate anyway is refused: no Whop code, the request still pending, no OVERRIDE line (the owner\'s review)', show(csmOverride))
+    ok(r3.status === 'approved' && r3.reviewed_by === 'team-admin-1' && override.includes('team-admin-1') && !override.includes('team-founder-1'),
+       'Generate anyway by an admin: the row and the log line name the login', override)
   } else {
     ok(r1.reviewed_by === 'team-founder-1' && r1.applied_by === 'team-founder-1' && r2.reviewed_by === null && override.includes('team-founder-1'),
        `control: at ${BASE} the routes record whatever the page sends, and Reject records nobody`, show({ r1: [r1.reviewed_by, r1.applied_by], r2: r2.reviewed_by, override }))

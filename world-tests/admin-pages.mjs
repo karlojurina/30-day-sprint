@@ -104,9 +104,21 @@
  *           the old admin addresses answered 404 by the catch-all. Its
  *           second round: Outreach insights' 5 numbers in the primary ink; a
  *           username longer than its journey card on one line, cut with an
- *           ellipsis, the whole of it in a title; no underline on a name
- *           with no student behind it; every failed block of a student's
- *           page and of the drawer starting with the tiles' warning dot
+ *           ellipsis, the whole of it in a title (until the owner's review
+ *           took the username off the cards); no underline on a name with no
+ *           student behind it; every failed block of a student's page and of
+ *           the drawer starting with the tiles' warning dot
+ *
+ * The owner's review of the preview (2026-10-21) changed these parts' checks
+ * where it changed the pages: dash, no source line under a tile, taller
+ * charts, the Bounty Program's arrow; thirty, Approve anyway for an admin (the
+ * dev page's default role) on every refused row, the coupon's too, and after
+ * the approve route's 409 (?approve=coursechanged), none for a csm
+ * (?role=csm), its confirm naming what it skips, no sentence when the coupons
+ * cannot be read; people, All students from 1 October with the pills Active,
+ * Payment failed and Ended, the journey's short cards; render, the journey's
+ * board across the window's width with the pages' side margins, and a name
+ * too long to share its line with the day breaking only between its parts.
  *
  * Every state at 390x844, 1280x720 and 1440x900 (a few click states at one
  * or two of them), and each one is measured. It fails on: a horizontal
@@ -701,10 +713,12 @@ if (wanted('thirty')) {
       console.log(`\n${label}`)
       await open('?state=nocoupons&tab=applied', size)
       await waitReady()
-      expect((await bodyText()).includes("Couldn't read the membership coupons, so no row shows one. Approve still asks Whop before it makes a code."), `${label}: the warning above the list`)
+      // The owner's review (2026-10-21): no sentence above the list; the rows simply show no coupon.
+      expect(!(await bodyText()).includes("Couldn't read the membership coupons") && !(await bodyText()).includes('Approve still asks Whop'),
+        `${label}: no sentence above the list about the coupons (the owner's review)`)
       const tara = await row('Tara Quinn')
-      expect(!(await rowText(tara)).includes('already has a discount') && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled)),
-        `${label}: Tara's row shows the rule's yes, Approve on (the approve route asks Whop itself)`)
+      expect(!(await rowText(tara)).includes('already has a discount') && !(await rowText(tara)).includes('Coupon not checked') && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled)),
+        `${label}: Tara's row shows the rule's yes and no coupon, Approve on (the approve route asks Whop itself)`)
       await check(label, `thirty-nocoupons-applied-${w}`)
     }
     {
@@ -796,12 +810,13 @@ if (wanted('thirty')) {
       const link = [...r.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Approve anyway')
       return { name: r.querySelector('a')?.textContent, yes: r.textContent.includes('Every video up to the checkpoint was done in time.'), open: !!b && !b.disabled, link: !!link }
     }))
-    // The render review's fix round: the coupon's row (Tara) has no Approve at all, and no Approve anyway.
+    // The render review's fix round: the coupon's row (Tara) has no Approve at all. Since the owner's review
+    // (2026-10-21) an admin (the dev page's default role) gets Approve anyway on it too.
     expect(approvable.filter((a) => a.open).map((a) => a.name).join() === 'Hugo Lindahl,Maya Lindqvist,Jonah Pereira'
-        && approvable.every((a) => (a.name === 'Tara Quinn' ? !a.open && !a.link : a.open !== a.link)),
-      'Approve is on where the verdict is yes (Hugo, Maya, Jonah); the coupon\'s row (Tara) has neither Approve nor Approve anyway; every other row has Approve anyway in its place, never both', JSON.stringify(approvable))
-    expect(approvable.filter((a) => a.link).map((a) => a.name).join() === 'Leo Hartmann,Sofia Marin,Maximilian Featherstonehaugh-Smythe,Priya Raman',
-      'the Approve anyway link after every refusal but the coupon\'s: Leo, Sofia, Max, Priya, never Tara', JSON.stringify(approvable))
+        && approvable.every((a) => a.open !== a.link),
+      'Approve is on where the verdict is yes (Hugo, Maya, Jonah); every row a check refuses, the coupon\'s (Tara) too, has Approve anyway in its place, never both', JSON.stringify(approvable))
+    expect(approvable.filter((a) => a.link).map((a) => a.name).join() === 'Leo Hartmann,Sofia Marin,Tara Quinn,Maximilian Featherstonehaugh-Smythe,Priya Raman',
+      'the Approve anyway link after every refusal, the coupon\'s too: Leo, Sofia, Tara, Max, Priya (the owner\'s review)', JSON.stringify(approvable))
     const notChecked = await page.$$eval('.list-row', (rs) => rs.filter((r) => r.textContent.includes('Coupon not checked yet. Approve asks Whop first.')).map((r) => r.querySelector('a')?.textContent))
     expect(notChecked.join() === 'Hugo Lindahl',
       '"Coupon not checked yet" only beside the rule\'s yes: Hugo; never Leo, refused for his first payment (the render review\'s fix round)', notChecked.join())
@@ -813,8 +828,8 @@ if (wanted('thirty')) {
     const tara = await row('Tara Quinn')
     const taraReject = await (await buttonIn(tara, 'Reject')).evaluate((b) => getComputedStyle(b).backgroundColor)
     expect((await rowText(tara)).includes(COUPON_LINE) && !(await rowText(tara)).includes('Approve asks Whop again') && (await isNull(await buttonIn(tara, 'Approve')))
-        && (await isNull(await linkIn(tara))) && !(await rowText(tara)).includes('videos') && taraReject !== 'rgba(0, 0, 0, 0)',
-      'Tara, every video done and evolve10 stored for her membership: the coupon\'s line, no Approve and no Approve anyway, Reject the one action, raised; no count (the render review\'s fix round)', await rowText(tara))
+        && !(await isNull(await linkIn(tara))) && !(await rowText(tara)).includes('videos') && taraReject !== 'rgba(0, 0, 0, 0)',
+      'Tara, every video done and evolve10 stored for her membership: the coupon\'s line, no Approve, Approve anyway for an admin (the owner\'s review), Reject raised; no count', await rowText(tara))
     const link = await (await linkIn(await row('Priya Raman'))).evaluate((b) => {
       const cs = getComputedStyle(b)
       const r = b.getBoundingClientRect()
@@ -834,7 +849,7 @@ if (wanted('thirty')) {
     await page.waitForFunction(() => document.body.innerText.includes('Approved Jonah Pereira.'), { timeout: 10000 })
     await settled()
     const made = await calls()
-    expect(made.filter((c) => c.name === 'approve').map((c) => JSON.stringify(c.args)).join() === '["r-jonah",false]',
+    expect(made.filter((c) => c.name === 'approve').map((c) => JSON.stringify(c.args)).join() === '["r-jonah",false,false]',
       'Approve on Jonah: one approve call, without override', JSON.stringify(made.map((c) => c.name)))
     let counts = await tabCounts()
     expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'Jonah moves from Applied to Approved', counts.join(' | '))
@@ -846,8 +861,8 @@ if (wanted('thirty')) {
     expect(notice.text.startsWith(`Hugo Lindahl: ${COUPON_LINE}`) && !notice.copy,
       'Whop says now that evolve10 applies: the approve route\'s own sentence, naming the code, with nothing to copy', JSON.stringify(notice))
     const hugo = await row('Hugo Lindahl')
-    expect((await rowText(hugo)).includes(COUPON_LINE) && !(await rowText(hugo)).includes('Coupon not checked yet') && (await isNull(await linkIn(hugo))) && (await isNull(await buttonIn(hugo, 'Approve'))),
-      'the list is read again: Hugo\'s row now shows the coupon the route stored, no "not checked" line, no Approve and no Approve anyway after it')
+    expect((await rowText(hugo)).includes(COUPON_LINE) && !(await rowText(hugo)).includes('Coupon not checked yet') && !(await isNull(await linkIn(hugo))) && (await isNull(await buttonIn(hugo, 'Approve'))),
+      'the list is read again: Hugo\'s row now shows the coupon the route stored, no "not checked" line, no Approve, and Approve anyway for an admin (the owner\'s review)')
     await press(await buttonIn(hugo, 'Reject'))
     await page.waitForSelector('input[placeholder^="For example"]')
     const prefilled = await page.$eval('input[placeholder^="For example"]', (i) => i.value)
@@ -943,15 +958,18 @@ if (wanted('thirty')) {
   }
 
   console.log('\n30% off: Approve anyway, the small link, an inline confirm, then the call with override')
+  /** Approve anyway's confirm on the page, as shown. */
+  const confirmShown = () => page.evaluate(() => document.querySelector('[data-approve-anyway-confirm]')?.textContent ?? null)
   {
     await open('')
     await waitReady()
     await press(await linkIn(await row('Priya Raman')))
     await page.waitForFunction(() => document.body.innerText.includes('Approve anyway skips the 30% rule'))
     expect(!(await calls()).some((c) => c.name === 'approve'), 'the first click opens the confirm and calls nothing')
-    const confirmText = await page.evaluate(() => [...document.querySelectorAll('p')].find((p) => p.textContent.startsWith('Approve anyway skips'))?.textContent)
-    expect(confirmText === "Approve anyway skips the 30% rule and creates the student's Whop code now. A discount already on the student's membership still stops it.",
-      'the confirm says what it skips, and what it does not', confirmText)
+    // The owner's review (2026-10-21): the confirm names what it skips, in the row's own words.
+    const confirmText = await confirmShown()
+    expect(confirmText === "Approve anyway skips the 30% rule, and creates the student's Whop code now. The rule says: Not every video up to the checkpoint is done yet. A discount already on the membership is still checked first.",
+      'the confirm says what it skips (the rule, and why it said no) and what it does not', confirmText)
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, the Approve anyway confirm, ${size.join('x')}`, `thirty-override-confirm-${size[0]}`)
@@ -961,9 +979,87 @@ if (wanted('thirty')) {
     await page.waitForFunction(() => document.body.innerText.includes('Approved Priya Raman.'), { timeout: 10000 })
     await settled()
     const after = await calls()
-    expect(after.some((c) => c.name === 'approve' && c.args[0] === 'r-priya' && c.args[1] === true), 'the second click sends approve with override', JSON.stringify(after.filter((c) => c.name === 'approve')))
+    expect(after.some((c) => c.name === 'approve' && c.args[0] === 'r-priya' && c.args[1] === true && c.args[2] === false), 'the second click sends approve with override, the coupon still checked', JSON.stringify(after.filter((c) => c.name === 'approve')))
     const counts = await tabCounts()
     expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'Priya moves from Applied to Approved', counts.join(' | '))
+  }
+
+  // The owner's review (2026-10-21): a founder or an admin approves past any check, the coupon's row too.
+  console.log('\n30% off: Approve anyway on the coupon\'s row, naming the code it skips')
+  {
+    await open('')
+    await waitReady()
+    await press(await linkIn(await row('Tara Quinn')))
+    await page.waitForSelector('[data-approve-anyway-confirm]')
+    const confirmText = await confirmShown()
+    expect(confirmText === `Approve anyway skips the coupon check and the 30% rule, and creates the student's Whop code now. ${COUPON_LINE}`,
+      'Tara\'s confirm names the coupon (evolve10) and the rule it skips', confirmText)
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`30% off, Approve anyway on the coupon's row, ${size.join('x')}`, `thirty-override-coupon-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    await press(await buttonIn(await row('Tara Quinn'), 'Yes, create the code'))
+    await page.waitForFunction(() => document.body.innerText.includes('Approved Tara Quinn.'), { timeout: 10000 })
+    await settled()
+    const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
+    expect(JSON.stringify(sent) === JSON.stringify([['r-tara', true, true]]), 'one approve call, with override and overrideCoupon', JSON.stringify(sent))
+    const counts = await tabCounts()
+    expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'Tara moves to Approved, the code made past evolve10', counts.join(' | '))
+  }
+
+  console.log('\n30% off: the approve route\'s 409 "The course changed", then Approve anyway in Approve\'s place')
+  {
+    const COURSE = 'The course changed and this check cannot run. Nothing was approved.'
+    await open('?approve=coursechanged')
+    await waitReady()
+    const loads = (await calls()).filter((c) => c.name === 'loadThirty').length
+    await press(await buttonIn(await row('Jonah Pereira'), 'Approve'))
+    await page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, COURSE)
+    await settled()
+    let jonah = await row('Jonah Pereira')
+    const alert = await jonah.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
+    expect(alert === COURSE && (await isNull(await buttonIn(jonah, 'Approve'))) && !(await isNull(await linkIn(jonah)))
+        && (await rowText(jonah)).includes('Every video up to the checkpoint was done in time.'),
+      'the 409 stays on Jonah\'s row in the route\'s words, and Approve anyway takes Approve\'s place though the verdict says yes (Approve used to come back, to be refused again)', alert ?? '')
+    expect((await calls()).filter((c) => c.name === 'loadThirty').length === loads + 1, 'the list is read again, quietly, in case its verdict changed')
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`30% off, a row the approve route refused, ${size.join('x')}`, `thirty-refused-row-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    await press(await linkIn(await row('Jonah Pereira')))
+    await page.waitForSelector('[data-approve-anyway-confirm]')
+    const confirmText = await confirmShown()
+    expect(confirmText === `Approve anyway skips the check that refused this approval, and creates the student's Whop code now. The check said: ${COURSE} A discount already on the membership is still checked first.`,
+      'its confirm names the check that refused, in the route\'s words', confirmText)
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`30% off, Approve anyway after the 409, ${size.join('x')}`, `thirty-refused-confirm-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    await press(await buttonIn(await row('Jonah Pereira'), 'Yes, create the code'))
+    await page.waitForFunction(() => document.body.innerText.includes('Approved Jonah Pereira.'), { timeout: 10000 })
+    await settled()
+    const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
+    expect(JSON.stringify(sent) === JSON.stringify([['r-jonah', false, false], ['r-jonah', true, false]]), 'Approve, then Approve anyway with override: the code made', JSON.stringify(sent))
+    jonah = await row('Jonah Pereira')
+    expect(await isNull(jonah), 'Jonah is off Applied')
+  }
+
+  console.log('\n30% off: a csm has no Approve anyway')
+  for (const size of SIZES) {
+    await open('?role=csm', size)
+    await waitReady()
+    const rows = await page.$$eval('.list-row', (rs) => rs.map((r) => ({
+      name: r.querySelector('a')?.textContent,
+      buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => t !== 'Copy'),
+    })))
+    const by = Object.fromEntries(rows.map((r) => [r.name, r.buttons.join(',')]))
+    expect(rows.every((r) => !r.buttons.includes('Approve anyway')) && by['Tara Quinn'] === 'Check Whop again,Reject' && by['Priya Raman'] === 'Reject'
+        && by['Maya Lindqvist'] === 'Approve,Reject' && by['Hugo Lindahl'] === 'Approve,Reject',
+      `${size.join('x')}: no Approve anyway on any row; Tara has Check Whop again and Reject, Priya Reject alone, Approve where the verdict says yes`, JSON.stringify(by))
+    await check(`30% off, a csm, ${size.join('x')}`, `thirty-csm-${size[0]}`)
   }
 
   console.log('\n30% off: Reject, its reason, and what the student sees')
@@ -1179,6 +1275,35 @@ if (wanted('dash')) {
         `${label}: the Bounty Program first (left from 768px), Month 2 beside it, the two cards as tall as each other (the render review's fix round)`, JSON.stringify(slots))
       const small = await smallTaps()
       expect(small.length === 0, `${label}: every button is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
+      // The owner's review (2026-10-21): no source or explanation line under a tile; the room goes to the charts.
+      const words = Object.values(t).map((x) => x.text).join(' | ')
+      const gone = ['Whop status now', 'the line from the nightly snapshot', 'pressed cancel', 'Access ended, per day', 'The nightly snapshot',
+        'Students on the monthly plan who first paid from', 'who joined on the bounty site', 'Joined per day']
+      expect(gone.every((g) => !words.includes(g)), `${label}: no source or explanation line under any tile`, gone.filter((g) => words.includes(g)).join(' | '))
+      const heights = await page.evaluate(() => Object.fromEntries([...document.querySelectorAll('[data-tile]')]
+        .map((tile) => [tile.dataset.tile, Math.round(tile.querySelector('[aria-roledescription="chart"]')?.getBoundingClientRect().height ?? 0)])))
+      expect(heights.active === 76 && heights.canceling === 76 && heights.churned === 76 && heights['avg-progress'] === 76 && heights.bounty === 156,
+        `${label}: taller charts, the trend lines 76px (44 before) and the Bounty Program's bars 156px (124)`, JSON.stringify(heights))
+      // The arrow beside the Bounty Program's 14-day number: its direction follows the rule against the earlier count in its title.
+      const arrow = await page.evaluate(() => {
+        const a = document.querySelector('[data-tile="bounty"] [data-bounty-arrow]')
+        const big = document.querySelector('[data-tile="bounty"] [data-number]')
+        if (!a) return { none: true, big: big?.textContent }
+        const g = a.querySelector('[aria-hidden="true"]')
+        const ar = a.getBoundingClientRect()
+        const br = big.getBoundingClientRect()
+        // The kit's status colours as this page computes them: green for up, red for down.
+        const probe = (v) => { const s = document.createElement('span'); s.style.color = v; a.parentElement.appendChild(s); const c = getComputedStyle(s).color; s.remove(); return c }
+        return {
+          dir: a.dataset.bountyArrow, title: a.getAttribute('title'), glyph: g.textContent, color: getComputedStyle(g).color, green: probe('var(--color-success)'), red: probe('var(--color-danger)'),
+          sr: a.querySelector('.sr-only')?.textContent, big: big.textContent, beside: ar.left >= br.right && ar.left - br.right <= 12 && ar.top < br.bottom && ar.bottom > br.top,
+        }
+      })
+      const before = arrow.none ? null : Number((arrow.title.match(/^([\d,]+) in the 14 days before$/) ?? [])[1]?.replace(/,/g, ''))
+      const last = Number(String(arrow.big).replace(/,/g, ''))
+      expect(!arrow.none && Number.isFinite(before) && arrow.dir === (last > before ? 'up' : 'down') && last !== before && arrow.glyph === (arrow.dir === 'up' ? '↑' : '↓')
+          && arrow.color === (arrow.dir === 'up' ? arrow.green : arrow.red) && arrow.green !== arrow.red && arrow.sr === `${arrow.dir === 'up' ? 'Up' : 'Down'} from ${arrow.title}` && arrow.beside,
+        `${label}: beside the Bounty Program's ${arrow.big}, a small ${arrow.dir} arrow, the 14 days before (${arrow.title}) in its tooltip and its words for a screen reader`, JSON.stringify(arrow))
     }
     {
       const label = `Dashboard, renewed (24 Nov, the first rates in), ${w}x${h}`
@@ -1628,21 +1753,32 @@ if (wanted('people')) {
     const header = await page.$$eval('main div[aria-hidden="true"]', (ds) => ds.map((d) => d.textContent))
     expect(header.some((t) => t.includes('Username') && t.includes('First paid') && !t.includes('Discord')), 'the column reads Username, not Discord', JSON.stringify(header))
     const names = await page.$$eval('main a.list-row', (as) => as.map((a) => a.querySelector('p')?.textContent))
-    expect(names[0] === 'Nora Brandt' && names[names.length - 1] === 'Felix Moreau' && names.length === 13,
-      'every course member on a $97 monthly plan with a first payment, newest first payment first (Nora, 20 Oct) to the oldest (Felix, 28 May)', names.join(', '))
+    // The owner's review (2026-10-21): the first payments from 1 October alone, and the page opens on Active.
+    expect(JSON.stringify(names) === JSON.stringify(['Nora Brandt', 'Maya Lindqvist', 'Theo Marsh', 'Omar Haddad', 'Jonah Pereira', 'Sofia Marin', 'Maximilian Featherstonehaugh-Smythe']),
+      'the page opens on Active: the active course members on a $97 monthly plan who first paid from 1 October, newest first payment first (Nora, 20 Oct, to Maximilian, 9 Oct)', names.join(', '))
+    const pills = await page.$$eval('[role="group"][aria-label="Membership"] button', (bs) => bs.map((b) => ({ t: [...b.childNodes].map((n) => n.textContent.trim()).join(' '), on: b.getAttribute('aria-pressed') })))
+    expect(JSON.stringify(pills) === JSON.stringify([{ t: 'Active 7', on: 'true' }, { t: 'Payment failed 1', on: 'false' }, { t: 'Ended 2', on: 'false' }]),
+      'three pills with their counts, Active pressed: Active 7, Payment failed 1, Ended 2 (no All)', JSON.stringify(pills))
     // The owner's answer of 2026-10-21: course members only, and only the $97 ones.
-    expect(names.includes('Omar Haddad') && !names.includes('Yusuf Demir') && !names.includes('Clara Vance'),
-      'Omar, on the hidden $97 plan, is listed; Yusuf (a yearly plan) and Clara (an ETfB owner\'s plan), both paid since the launch, are not', names.join(', '))
+    const text = await bodyText()
+    expect(names.includes('Omar Haddad') && !text.includes('Yusuf Demir') && !text.includes('Clara Vance') && !text.includes('Leo Hartmann') && !text.includes('Felix Moreau') && !text.includes('Iris'),
+      'Omar, on the hidden $97 plan, is listed; Yusuf (a yearly plan) and Clara (an ETfB owner\'s plan) are not, nor Leo (September), Felix (May) or Iris (August)', names.join(', '))
     const words = await page.evaluate(() => ({
       description: [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))?.querySelector('p')?.textContent ?? null,
+      meta: [...document.querySelectorAll('main header')].find((x) => x.querySelector('h1'))?.innerText ?? '',
       rows: [...document.querySelectorAll('main a.list-row')].map((a) => a.innerText).join(' '),
     }))
-    expect(words.description === 'Course members on a $97 monthly plan who have paid at least once, newest first payment first.' && !/\bplan\b/i.test(words.rows),
-      'the header\'s line says who is listed in plain words, and no row shows a plan', JSON.stringify(words.description))
+    expect(words.description === 'Course members on a $97 monthly plan who first paid on or after Thu 1 Oct, newest first payment first.' && !/\bplan\b/i.test(words.rows) && words.meta.includes('10 students'),
+      'the header\'s line says who is listed in plain words, from Thu 1 Oct, with the 10 listed; no row shows a plan', JSON.stringify(words.description))
     await press(await button('Payment failed1'))
     await sleep(150)
     expect((await page.$$eval('main a.list-row', (as) => as.length)) === 1 && (await bodyText()).includes('Priya Raman'), 'Payment failed: Priya alone')
-    await press(await button('All13'))
+    await press(await button('Ended2'))
+    await sleep(150)
+    const ended = await page.$$eval('main a.list-row', (as) => as.map((a) => a.querySelector('p')?.textContent))
+    expect(JSON.stringify(ended) === JSON.stringify(['Ethan Cole', 'Hana Sato']), 'Ended: the canceled (Ethan) and the expired (Hana) together', JSON.stringify(ended))
+    await check('All students, Ended, 1440x900', 'students-ended-1440')
+    await press(await button('Active7'))
     await page.type('input[type="search"]', '@JONAH')
     await sleep(150)
     expect((await page.$$eval('main a.list-row', (as) => as.map((a) => a.querySelector('p')?.textContent))).join() === 'Jonah Pereira', 'the search finds @jonah_p in any case')
@@ -1758,8 +1894,10 @@ if (wanted('people')) {
       else await settledPage()
       if (name === 'partial') {
         const text = await bodyText()
-        expect(text.includes("Couldn't load the students' progress") && text.includes("Couldn't load where each student is") && !/\b0%/.test(text),
-          `${label}: the failed reads say so on the board and on every card, never 0%`)
+        const cards = await page.$$eval('[data-card-progress]', (ps) => ps.map((p) => p.textContent))
+        expect(text.includes("Couldn't load the students' progress") && text.includes("Couldn't read which course is live") && !/\b0%/.test(text)
+            && cards.length > 0 && cards.every((c) => c === "Progress couldn't load"),
+          `${label}: the failed reads say so on the board and on every card ("Progress couldn't load"), never 0%`, JSON.stringify(cards.slice(0, 2)))
       }
       if (name === 'error') {
         const t = await page.$eval('[role="alert"]', (e) => e.textContent)
@@ -1782,6 +1920,32 @@ if (wanted('people')) {
       'the header\'s line says who is on it in plain words; the new program\'s students only: Leo (paid in September) and Theo (no Whop membership) are not on it', JSON.stringify(description))
     expect(text.includes('Omar Haddad') && !text.includes('Yusuf Demir') && !text.includes('Clara Vance'),
       'the same plans as All students: Omar, on the hidden $97 plan, is on it; Yusuf (a yearly plan) and Clara (an ETfB owner\'s plan), both paid since the launch, are not')
+    // The owner's review (2026-10-21): a card holds the name, the day, the activity word, the progress and the last activity, nothing else.
+    const cards = await page.$$eval('[data-journey-card]', (cs) => cs.map((c) => ({
+      id: c.dataset.journeyCard,
+      text: c.lastElementChild.innerText.replace(/\s+/g, ' ').trim(),
+      h: Math.round(c.getBoundingClientRect().height),
+      pills: c.querySelectorAll('.pill-tone').length,
+      meter: !!c.querySelector('[role="meter"]'),
+      user: !!c.querySelector('[data-student-username]'),
+    })))
+    const maya = cards.find((c) => c.id === 'p-maya')
+    const sofia = cards.find((c) => c.id === 'p-sofia')
+    const priya = cards.find((c) => c.id === 'p-priya')
+    expect(maya.text === 'Maya Lindqvist Day 2 Moving 38% done Last active 40 min ago' && maya.pills === 1 && !maya.meter && !maya.user,
+      'Maya\'s card: her name, Day 2, Moving, 38% done and her last activity; one pill (the activity word), no bar, no username, no area', JSON.stringify(maya))
+    // Priya first paid on 10 Oct at 08:00 UTC; the page's clock is 21 Oct 08:30, 11 days and 30 minutes on: Day 12.
+    expect(sofia.text === 'Sofia Marin Day 9 Not started 0% done Last active 20 h ago' && priya.text === 'Priya Raman Day 12 Stalled 4% done Last active 9 days ago'
+        && cards.every((c) => !/Canceling|Payment failed|Foundations|Research|\b(I|II|III|IV)\b/.test(c.text)),
+      'no Canceling (Sofia booked one) and no Payment failed (Priya\'s did) on a card, and no area', JSON.stringify([sofia.text, priya.text]))
+    // Maximilian's name takes two lines and his day a third (render checks how it breaks), so his card is measured apart.
+    const short = cards.filter((c) => c.id !== 'p-maximilian')
+    const long = cards.find((c) => c.id === 'p-maximilian')
+    expect(short.every((c) => c.h <= 100 && c.h >= 44) && long.h <= 140,
+      `the cards are short: ${Math.min(...short.map((c) => c.h))} to ${Math.max(...short.map((c) => c.h))}px tall with a one-line name, ${long.h}px with Maximilian's long one`, JSON.stringify(cards.map((c) => [c.id, c.h])))
+    const board = await page.evaluate(() => { const r = document.querySelector('[data-board]').getBoundingClientRect(); return { left: Math.round(r.left), right: Math.round(r.right), col: Math.round(document.querySelector('main section[aria-label]').getBoundingClientRect().width) } })
+    expect(board.left === 48 && board.right === 1392 && board.col >= 210,
+      'the board runs across the window with the pages\' side margins (48px each side at 1440), each column about 217px wide (164 in the old column)', JSON.stringify(board))
     await press(await page.evaluateHandle(() => [...document.querySelectorAll('main section button')].find((b) => b.textContent.includes('Maya Lindqvist'))))
     await page.waitForSelector('aside[role="dialog"]')
     // textContent: the block's title is drawn in capitals, which innerText reports.
@@ -2501,7 +2665,9 @@ if (wanted('render')) {
   await settle()
   await check('render, Team failed, its header saying so, 390x844', 'render-team-error-390')
 
-  console.log('\nrender: the journey\'s board in the page\'s column')
+  // Since the owner's review (2026-10-21) the page, header and board, runs across the window with the pages' side
+  // margins (48px from 1024px wide), where the fix round had put it in the 1084px column.
+  console.log('\nrender: the journey\'s board across the window, with the pages\' side margins')
   for (const size of [[1280, 720], [1440, 900], [1100, 800]]) {
     await go('/dev/admin/journey', size)
     await settle()
@@ -2513,8 +2679,9 @@ if (wanted('render')) {
       return { headerLeft: Math.round(h.left), headerRight: Math.round(h.right), left: Math.round(r.left), right: Math.round(r.right), scroll: board.scrollWidth - board.clientWidth, lastRight: Math.round(cols.at(-1).right), n: cols.length, win: innerWidth }
     })
     const fits = size[0] >= 1120
-    expect(b.n === 6 && b.left === b.headerLeft && b.right === b.headerRight && (fits ? b.scroll <= 0 && b.lastRight <= b.right : b.scroll > 0),
-      `${size.join('x')}: the board's edges are the header's, the page's column; ${fits ? 'all six columns in it' : 'it scrolls sideways inside itself'}`, JSON.stringify(b))
+    expect(b.n === 6 && b.left === b.headerLeft && b.right === b.headerRight && b.left === 48 && b.right === b.win - 48
+        && (fits ? b.scroll <= 0 && b.lastRight <= b.right : b.scroll > 0),
+      `${size.join('x')}: the board's edges are the header's, 48px from each side of the window; ${fits ? 'all six columns in it' : 'it scrolls sideways inside itself'}`, JSON.stringify(b))
     await check(`render, the journey, ${size.join('x')}`, `render-journey-${size[0]}`)
   }
   await go('/dev/admin/journey', [390, 844])
@@ -2528,27 +2695,44 @@ if (wanted('render')) {
     const btn = c.querySelector('button')
     return { href: a?.getAttribute('href'), weight: getComputedStyle(a).fontWeight, user: c.querySelector('[data-student-username]')?.textContent, btnH: Math.round(btn.getBoundingClientRect().height), cardH: Math.round(c.getBoundingClientRect().height) }
   })
-  expect(card.href === '/admin/students/p-maya' && card.weight === '600' && card.user === '@maya.lq' && card.btnH >= card.cardH - 2,
-    'a card: the name links to the student\'s page (600, @username after it); the button under it covers the card', JSON.stringify(card))
-  // The render review's second round: a username longer than its card ends in an ellipsis, never broken between characters.
-  for (const size of [[1280, 720], [1440, 900]]) {
+  expect(card.href === '/admin/students/p-maya' && card.weight === '600' && card.user === undefined && card.btnH >= card.cardH - 2,
+    'a card: the name links to the student\'s page (600, no @username since the owner\'s review); the button under it covers the card', JSON.stringify(card))
+  // The render review's second round cut a long username with an ellipsis; since the owner's review (2026-10-21) a card
+  // carries no username, and the day shares the name's line. A name too long to share it takes the card's width and the
+  // day goes under it, at the right: the name breaks between its parts (after a space or a hyphen), never inside one
+  // (at 1280px it broke "Featherstonehau" "gh-Smythe" with the day beside it).
+  for (const size of [[1280, 720], [1440, 900], [390, 844]]) {
     await go('/dev/admin/journey', size)
     await settle()
     const u = await page.evaluate(() => {
-      const c = document.querySelector('[data-journey-card="p-maximilian"]')
-      const name = c.querySelector('[data-student-name]').getBoundingClientRect()
-      const user = c.querySelector('[data-student-username]')
-      const cs = getComputedStyle(user)
-      const r = user.getBoundingClientRect()
-      const box = c.getBoundingClientRect()
-      return {
-        text: user.textContent, title: user.getAttribute('title'), h: Math.round(r.height), fontSize: parseFloat(cs.fontSize), cut: user.scrollWidth > user.clientWidth,
-        ellipsis: cs.textOverflow, nowrap: cs.whiteSpace, inside: r.left >= box.left && r.right <= box.right, under: r.top >= name.bottom - 2,
+      const lay = (id) => {
+        const c = document.querySelector(`[data-journey-card="${id}"]`)
+        const a = c.querySelector('[data-student-name]')
+        const node = a.firstChild
+        const text = node.textContent
+        // The name's parts: each word, a hyphen kept with the part before it.
+        const parts = []
+        let start = 0
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === ' ') { parts.push([start, i]); start = i + 1 } else if (text[i] === '-' || i === text.length - 1) { parts.push([start, i + 1]); start = i + 1 }
+        }
+        const broken = parts.filter(([s, e]) => { const r = document.createRange(); r.setStart(node, s); r.setEnd(node, e); return r.getClientRects().length > 1 }).map(([s, e]) => text.slice(s, e))
+        const box = c.getBoundingClientRect()
+        const inner = c.lastElementChild
+        const contentRight = inner.getBoundingClientRect().right - parseFloat(getComputedStyle(inner).paddingRight)
+        const n = a.getBoundingClientRect()
+        const d = c.querySelector('[data-card-day]').getBoundingClientRect()
+        return {
+          text, broken, user: !!c.querySelector('[data-student-username]'), inside: n.left >= box.left && n.right <= box.right && d.right <= box.right,
+          dayAtRight: Math.abs(d.right - contentRight) <= 1, besideName: d.top < n.bottom && d.bottom > n.top, underName: d.top >= n.bottom - 2,
+        }
       }
+      return { long: lay('p-maximilian'), short: lay('p-maya') }
     })
-    expect(u.text === '@max.featherstonehaugh.smythe' && u.title === u.text && u.h <= u.fontSize * 1.8 && u.cut && u.ellipsis === 'ellipsis' && u.nowrap === 'nowrap' && u.inside && u.under,
-      `${size.join('x')}: a username longer than its journey card stays on one line under the name, cut with an ellipsis inside the card, the whole of it in its title (it broke between characters)`, JSON.stringify(u))
-    await check(`render, the journey, a long username, ${size.join('x')}`, `render-journey-username-${size[0]}`)
+    expect(u.long.text === 'Maximilian Featherstonehaugh-Smythe' && u.long.broken.length === 0 && !u.long.user && u.long.inside && u.long.dayAtRight && u.long.underName,
+      `${size.join('x')}: the longest name breaks only between its parts, inside its card, the day under it at the right; no username`, JSON.stringify(u.long))
+    expect(u.short.broken.length === 0 && u.short.dayAtRight && u.short.besideName, `${size.join('x')}: a short name keeps the day at the end of its line`, JSON.stringify(u.short))
+    await check(`render, the journey, a long name, ${size.join('x')}`, `render-journey-longname-${size[0]}`)
   }
 
   console.log('\nrender: Outreach insights\' numbers in the primary ink (the render review\'s second round)')

@@ -3233,3 +3233,11 @@
 .btPanel .panelInner {
   mask-image: linear-gradient(180deg, #000 calc(100% - 16px), transparent);
 }
+
+/* The 30% checkpoint's panel (CheckpointPanel in WorldV6.tsx): its sentences
+   break evenly, with no word alone on the last line (admin rebuild 2, the
+   review's fix round). */
+.view[data-cp] .desc,
+.view[data-cp] .cpReason {
+  text-wrap: pretty;
+}

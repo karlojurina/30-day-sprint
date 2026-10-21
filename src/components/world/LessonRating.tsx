@@ -37,15 +37,22 @@ export interface SavedRating {
  * (StudentContext's rateLesson), and only a saved rating comes back in
  * `saved`. A refusal shows under the buttons in the route's own words, with
  * what was picked and typed kept.
+ *
+ * While the form is open (stars picked, or editing), `onFormOpen(true)`: the
+ * lesson page then draws "Next lesson" outlined, so Save is the one filled
+ * button in the panel (admin rebuild 2, the review's fix round).
  */
 export function LessonRating({
   saved,
   onSave,
+  onFormOpen,
 }: {
   /** The student's saved rating of this lesson, or null. */
   saved: SavedRating | null;
   /** Save a rating. Resolves to null once saved, or to the sentence to show. */
   onSave: (stars: number, comment: string | null) => Promise<string | null>;
+  /** Told whether the form with Save is open; false again when the block goes. */
+  onFormOpen?: (open: boolean) => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [stars, setStars] = useState(0);
@@ -86,6 +93,11 @@ export function LessonRating({
 
   const showForm = !saved || editing;
   const left = RATING_COMMENT_MAX - comment.length;
+  const formOpen = showForm && stars > 0;
+  useEffect(() => {
+    onFormOpen?.(formOpen);
+  }, [formOpen, onFormOpen]);
+  useEffect(() => () => onFormOpen?.(false), [onFormOpen]);
 
   function pick(n: number) {
     setStars(n);

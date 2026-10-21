@@ -241,6 +241,15 @@ try {
     for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowRight')
     expect(await checked() === 4 && await state() === 'picking', 'Space then the right arrow 3 times: 4 stars picked', `picked ${await checked()}`)
     expect((await blockText()).includes('4 of 5') && !!(await page.$(`${BLOCK} textarea`)), '"4 of 5" beside the stars, and the comment box')
+    // While the form is open, Save is the one filled button: "Next lesson" turns outlined (data-quiet), and back when it closes.
+    const nextLook = () => page.evaluate((sel) => {
+      const a = [...document.querySelectorAll('a')].find((x) => x.textContent.includes('Next lesson'))
+      const save = [...document.querySelectorAll(`${sel} button`)].find((b) => b.textContent.trim() === 'Save')
+      const filled = (el) => { const c = el ? getComputedStyle(el).backgroundColor : ''; return !!c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent' }
+      return { quiet: !!a?.hasAttribute('data-quiet'), nextFilled: filled(a), saveFilled: filled(save) }
+    }, BLOCK)
+    const open1 = await nextLook()
+    expect(open1.quiet && !open1.nextFilled && open1.saveFilled, 'the form open: Save filled, "Next lesson" outlined', JSON.stringify(open1))
     await page.keyboard.press('Tab')
     expect(await activeIs(() => document.activeElement?.tagName === 'TEXTAREA'), 'Tab: the comment box')
     await page.keyboard.type('Clear, and the example at the end helped.')
@@ -256,6 +265,8 @@ try {
     expect(text.includes('You rated it 4 of 5.') && text.includes('Clear, and the example at the end helped.') && text.includes('Edit'),
       'saved: "You rated it 4 of 5.", the comment and Edit', text)
     expect(await activeIs(() => /You rated it 4 of 5\./.test(document.activeElement?.textContent ?? '')), 'the focus is on the saved line, for a screen reader')
+    const closed1 = await nextLook()
+    expect(!closed1.quiet && closed1.nextFilled, 'saved: "Next lesson" filled again', JSON.stringify(closed1))
     expect(JSON.stringify(await fixtureCalls()) === JSON.stringify([{ lessonId: 'a1l01', stars: 4, comment: 'Clear, and the example at the end helped.', answer: null }]),
       'one save: a1l01, 4 stars, the comment', JSON.stringify(await fixtureCalls()))
     await showBlock()

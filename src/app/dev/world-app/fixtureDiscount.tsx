@@ -161,9 +161,13 @@ const OLD_COURSE: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> 
   "october-old-course-approved": "approved",
 };
 
-/** The six questions v29 seeded, as discount_feedback_questions rows. */
+/**
+ * The six questions v29 seeded, as discount_feedback_questions rows. Question 1
+ * in the words _admin/prds/admin-rebuild-2/messages_v2.sql gives the live row
+ * (v29 seeded it with the old brand's name; admin rebuild 2, the review's fix round).
+ */
 const QUESTIONS: readonly DiscountFeedbackQuestion[] = [
-  question(1, "On a scale of 1-10, how likely are you to recommend EcomTalent to a friend?", "scale", { min: 1, max: 10, required: true }),
+  question(1, "On a scale of 1 to 10, how likely are you to recommend Ecom University to a friend?", "scale", { min: 1, max: 10, required: true }),
   question(2, "Has the pace of the program felt right?", "multi_choice", {
     options: ["Way too fast", "A bit too fast", "Just right", "A bit too slow", "Way too slow"],
     required: true,

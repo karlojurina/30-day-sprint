@@ -124,6 +124,9 @@ export function LessonScreen({
   const [justCompleted, setJustCompleted] = useState<string[] | null>(null);
   // The lesson the player was put up for. It stays up for that lesson.
   const [playerFor, setPlayerFor] = useState<string | null>(null);
+  // The rating's form is open (stars picked, Save showing): its Save is then the one filled button, and
+  // "Next lesson" takes the outline (admin rebuild 2, the review's fix round: two sand buttons at once).
+  const [ratingOpen, setRatingOpen] = useState(false);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
   // The Ad Bounty's lesson is its own checkpoint's, not the place's it is
@@ -315,6 +318,7 @@ export function LessonScreen({
                 href={nextOn ? stage.href(areaId, next.id) : "#"}
                 scroll={false}
                 aria-disabled={!nextOn}
+                data-quiet={ratingOpen && nextOn ? "" : undefined}
                 onClick={(e) => {
                   if (!nextOn) e.preventDefault();
                 }}
@@ -334,6 +338,7 @@ export function LessonScreen({
           key={`rating-${lesson.id}`}
           saved={lessonRatings.get(lesson.id) ?? null}
           onSave={(stars, comment) => rateLesson(lesson.id, stars, comment)}
+          onFormOpen={setRatingOpen}
         />
       )}
     </Panel>

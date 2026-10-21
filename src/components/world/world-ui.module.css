@@ -541,6 +541,19 @@
   transform: translateY(1px);
 }
 
+/* "Next lesson" while the rating's form is open below it (LessonRating.tsx):
+   outlined like .secondary, so Save is the one filled button in the panel. */
+.primary[data-quiet]:not([aria-disabled="true"]) {
+  border-color: var(--color-line-strong);
+  background: none;
+  color: var(--color-ink);
+  font-weight: 500;
+}
+
+.primary[data-quiet]:not([aria-disabled="true"]):hover {
+  background: var(--color-surface-3);
+}
+
 /* "Next lesson" before the lesson is done: there, outlined, and plainly off. */
 .primary[aria-disabled="true"],
 .primary[aria-disabled="true"]:hover,

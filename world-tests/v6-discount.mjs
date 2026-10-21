@@ -827,7 +827,7 @@ try {
     await waitFor(page, () => !!document.querySelector('[data-discount-form] [role="dialog"]'), { timeout: 3000, what: 'row 8: Apply did not open the questions' })
     await sleep(500)
     let f = await page.evaluate(FORM)
-    r.check('Apply opened the questions on the map, question 1 of 6, a scale, focus inside', f?.count === '1 of 6' && f.kind === 'scale' && /recommend EcomTalent/.test(f.question) && f.focusInside && !f.sheet, f && { count: f.count, kind: f.kind, q: f.question, focusInside: f.focusInside })
+    r.check('Apply opened the questions on the map, question 1 of 6, a scale, focus inside', f?.count === '1 of 6' && f.kind === 'scale' && /recommend Ecom University/.test(f.question) && f.focusInside && !f.sheet, f && { count: f.count, kind: f.kind, q: f.question, focusInside: f.focusInside })
     r.check('nothing sent yet: no application in memory', (await page.evaluate(() => window.__fixtureDiscount.requests().length)) === 0)
     s = await page.evaluate(SNAP)
     r.check('the checkpoint stays open, parked, under the form', s.panel !== null && s.park?.id === 'checkpoint', { panel: !!s.panel, park: s.park })

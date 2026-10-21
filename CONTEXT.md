@@ -1033,8 +1033,12 @@ the service role writes, the undo twice, then v111 again). It needs no other fil
 before it; paste it before the code that reads it is deployed, or the
 student data route logs a failed read on every load (the flag is then
 false) and the coupon cron fails on its first write. v112 (2026-10-21, the
-badges for the new course) is not pasted yet, its code on production since
-`35bf390`: it leaves 8 badges (Region Sweep and Two Weeks Strong deleted
+badges for the new course) was pasted on production on 2026-10-21 at 13:56
+UTC, after its code went live (`35bf390`). Its first run took away 475 badge
+rows (Region Sweep 308, Two Weeks Strong 27, Habit Builder 69, Triple
+Threat 71 of 355), read 12,216 lesson rows as finished at their own time
+and 4,974 as a sync's, and the share now divides by 1,391 active members
+(1,137 before). It leaves 8 badges (Region Sweep and Two Weeks Strong deleted
 with their holders' rows, four sentences rewritten), adds
 `student_lesson_completions.completed_at_real` and judges the rows already
 there by their time, takes Habit Builder from everyone who got it before the
@@ -2382,7 +2386,7 @@ old code on old-course fixtures.
   `region_sweep` count the eight areas, and titles scale to 0, 2, 4, 6
   and 8 areas. Streaks are kept (call C2), so a student holding a 7 or
   14 day streak gets that badge back at their next lesson. v112
-  (2026-10-21, not pasted) ends that: Two Weeks Strong and Region Sweep
+  (pasted on production 2026-10-21) ends that: Two Weeks Strong and Region Sweep
   are gone, Habit Builder counts only the streak's days from the switch's
   date, and the Habit Builder rows handed out from old history (before
   25 October) are taken away into `archive_v112`.

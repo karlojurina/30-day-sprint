@@ -55,7 +55,9 @@ When adding a new table, append it here. When deleting a field, scan
   the Student journey also read it, against `MONTHLY_97_PLAN_IDS`, the
   course's two $97 monthly plans (`src/lib/admin/students-list.ts`,
   `journey-board.ts`): a student on any other plan, or with none on
-  file, is on neither page.),
+  file, is on neither page. Since the owner's review of the same day All
+  students also reads `first_paid_at` from `DISCOUNT_ELIGIBLE_FROM`, 1
+  October, as the journey does from 9 October.),
   `first_paid_at` (the student's FIRST REAL WHOP PAYMENT since the
   first-paid fix, 2026-10-20: the earliest payment by that user with
   status paid, `paid_at` set, a total above 0 and not fully refunded
@@ -1035,7 +1037,43 @@ When adding a new table, append it here. When deleting a field, scan
   "not-eligible" }`; the approve route with 400 `{ error: "This student
   already has a discount on their membership (<code>).", code:
   "has-discount" }`, before any Whop code is made.
-- **No ads check on approve (2026-10-20, Lovro's decision):**
+- **Applying fails closed when the coupon check cannot run (the owner's
+  review, 2026-10-21; branch `night/admin3`, not on production):** with
+  neither Whop's answer nor a stored row for the current membership
+  (`checkMembershipDiscount`'s `source: "none"`: Whop down or refusing, no
+  Whop key, no membership on file, a payment's id in its place, the
+  student's row unread), both request routes write nothing and answer
+  503 `{ error: "We couldn't check your membership just now. Try again in
+  a minute.", state: "read-failed" }` (`membershipUncheckedRefusal`).
+  Until then the request went in and the approve route checked again. The
+  approve route still goes on with neither.
+- **Required questions are enforced on the server (the owner's review,
+  2026-10-21; branch `night/admin3`, not on production):** before
+  anything is written, `POST /api/discounts/request` and
+  `POST /api/discounts/submit-feedback` read the active
+  `discount_feedback_questions` marked `is_required` and refuse an
+  application that leaves one unanswered (`requiredAnswersRefusal`,
+  `src/lib/discount-feedback.ts`; a scale needs a number, a choice a
+  choice, an open question words that are not only spaces): 400
+  `{ error: "Answer every question that is not marked Optional, then send
+  it again." }`. A plain request carries no answers, so it is refused
+  while any required question is active. A failed read of the questions
+  is 503 `{ error: "We couldn't check your answers just now, so nothing
+  was sent. Try again in a minute." }`, never read as "no questions".
+- **Approve anyway (the owner's review, 2026-10-21; branch
+  `night/admin3`, not on production):** `POST /api/discounts/approve`
+  takes `overrideCoupon` beside `override`: it skips the coupon check
+  (Whop is not asked), as `override` skips the 30% rule. Either one from
+  a team member who is not a founder or an admin is refused with 403
+  `{ error: "Only a founder or an admin can approve past a check." }`
+  before anything is read or made (until then any team member could send
+  `override`). Every refusal of the rule, or of a read the rule needs,
+  carries `code: "rule"` (the switch date unread, the new course's
+  verdict, and the old rule's four refusals, the 409 "The course changed
+  and this check cannot run. Nothing was approved." among them), which
+  the 30% page reads to offer Approve anyway. The log line names what was
+  skipped.
+- **No ads check on approve (2026-10-20, the owner's decision):**
   `POST /api/discounts/approve` no longer reads
   `students.ad_submissions_verified`, on either course: the 30% already
   asks for 61 videos, so the rule alone decides, and Generate anyway

@@ -279,15 +279,24 @@ the Student journey. The readers (`src/lib/admin/students-list.ts`,
 `student-detail.ts`, `journey-board.ts`, copied by `build.mjs`) run on
 `stub-server.ts`'s database: since the owner's answer of 2026-10-21 All
 students holds a first payment on one of the course's two $97 monthly plans
-(`MONTHLY_97_PLAN_IDS`: the visible one and the hidden one; before 25 May,
-every membership, no Whop membership) and never a yearly plan, an ETfB
-plan, no plan on file, a $97 member with no first payment or a free seat,
-past 1,000 students read by key, with the list's columns only (the plans
-are the read's filter, never a column); the journey holds the same two
-plans with a first payment from `DISCOUNT_LAUNCH_DATE` on (not a
-millisecond before), active, past due or canceled with a membership, and
-on one database it is exactly the list's students paid from the launch
-with a live or churned membership; the two readers as they were at
+(`MONTHLY_97_PLAN_IDS`: the visible one and the hidden one; every
+membership, no Whop membership) and never a yearly plan, an ETfB plan, no
+plan on file, a $97 member with no first payment or a free seat, and since
+the owner's review of the same day only a first payment from
+`DISCOUNT_ELIGIBLE_FROM` on (30 September 22:00 UTC, 1 October in Croatia;
+not a millisecond before, nor March, June or September), past 1,000
+students read by key, with the list's columns only (the plans are the
+read's filter, never a column), and their progress read for them alone, by
+id in batches of 100 (12 reads for 1,200 students; one batch failing fails
+the read, never a list with students missing); the pills Active, Payment
+failed and Ended (canceled and expired together), Active first, each with
+its count; the journey holds the same two plans with a first payment from
+`DISCOUNT_LAUNCH_DATE` on (not a millisecond before), active, past due or
+canceled with a membership, its progress read for the board's students
+alone and no area, username or booked cancel read, and on one database it
+is exactly the list's students paid from the launch with a live or churned
+membership; a journey card holds exactly the name, the day, the activity,
+the progress and the last activity; the two readers as they were at
 `35d44d2` (git, copied into `_gen/*.before-97.ts`), run on the same
 databases, are the control that every plan used to be listed; a student's
 latest 30% request is the newest of any date, and the Whop sync read names
@@ -296,8 +305,8 @@ progress over the counting lessons (a skip counts, a half-done action item
 and a lesson outside progress do not), the activity, the six columns at
 days 7, 8, 14, 15, 21, 22, 30 and 31 (past due and canceled apart), the
 Whop sync's mark on each side of the switch's millisecond (`whopPulled`),
-the area a student is in named by the lessons that count (as the
-journey's chip),
+the area a student is in named by the lessons that count (on the student's
+page; a journey card showed it too until the owner's review),
 and every failed read carried to the page as a failure, never 0% or "no
 request". The Tasks rules: the tabs (Archived once the reset ran), the
 tiers, the closed lines (the reset's note in plain words), the queue line's
@@ -310,7 +319,8 @@ column or shown on a row: All students' and the journey's readers name the
 plan only in their one filter on `MONTHLY_97_PLAN_IDS`
 (`PAYING_WHOP_PLAN_IDS` left as it was), and both headers say who is
 listed. Where the old page held the rule inline, the page at `ca9b5ef`
-(git) is the control. 68 checks (61 before the $97 plans came back).
+(git) is the control. 78 checks (68 before the owner's review of the
+preview, 61 before the $97 plans came back).
 `build.mjs` copies `templates.ts` and `database.ts` again for it (the Tasks
 rules read the buckets' order), beside `metrics-definitions.ts`.
 
@@ -449,6 +459,50 @@ canceled member from before 1 October, and failing when the pending requests
 cannot be read), `admin-review` and `admin-render-fixes` (their 30% row
 patterns and their count of `ReadFailure` follow the new source; the reason's
 words are the second round's).
+
+`admin-owner-review.test.mjs` (the owner's review of the preview,
+2026-10-21; 58 checks) holds every rule that review added, run as the
+source has it. The Dashboard: no source or explanation line under a
+program or trend tile, the owner's list word for word and the Bounty
+Program's per-day caption with it, the (i) definitions kept, the charts
+taller (their heights read from the source); the Bounty Program's arrow by
+`bountyTrend` (up when the last 14 days beat the 14 before, down when
+fewer, none when equal, 0 and 0 too), `bounty`'s `previous14` counted to the
+millisecond at both ends of the 14 UTC days before the window, and
+`BountyArrow` from `DashboardView.tsx`, compiled with TypeScript into
+`_gen/ow-*.mjs` with the parts it imports and rendered to a string: a green
+up or a red down glyph hidden from a screen reader, its words for one ("Up
+from 9 in the 14 days before") and the earlier count in its title. The 30%
+page: `anywaySkip` and `approveAnywayText` for the coupon's row, the rule's
+refusals and a refusal of the approve route (the confirm names what it
+skips and claims nothing about what Whop does with two codes), Approve
+anyway only for a founder or an admin (`ThirtyPage.tsx` hands the role),
+a refusal with code "rule" remembered on its row, and no sentence above the
+list when the coupons cannot be read. The approve route, copied here: the
+new course's refusal and the old course's 409 "The course changed and this
+check cannot run" carry code "rule" and `override` passes them; a decided
+request carries no code. Applying: both request routes answer "We couldn't
+check your membership just now. Try again in a minute." (503) and write
+nothing when no Whop key is set and nothing is stored, and go in on a stored
+answer. The survey: `unansweredRequired` on every kind of question (spaces,
+a number as words, a field of the wrong kind, an empty choice, two answers
+to one question), the form route refusing each unanswered case with
+"Answer every question that is not marked Optional, then send it again."
+before the database function is called, a failed read of the questions a
+503 that writes nothing, a plain request refused while a required question
+is active and let in when none is. With it changed: `membership-discount`
+(170: Whop down, no membership and a payment's id at application time
+refused and nothing written, the stored answer letting one in, Approve
+anyway on the coupon's row with `override` and `overrideCoupon` and
+`overrideCoupon` alone, and the helper's log saying "no answer is on file"),
+`admin-discounts` (29: a csm's Generate anyway refused with no Whop code and
+no OVERRIDE line, then an admin's made), `discount-double-submit` (33) and
+`discount-september` (65), whose students now carry a stored answer for
+their membership so Apply reaches the write, `admin-review` (98: its 30%
+row patterns and the log's words), `admin-people` (78), and
+`admin-render-fixes` and
+`admin-render-second`, whose 30% row and journey card patterns follow the
+new source.
 
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop

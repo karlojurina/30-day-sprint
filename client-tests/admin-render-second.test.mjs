@@ -20,8 +20,8 @@
 //                it in a title; no underline on a name nothing opens from
 //   student      every block whose read failed starts with the tiles'
 //                warning dot (SectionFailure), on the page and in the drawer
-//   docs         system_contracts.md's tasks contract names every reader of
-//                tasks the source has
+//   docs         CONTEXT.md's coupon cron lines; system_contracts.md's tasks
+//                contract names every reader of tasks the source has
 //   unchanged    /admin/not-activated, byte for byte as at d0ebe76
 //
 // Run by `npm run test:client`, after client-tests/build.mjs (which copies
@@ -269,8 +269,20 @@ console.log('\n=== A student: every failed block starts with the tiles\' warning
 }
 
 // ── The docs ────────────────────────────────────────────────────────────────
-console.log('\n=== system_contracts.md\'s readers of tasks ===')
+console.log('\n=== CONTEXT.md\'s coupon cron; system_contracts.md\'s readers of tasks ===')
 {
+  const context = fromSrc('CONTEXT.md')
+  ok(!context.includes('since the render review\'s fix round, 2026-10-21, it read every student who first paid from 1 October')
+       && !context.includes('a pending one is decided by the approve route\'s own live read'),
+     'CONTEXT.md no longer says the cron read every student since the render review\'s fix round (it was until), nor that the approve route reads Whop for a pending request (a coupon row has no Approve)')
+  const lines = context.split('\n')
+  const routeLine = lines.find((l) => l.startsWith('- `GET /api/cron/refresh-membership-discounts`')) ?? ''
+  const cronRow = lines.find((l) => l.startsWith('| `refresh-membership-discounts` |')) ?? ''
+  const libRow = lines.find((l) => l.startsWith('| `membership-discount.ts`')) ?? ''
+  ok([routeLine, cronRow, libRow].every((l) => /pending request/.test(l)) && /until the render review's fix round/.test(routeLine),
+     'its route line, its cron row and its library row name the pending requests the cron reads; the route line dates the window read correctly', show([routeLine.length, cronRow.length, libRow.length]))
+  ok(/Whop answered no read before the time ran out/.test(cronRow), 'the cron row lists every way a run fails, the run Whop never answered too')
+
   const contracts = fromSrc('system_contracts.md')
   const tasks = contracts.slice(contracts.indexOf('### `tasks` (CSM task queue)'), contracts.indexOf('### `daily_progress_snapshots`'))
   const dependedOn = tasks.slice(tasks.indexOf('**Depended on by**'), tasks.indexOf('Nothing'))

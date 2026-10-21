@@ -404,6 +404,41 @@ own window closed after its 14 days are not read, a pending request is),
 rules), `thirty-view` (the coupon's id and `ours` on the row), `lesson-feedback`
 (the username its students read) and `streak` (the student page's number tile).
 
+`admin-render-second.test.mjs` (admin rebuild 2, the render review's second
+round, 2026-10-21; 53 checks) holds every rule that round added: a coupon
+row's Reject starting with the map's own sentence to the student
+(`COUPON_REJECT_REASON`, which is `MEMBERSHIP_DISCOUNT_LINE`: no code, no
+third person, still the team's to change); "Check Whop again" in Approve's
+place on that row, through `checkCoupon` of the transport and
+`POST /api/admin/thirty/check-coupon`, which makes no code and writes nothing
+itself; the coupon cron reading every pending request whatever its window;
+Outreach insights' 5 numbers in the primary ink (`Stat` rendered with no
+tone); the Dashboard's header "Couldn't load" when no tile could be drawn
+(`nothingLoaded` over the loader's failure, every read failed one by one,
+and the reads every tile needs; one tile drawn keeps the time); a short run of
+readings drawn as 6px dots joined by their line (`TrendChart.tsx` compiled
+into `_gen/rs-trend-chart.mjs` and rendered: 1, 2 and 3 readings, 4, 14, and a
+run of 2 between gaps); a username on one line with its ellipsis and title,
+and no underline on a name with no student behind it (`student-name.tsx`
+rendered), every name part with a username in a wrapping flex line, All
+students' cut name and username with their titles; every failed block of a
+student's page and of the journey's drawer starting with the tiles' warning
+dot (`SectionFailure`); CONTEXT.md's coupon cron lines; `system_contracts.md`'s
+tasks contract naming every file of `src` that reads `tasks` (found with
+`git grep`) and every route that reads it through `computeOutreachInsights`,
+`GET /api/admin/templates/stats` among them; and `/admin/not-activated` still
+as at `d0ebe76`. A control reads the files at `22e83fb` (`night/admin2`
+before the round). With it changed: `membership-discount` (158: the check
+route through its own handler on the stand-in Whop with the real team check,
+401 and 403, Whop's answer stored and the list read after it showing Approve
+again, the code still there, Whop down, the write failing and every other
+refusal in plain words; `saved` on `checkMembershipDiscount`'s answer; the
+cron on 5 November reading a pending request of the shared group and one of a
+canceled member from before 1 October, and failing when the pending requests
+cannot be read), `admin-review` and `admin-render-fixes` (their 30% row
+patterns and their count of `ReadFailure` follow the new source; the reason's
+words are the second round's).
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

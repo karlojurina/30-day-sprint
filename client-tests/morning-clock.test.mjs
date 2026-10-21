@@ -290,7 +290,8 @@ console.log('\nThe morning (07:30): the opening and the first six places')
     ok(bits(b.sunEl) === bits(day.sunEl) && Math.abs(az(b.sunDir) - az(day.sunDir)) < 1e-9, `${names[i]}: the place's own sun (az ${az(day.sunDir).toFixed(1)}, el ${day.sunEl})`)
     ok(bits(b.fogNear) === bits(day.fogNear) && bits(b.fogFar) === bits(day.fogFar), `${names[i]}: the day's fog ramp, so the same far plane (${day.fogNear} to ${day.fogFar})`)
     ok(b.lampGlow < day.lampGlow && b.lampGlow <= 0.15, `${names[i]}: the lamps down (${day.lampGlow} by day, ${b.lampGlow.toFixed(2)})`)
-    ok(b.mist > 0 && b.mist <= 0.6 && b.mistDepth > 0 && b.mistFar > b.mistNear, `${names[i]}: the mist on (${b.mist.toFixed(2)}, ${b.mistDepth} deep, ${b.mistNear} to ${b.mistFar})`)
+    // At most 0.95 of a pixel (the haze's second round made the banks dense, 0.5 to 0.95 at the places): the ground always shows through.
+    ok(b.mist > 0 && b.mist <= 0.95 && b.mistDepth > 0 && b.mistFar > b.mistNear, `${names[i]}: the mist on (${b.mist.toFixed(2)}, ${b.mistDepth} deep, ${b.mistNear} to ${b.mistFar})`)
     ok(b.skyTop.b > b.skyTop.r && b.haze.b - b.haze.r > day.haze.b - day.haze.r, `${names[i]}: a blue top and a cooler haze than the day's`)
   }
 }

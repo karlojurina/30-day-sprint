@@ -996,6 +996,23 @@ export const MORNING_BASE = {
  * and the peaks stand clear above. Each row lays its bank by the heights in
  * its own view: mistDepth over the row's hazeBase, starting past what must
  * stay crisp (mistNear).
+ *
+ * The haze's second round (2026-10-21, from two critiques of the first): the
+ * banks read as a grey veil. Where a bank lay over dark ground at 0.6 of a
+ * pixel, a pale lilac over warm dark green cancelled to mid grey (luma 118 to
+ * 145 at sat 0.02 to 0.06), and a soft top with a wide drift spanned the
+ * trees' whole height, so no top edge read. So the banks are denser (0.8 to
+ * 0.95), lower and crisper on top, reach full strength sooner past what must
+ * stay crisp, and are warmer: the side turned from the sun cools only 0.3 of
+ * the way to the haze (a warm white, about #f3e2d8, where it was a lilac
+ * grey, #e5dce1), and the side toward the sun carries twice the sun's glow.
+ * The air stays as it was from the opening to the Falls (it pales the ridges
+ * behind, which is the layering); the Gorge Trail takes more of it and the
+ * Mirror Lake less. Measured on the renders at 1691 x 1278, the page's own
+ * bottom scrim (the HUD's gradient over the canvas) takes the lower 40% of
+ * the frame down to 0.46 of its value at the bottom edge, so a bank low in
+ * the frame shows at most about 165 luma whatever its strength; the gorge's
+ * bank is deeper for that, so its bright top sits higher in the frame.
  */
 export const MORNING_LOOK = {
   // Haze pass: the lobe 0.3 -> 0.6, the haze and the mist warmer toward the sun.
@@ -1003,7 +1020,8 @@ export const MORNING_LOOK = {
   lift: [0.02, 0.03, 0.07], gain: [1.02, 1.0, 0.98], gamma: 0.97,
   halo: 0xf8cfc4, haloAmt: 0.6, haloDeg: 1.2, haloHalf: 5, haloFog: 0,
   mist: 0.5, mistDepth: 60, mistSoft: 25, mistWave: 18, mistNear: 400, mistFar: 1200, mistColor: 0xffe6cc,
-  mistCool: 0.6, mistGlow: 0.2, air: 0.6, airLift: 40, airFall: 300,
+  // Second round: mistCool 0.6 -> 0.3 and mistGlow 0.2 -> 0.4 (the lake and the forest set their own).
+  mistCool: 0.3, mistGlow: 0.4, air: 0.6, airLift: 40, airFall: 300,
 } satisfies Partial<LookKey>;
 
 /** One row per light key the opening and the first six places use (the keys between them included), as NIGHT_ROWS. */
@@ -1014,17 +1032,31 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // and drifting by 22, so the trees' feet are in it and their tops stand out.
   // It comes in from 850 units out, just past the signpost (945 out, its arms
   // 19 to 42 over its foot), which stands dark against it.
+  // Second round: the bank read as a grey veil over the whole tree band (its
+  // brightest fifth 153 luma, the shore bank only 30 over the trees above
+  // it). Denser (0.9), lower and crisper (top 58, soft 14, drift 22 kept), and
+  // at full strength by 1100 (the forest's feet are 1000 to 2000 out): a lit
+  // bank on the shore, its brightest fifth 177, with the tree tops just above
+  // it at 108 to 111 (a 65 luma step) and the band above y 860 as it was. It
+  // starts at 900, so the signpost keeps its dark against it.
   "opening-gold": {
     dial: 1,
-    look: { nearShade: 0x404a6c, mist: 0.6, mistDepth: 72, mistSoft: 26, mistWave: 22, mistNear: 850, mistFar: 1500, air: 0.9, airLift: 60, airFall: 300 },
+    look: { nearShade: 0x404a6c, mist: 0.9, mistDepth: 58, mistSoft: 14, mistWave: 22, mistNear: 900, mistFar: 1100, air: 0.9, airLift: 60, airFall: 300 },
   },
   // The Landing (tune pass): less of the day's additive fog (0.3, set for a
   // gold haze, it added pale lilac on the massif under the morning's). Haze
   // pass: the bank in the meadow and the forest's feet (the ground 0 to 70
   // here), from 300 units out; the signpost is 276 out.
+  // Second round: the band was a veil by distance (luma climbing smoothly
+  // from the near trees to the far slope, no edge). The forest's feet are 500
+  // to 1300 out on ground 27 to 70, so the bank is at full strength by 600,
+  // denser (0.85) and crisper on top (soft 16, drift 20, top 72): its
+  // brightest fifth 191 to 193 (it was 180 to 187), the trees' lower halves in
+  // it. The air stays 1.1, so the tree tops above the bank keep a pale veil
+  // (about 145) and the far slopes their paleness.
   "afternoon-gold": {
     dial: 1,
-    look: { fogAdd: 0.2, mist: 0.6, mistDepth: 68, mistSoft: 28, mistWave: 22, mistNear: 300, mistFar: 850, air: 1.1, airLift: 80, airFall: 300 },
+    look: { fogAdd: 0.2, mist: 0.85, mistDepth: 72, mistSoft: 16, mistWave: 20, mistNear: 300, mistFar: 600, air: 1.1, airLift: 80, airFall: 300 },
   },
   // Base Camp (haze pass): the camera stands on the crest (hazeBase 120); the
   // ground behind it rises from 150 to 300 before the mountains' feet (500 and
@@ -1032,9 +1064,17 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // 45, from 240 units out (the cabin and the tower's foot nearer), and the
   // air lies thick up to 380 over the base and twice the ramp's own there, so
   // the mountains' feet are lost in it and their tops catch the light.
+  // Second round: the left hill had gone khaki grey (its slope sat 0.08 by
+  // the cabin, 0.53 by day) and the trees behind the cabin were ghosts. The
+  // bank lies lower in the hollow with a crisper top (160, soft 25, drift
+  // 35) and starts at 300, denser (0.8), so the hollow is a white bank (its
+  // brightest fifth 199, it was 189), the trees behind the cabin stand dark in
+  // it (138 luma, they were 159) and the hill's slope above comes back toward
+  // its green (sat 0.15 to 0.29). The air is kept: the right valley's bright
+  // bank comes from it.
   afternoon: {
     dial: 1,
-    look: { mist: 0.6, mistDepth: 230, mistSoft: 55, mistWave: 45, mistNear: 240, mistFar: 600, air: 2.0, airLift: 380, airFall: 300 },
+    look: { mist: 0.8, mistDepth: 160, mistSoft: 25, mistWave: 35, mistNear: 300, mistFar: 600, air: 2.0, airLift: 380, airFall: 300 },
   },
   // The Falls (tune pass): the cliff in shade right of the falls read as a
   // moonlit navy (the base's mossy bounce is half the fill on a vertical face,
@@ -1046,12 +1086,21 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // Haze pass: the bank on the pool and along the river's valley (the ground
   // there 41 to 61, the base 60), top 60 over it, from 160 units out, so the
   // falls' foot and the valley's trees stand in it to half their height.
+  // Second round: the bank was grey inside (its brightest fifth 152, by the
+  // cliff's foot 130, where the dark trees and the orange rock showed through)
+  // and it reached the near rocks, the red pine and the log (sat 0.20, 0.34
+  // before the haze), which are 360 to 460 out, not nearer. Denser (0.95),
+  // from 420 to full by 560, so the foreground is crisp again (sat 0.31); a
+  // crisper top that drifts more (soft 20, drift 28, top 68), since a crisp
+  // top with little drift read as a flat stripe along the cliff. The whole
+  // view faces away from the sun, so the bank is the base's warm white side:
+  // its brightest fifth 186, by the cliff's foot 172.
   "late-afternoon": {
     dial: 1,
     light: { hemiGround: 0x5c4c40 },
     look: {
       lift: [0.025, 0.02, 0.035], gain: [1.04, 1.0, 0.95], fogAdd: 0.2,
-      mist: 0.6, mistDepth: 60, mistSoft: 25, mistWave: 16, mistNear: 160, mistFar: 650, air: 0.8, airLift: 40, airFall: 200,
+      mist: 0.95, mistDepth: 68, mistSoft: 20, mistWave: 28, mistNear: 420, mistFar: 560, air: 0.8, airLift: 40, airFall: 200,
     },
   },
   // The gorge: a warmer sun and a pink haze, so the far range keeps the
@@ -1064,10 +1113,27 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // Haze pass: the bank in the gorge, on the pool (61) and up the walls to 110
   // over the base, from 600 units out (the bench and the hut are nearer); the
   // air thick up to 200 over it, so the range's feet behind the rim are lost.
+  // Second round: the view read as noon beside the day's coral evening (a
+  // grey violet range, sat 0.08 to 0.10 at hue 294 to 307, and the gorge's
+  // mist a faint veil at the falls' foot with no top). The range takes no
+  // direct sun here (its colour is the fog ramp's over a dark base: the sun's
+  // colour and strength move it by nothing), so its first light comes from the
+  // ramp's sun side: a warmer sun glow and a rose haze (hue 7, sat 0.29), the
+  // Falls' grade (less blue in the lift and the gain) and less additive fog,
+  // so the range reads rose (sat 0.18 to 0.19 at hue 353 to 360) under the
+  // blue sky, with cloud tops a step peach. The bank fills the gorge, denser
+  // (0.9), lit on the side toward the low sun (mistGlow 0.5), up the walls to
+  // 185 over the base with a top that shows (soft 20), from 450 to full by
+  // 650: the trail and the hut (300, 240 over the base) stay above its
+  // highest drift (225). More air (1.5, falling over 200), so the range's
+  // feet behind the rim are lost in a pale band.
   "gorge-sunset": {
     dial: 1,
-    light: { sunColor: 0xffcf96, skyHorizon: 0xf6cac4, haze: 0xd6b8c2, hemiGround: 0x5c4c40 },
-    look: { fogAdd: 0.25, mist: 0.6, mistDepth: 110, mistSoft: 40, mistWave: 20, mistNear: 600, mistFar: 1000, air: 0.9, airLift: 200, airFall: 250 },
+    light: { sunColor: 0xffcf96, skyHorizon: 0xf6cac4, haze: 0xe8aca4, sunGlow: 0xffc49a, cloudTop: 0xffe2cc, hemiGround: 0x5c4c40 },
+    look: {
+      lift: [0.025, 0.02, 0.035], gain: [1.04, 1.0, 0.95], fogAdd: 0.15,
+      mist: 0.9, mistDepth: 185, mistSoft: 20, mistWave: 20, mistNear: 450, mistFar: 650, mistGlow: 0.5, air: 1.5, airLift: 200, airFall: 200,
+    },
   },
   "sunset-cliff": { dial: 1 },
   // The lake: its low sun kept, cooler; a pink horizon over the water; the
@@ -1084,12 +1150,22 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // Haze pass: the same thin band on the water (from the lake up 10, as it was:
   // depth 5, soft 5), a little brighter and lit, and a light air on the far
   // slopes; the mirror nearer stays clear.
+  // Second round: the frame was a grey violet sheet (the far forest sat 0.11
+  // at 99 luma) and the band on the water read as a grey line (its brightest
+  // fifth 158). A bank of mist on the far water and up the far shore's foot
+  // (0.6, top 16, soft 6, drifting by 12 on the slopes), in a warm white
+  // with the low sun's glow ahead in it, from 620 to full by 1000, so the
+  // nearer mirror keeps the forest, the hill and the boathouse: the band 187
+  // to 191 luma (its brightest fifth 198). Less air and additive fog on the
+  // far slopes (0.2 and 0.03), and the haze a step more saturated in the same
+  // hue (325, sat 0.18; it was 0.12), so the far forest comes back as a
+  // darker silhouette with its own colour (80 to 83 luma, sat 0.14 to 0.15).
   sunset: {
     dial: 1,
-    light: { skyMid: 0xd0c8ec, skyHorizon: 0xf6c8c0, skyGlow: 0xffd8b0, haze: 0xd6bccb, water: 0x4c6684 },
+    light: { skyMid: 0xd0c8ec, skyHorizon: 0xf6c8c0, skyGlow: 0xffd8b0, haze: 0xd1abc1, water: 0x4c6684 },
     look: {
-      fogAdd: 0.15, sunLobe: 0.3, mist: 0.18, mistDepth: 5, mistSoft: 5, mistWave: 3, mistNear: 450, mistFar: 1100, mistColor: 0xf2e4ea,
-      mistCool: 0.2, mistGlow: 0.6, air: 0.45, airLift: 40, airFall: 220,
+      fogAdd: 0.03, sunLobe: 0.3, mist: 0.6, mistDepth: 16, mistSoft: 6, mistWave: 12, mistNear: 620, mistFar: 1000, mistColor: 0xffeadc,
+      mistCool: 0.2, mistGlow: 0.6, air: 0.2, airLift: 40, airFall: 220,
     },
   },
   // The forest: its dusk keeps the sun under the horizon and the floor dark
@@ -1100,7 +1176,9 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
     dial: 1,
     light: { magicGlow: 0.55, skyTop: 0x7a92d6, skyMid: 0xc8c2ea, skyHorizon: 0xf6c6c4, skyGlow: 0xffd2b4, haze: 0xcec4de },
     // Haze pass: the same mist on the floor past the clearing, in drifts, and
-    // a little air between the far trunks.
+    // a little air between the far trunks. Second round: mist 0.6 was tried
+    // for the drifts past the clearing and moved the picture by at most 5
+    // levels on a few pixels, so the row stays as it is.
     look: {
       mist: 0.5, mistDepth: 40, mistSoft: 30, mistWave: 25, mistNear: 600, mistFar: 2000, mistColor: 0xf6f0f2,
       mistCool: 0.4, mistGlow: 0.6, air: 0.6, airLift: 80, airFall: 250,

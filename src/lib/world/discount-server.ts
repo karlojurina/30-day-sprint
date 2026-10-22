@@ -325,9 +325,11 @@ export function decideDiscountRequest(reads: DiscountReads, now: Date): RequestD
 
 /**
  * Both request routes on the new course, once decideDiscountRequest has
- * granted: the student's Whop membership already has a discount on its next
- * renewal (D5, src/lib/membership-discount.ts checkMembershipDiscount), so
- * nothing is written and the student reads the map's own line.
+ * granted: the student already has a coupon (D5, src/lib/membership-discount.ts
+ * checkMembershipDiscount: since T-122's third fix round a code other than
+ * their own 30% on a course membership or payment, or with none a price
+ * under 97.00), so nothing is written and the student reads the map's own
+ * line.
  */
 export function membershipDiscountRefusal(): Extract<RequestDecision, { grant: false }> {
   const state: DiscountState = { kind: "not-eligible", reason: "has-discount" };
@@ -341,15 +343,17 @@ export const MEMBERSHIP_UNCHECKED = "We couldn't check your membership just now.
  * Both request routes on the new course, once decideDiscountRequest has
  * granted: the coupon check could not run (the owner's review, 2026-10-21:
  * applying fails closed, so a student whose membership may hold a code never
- * gets a request in). Whop gave no answer and nothing is stored for the membership the
- * student has now (checkMembershipDiscount's source "none": Whop down or
- * refusing the key, no key or no course product on the deployment, the
- * student's row unreadable), so nothing is written and the student is asked
- * to try again. It used to let the request through and leave the coupon to
- * the approve route. Since T-122 a Whop id on file that is missing, a
- * payment's, or one Whop does not know is no reason any more: the check
- * finds the membership through the student's Whop user, and judges the
- * student's real course payments (every one since T-122's second fix round).
+ * gets a request in). Whop gave no answer and nothing stored answers for the
+ * membership the student has now (checkMembershipDiscount's source "none":
+ * Whop down or refusing the key, no key or no course product on the
+ * deployment, the student's row unreadable; and since T-122's third fix
+ * round a stored "no coupon" that holds no source, which the rule before it
+ * wrote, or any stored "no coupon" on a database without v113), so nothing
+ * is written and the student is asked to try again. It used to let the
+ * request through and leave the coupon to the approve route. Since T-122 a
+ * Whop id on file that is missing, a payment's, or one Whop does not know is
+ * no reason any more: the check finds the memberships through the student's
+ * Whop user, and judges the student's course payments.
  */
 export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: false }> {
   return { grant: false, status: 503, state: "read-failed", error: MEMBERSHIP_UNCHECKED };

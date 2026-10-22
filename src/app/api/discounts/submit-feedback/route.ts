@@ -30,8 +30,14 @@
  * src/lib/discount-feedback.ts: the forms' own rule, a 400 in plain words,
  * and a 503 when the questions cannot be read), and on the new course the
  * coupon check must have run (membershipUncheckedRefusal: Whop gave no
- * answer and nothing is stored is a 503 asking the student to try again,
- * where the request used to go through).
+ * answer and nothing stored answers is a 503 asking the student to try
+ * again, where the request used to go through).
+ *
+ * The coupon check is the one /api/discounts/request makes
+ * (checkMembershipDiscount, its comment names the owner's rule). Its stored
+ * fallback answers "no coupon" only for a row that rule wrote, its source
+ * set (v113): a row with no source, and every stored "no coupon" on a
+ * database without v113, gives the 503 when Whop does not answer.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -141,7 +147,8 @@ export async function POST(request: NextRequest) {
     }
     // The coupon (admin rebuild 2, D5), as /api/discounts/request checks it:
     // the map's Apply sends here whenever the team has questions. A check
-    // that could not run refuses too (the owner's review, 2026-10-21).
+    // that could not run refuses too (the owner's review, 2026-10-21), and
+    // so does one whose stored row says no coupon without a source.
     const coupon = await checkMembershipDiscount(supabase, studentId);
     if (coupon.discounted) {
       const refusal = membershipDiscountRefusal();

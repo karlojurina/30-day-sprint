@@ -48,12 +48,16 @@
  *   walkFirstPayments: every paid payment of the account once, grouped by user
  *     (POST /api/admin/first-paid-repair), in one lane, or in 4 lanes that
  *     split the account's history by created_at and read side by side.
- *   fetchRealCoursePayments: every real course payment of one user, newest
- *     first, for the coupon check (membership-discount.ts, T-122), on that
- *     check's key, pace and limits, each with its promo code, its subtotal,
- *     the tax its total carries on top (since T-122's fix round), its
- *     currency and its total in dollars (since its second fix round, when
- *     it replaced fetchLatestRealPayment, which read the newest alone).
+ *   fetchCoursePayments: every course payment of one user that the list
+ *     gives, newest first, for the coupon check (membership-discount.ts,
+ *     T-122), on that check's key, pace and limits: each with whether it is
+ *     a real payment under THE RULE, its promo code, its subtotal, the tax
+ *     its total carries on top, its currency and its billing reason. A $0
+ *     payment (a 100% code's checkout) is never a real payment, so it never
+ *     sets first_paid_at: the coupon check reads it for the code it names
+ *     alone. Since T-122's third fix round (2026-10-22), when it replaced
+ *     fetchRealCoursePayments, which kept the real payments alone (and their
+ *     total in dollars, which the check no longer reads).
  *
  * None of them writes anything. A failure comes back as a kind, never as
  * Whop's message, so no caller can pass a Whop id on by accident.
@@ -108,7 +112,7 @@ export interface WhopPayment {
   refunded_amount?: WhopMoney;
   user?: { id?: string | null } | null;
   /**
-   * What the payment was for, read by fetchRealCoursePayments alone: an id in
+   * What the payment was for, read by fetchCoursePayments alone: an id in
    * the pinned shape (`product_id`), an object in the older one (`product:
    * { id }`); the promo code's name only in the older one (`promo_code:
    * { id, code }`).
@@ -121,36 +125,49 @@ export interface WhopPayment {
   promo_code?: { id?: string | null; code?: string | null } | string | null;
   /**
    * What the coupon check weighs beside the total, read by
-   * fetchRealCoursePayments alone (T-122's fix round, 2026-10-21). The names
-   * are those of Whop's payment object pinned to 2026-10-15-1 (docs.whop.com,
-   * API reference, Payments, read 2026-10-21), where every one of them is on
-   * every payment: `subtotal`, "The price before discounts, tax and fees";
-   * `tax_amount`, "The sales tax or VAT collected. Null when no tax
-   * applied"; `tax_behavior`, "Whether `tax_amount` was added on top of the
-   * price (`exclusive`) or was already inside it (`inclusive`)", the only two
-   * values that version lists (the key's older shape has been read with
-   * others, `unspecified` and `unable_to_collect`, and with none). There
-   * `total` is "the price after discounts, plus any tax added on top", and a
-   * payment quote's total is "the subtotal less the discount, plus
-   * `tax_amount` when tax is added on top". The amounts are money objects
-   * ({ amount: "97.00", ... }); the key's older shape uses the same three
-   * names, its amounts bare numbers (the workspace's
-   * _admin/prds/first-paid-fix/facts_whop.md).
+   * fetchCoursePayments alone (T-122's fix round, 2026-10-21). The names are
+   * those of Whop's payment object pinned to 2026-10-15-1 (docs.whop.com,
+   * API reference, Payments, read 2026-10-21 and 2026-10-22), where every
+   * one of them is on every payment: `subtotal`, "The price before
+   * discounts, tax and fees"; `tax_amount`, "The sales tax or VAT collected.
+   * Null when no tax applied"; `tax_behavior`, "Whether `tax_amount` was
+   * added on top of the price (`exclusive`) or was already inside it
+   * (`inclusive`)", whose list of values (ReceiptTaxBehaviors) holds four:
+   * `exclusive`, `inclusive`, `unspecified` and `unable_to_collect` (the
+   * field's own words name the first two; the key's older shape has been
+   * read with all four and with none). There `total` is "the price after
+   * discounts, plus any tax added on top", and a payment quote's total is
+   * "the subtotal less the discount, plus `tax_amount` when tax is added on
+   * top". The amounts are money objects ({ amount: "97.00", ... }); the
+   * key's older shape uses the same three names, its amounts bare numbers
+   * (the workspace's _admin/prds/first-paid-fix/facts_whop.md).
    */
   subtotal?: WhopMoney;
   tax_amount?: WhopMoney;
   tax_behavior?: string | null;
   /**
-   * The currency, read by fetchRealCoursePayments alone (T-122's second fix
-   * round, 2026-10-21; the same reference, read that day):
-   * `currency`, "The currency the payment settles in, lowercase ISO 4217.
-   * Every money field below is stated in it unless it says otherwise", and
-   * `usd_total`, "The total converted to USD at the time of the charge, for
-   * reporting across currencies", a money object or null. Each money object
-   * names its own currency too.
+   * The currency, read by fetchCoursePayments alone (T-122's second fix
+   * round, 2026-10-21; the same reference): `currency`, "The currency the
+   * payment settles in, lowercase ISO 4217. Every money field below is
+   * stated in it unless it says otherwise". Each money object names its own
+   * currency too. The payment's `usd_total` is not read: since T-122's third
+   * fix round a payment in another currency is judged by its code alone.
    */
   currency?: string | null;
-  usd_total?: WhopMoney;
+  /**
+   * Why the charge was made, read by fetchCoursePayments alone (T-122's third
+   * fix round, 2026-10-22; the same reference): `billing_reason`, "Why the
+   * charge was created: a first purchase, a renewal, a one-time payment, or a
+   * manual charge", one of `subscription_create`, `subscription_cycle`,
+   * `subscription_update`, `one_time`, `manual` and `subscription` (the
+   * BillingReasons list), or null. The reference names no proration and does
+   * not say what each value means; `subscription_update` is read as a change
+   * to the subscription (a plan change and its proration) by its name, and
+   * the list's own filter says renewals are sometimes recorded under it too:
+   * "`subscription_cycle` also matches renewals recorded as
+   * `subscription_update`".
+   */
+  billing_reason?: string | null;
 }
 
 /** Why a payment read does not count. */
@@ -416,18 +433,26 @@ function refId(value: unknown): string | null {
   return typeof id === "string" && id.trim() !== "" ? id : null;
 }
 
-/** One real course payment of a user, as the coupon check reads it (fetchRealCoursePayments). */
-export interface RealCoursePayment {
-  paidAt: string;
-  /** What the payment charged: `total` under THE RULE, above 0, in `currency`. */
-  total: number;
+/** One course payment of a user, as the coupon check reads it (fetchCoursePayments): any the list gives, a $0 one too. */
+export interface CoursePayment {
+  /**
+   * A real payment under THE RULE above (judgePayment): paid, paid_at set, a
+   * total above 0, not refunded or lost in a dispute. A $0 payment never is,
+   * nor one whose total or paid_at does not read: the coupon check reads
+   * those for the code they name alone.
+   */
+  real: boolean;
+  /** When it was paid, ISO: `paid_at`, else `created_at`; null when neither reads. It orders the list. */
+  paidAt: string | null;
+  /** What the payment charged (`total`), in `currency`; null when it does not read. */
+  total: number | null;
   /**
    * The currency the payment settles in, lower case: `currency`, else the
    * total's own; null when the payment names none. Its amounts are in it.
    */
   currency: string | null;
-  /** The total in dollars at the time of the charge (`usd_total`); null when it is missing, null or does not read. */
-  usdTotal: number | null;
+  /** Why the charge was made (`billing_reason`); null when the payment names none. */
+  billingReason: string | null;
   productId: string | null;
   membershipId: string | null;
   promoCodeId: string | null;
@@ -472,28 +497,42 @@ function currencyOf(p: Pick<WhopPayment, "currency" | "total">): string | null {
   return named !== null && named.trim() !== "" ? named.trim().toLowerCase() : null;
 }
 
-export type RealCoursePaymentsRead =
-  | { ok: true; payments: RealCoursePayment[]; seen: number; kept: number }
+export type CoursePaymentsRead =
+  | { ok: true; payments: CoursePayment[]; seen: number; kept: number }
   | { ok: false; fail: PaymentReadFail };
 
 /**
- * Every real payment of one user (THE RULE above) among the payments for
- * `productIds`, newest first by paid_at, a tie in Whop's order: a payment
- * naming another product is left out, one naming none is kept. `payments` is
- * empty when there is none. The coupon check judges each
- * (membership-discount.ts, T-122; every one since its second fix round, the
- * newest alone until then). The same pinned read as
+ * Every payment of one user that the list gives among the payments for
+ * `productIds`, newest first (paid_at, else created_at; one with neither
+ * last; a tie in Whop's order): a payment naming another product is left
+ * out, one naming none is kept, and so is one that is not a real payment
+ * under THE RULE above (a $0 one, a refunded one, one whose total or paid_at
+ * does not read), with `real` false. `kept` counts the real ones. The coupon
+ * check judges them (membership-discount.ts, T-122): a code on any of them,
+ * then the price of the real ones. The same pinned read as
  * fetchFirstPaymentForUser, GET /api/v1/payments?user_id=<id>&status=paid
  * &first=100, every page, every row's user checked; on the caller's key, its
  * pace (shared with its other Whop reads) and its limits: no request starts
  * after `startBy` and no answer is waited on past `answerBy`.
+ *
+ * THE $0 PAYMENTS. The pinned list gives them with the rest, and takes no
+ * parameter for them: Whop's changelog entry for 2026-09-02 (API Versions,
+ * docs.whop.com, read 2026-10-22), which every later version keeps, says
+ * "Zero-amount payments are included, so the proxy's `include_free` is
+ * gone", and "An invalid `status` is a `400`, as is any proxy-only filter
+ * (...) rather than an unfiltered page". `include_free` ("Defaults to false,
+ * so zero-amount payments are omitted") is a parameter of the older list
+ * that a key without the pin answers, so it is not sent: on this list it
+ * could turn every read into a 400. A $0 payment is listed only when Whop
+ * gives it the status paid; one it leaves out is not seen here, and a code it
+ * carried is then seen on the membership alone.
  */
-export async function fetchRealCoursePayments(
+export async function fetchCoursePayments(
   whopUserId: string,
   opts: { apiKey: string; pace: Pace; startBy: number | null; answerBy: number | null; productIds: ReadonlySet<string> },
-): Promise<RealCoursePaymentsRead> {
+): Promise<CoursePaymentsRead> {
   if (!opts.apiKey) return { ok: false, fail: "no_api_key" };
-  const payments: RealCoursePayment[] = [];
+  const payments: CoursePayment[] = [];
   let seen = 0;
   let after: string | null = null;
   for (let page = 0; page < USER_MAX_PAGES; page++) {
@@ -506,16 +545,16 @@ export async function fetchRealCoursePayments(
       seen += 1;
       // A row naming no buyer is nobody's, as in addFirstPayments.
       if (!p.user?.id) continue;
-      const judged = judgePayment(p);
-      if (!judged.keep) continue;
       const productId = refId(p.product_id) ?? refId(p.product);
       if (productId !== null && !opts.productIds.has(productId)) continue;
       const code = p.promo_code !== null && typeof p.promo_code === "object" ? p.promo_code.code : null;
+      const reason = typeof p.billing_reason === "string" ? p.billing_reason.trim() : "";
       payments.push({
-        paidAt: judged.paidAt,
-        total: moneyAmount(p.total),
+        real: judgePayment(p).keep,
+        paidAt: toIso(p.paid_at ?? null) ?? toIso(p.created_at ?? null),
+        total: amountOrNull(p.total),
         currency: currencyOf(p),
-        usdTotal: amountOrNull(p.usd_total),
+        billingReason: reason !== "" ? reason : null,
         productId,
         membershipId: refId(p.membership_id) ?? refId(p.membership),
         promoCodeId: refId(p.promo_code_id) ?? refId(p.promo_code),
@@ -525,9 +564,17 @@ export async function fetchRealCoursePayments(
       });
     }
     if (!got.next) {
-      // Array sort is stable: payments paid at the same moment keep Whop's order.
-      payments.sort((a, b) => Date.parse(b.paidAt) - Date.parse(a.paidAt));
-      return { ok: true, payments, seen, kept: payments.length };
+      // Newest first, one with no date last. Array sort is stable: payments paid at the same moment keep Whop's order.
+      const at = (x: CoursePayment) => (x.paidAt === null ? null : Date.parse(x.paidAt));
+      payments.sort((a, b) => {
+        const x = at(a);
+        const y = at(b);
+        if (x === y) return 0;
+        if (x === null) return 1;
+        if (y === null) return -1;
+        return y - x;
+      });
+      return { ok: true, payments, seen, kept: payments.filter((x) => x.real).length };
     }
     after = got.next;
   }

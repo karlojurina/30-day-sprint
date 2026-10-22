@@ -19,12 +19,13 @@
  * again" asks for one student (POST /api/admin/thirty/check-coupon).
  *
  * Since T-122 every student ends in a yes or a no unless Whop does not
- * answer: the membership on file, else every course membership found through
- * the student's Whop user, and whenever those show no discount every real
- * course payment (since T-122's second fix round; the latest alone, and only
- * when no membership answered, until then): a code on one that took money
- * off, or a price under 97.00, is a discount. `by_source` counts the answers
- * by that step, and `failed` holds
+ * answer, and since its third fix round by the owner's rule as he put it: a
+ * promo code other than the student's own 30% on the membership on file, on
+ * any course membership found through their Whop user (read whatever the one
+ * on file said) or on any course payment, the $0 ones too, is a coupon; with
+ * no code anywhere, a real payment in dollars under 97.00 that is no plan
+ * change is one. `by_source` counts the answers by the step that answered,
+ * and `failed` holds
  * only the students Whop gave no answer for (no connection, a 5xx, a 429
  * after its retries, no answer in time, a refused key, payments it could not
  * judge, or a deployment that cannot ask). The first dry run on production
@@ -33,8 +34,13 @@
  *
  * ?mode=dry reads Whop and writes nothing, for the first look after a deploy:
  * it passes when `checked` is above 0 and `failed` is empty, and
- * `discounted` is about the number of students in the window on a code like
- * evolve10.
+ * `discounted` is about the number of students in the window who came in on
+ * a code, a used one included (evolve10, welcome50, a 100% first month).
+ * After the deploy of T-122's third fix round, with v113 pasted, the run in
+ * write mode is repeated until `left` is 0, so every stored row is one this
+ * rule wrote (its source set): until then a stored "no coupon" holds no
+ * source, and the request routes give their 503 for it when Whop does not
+ * answer.
  *
  * Auth: CRON_SECRET as a bearer, like every cron (src/lib/cron-auth.ts), with
  * a cron_runs row. Answers 500, ok: false, when who is in the window or who

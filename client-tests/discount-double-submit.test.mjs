@@ -74,7 +74,9 @@ async function heard(fn) {
  * gate watched, inside the 14 days. Their Whop membership was checked and
  * holds no discount (the stored row; no Whop key here): since the owner's
  * review of 2026-10-21 a coupon check that cannot run writes nothing, so the
- * routes reach the write only with an answer on file.
+ * routes reach the write only with an answer on file. The row holds its
+ * source: since T-122's third fix round a stored "no coupon" answers only
+ * when the rule of that round wrote it (v113's source set).
  */
 function newCourseDb() {
   setCatalog({ v2: true, lessonsTable: 'lessons_next' })
@@ -82,7 +84,7 @@ function newCourseDb() {
     students: [{ id: 's1', supabase_user_id: 'auth-1', first_paid_at: PAID, joined_at: PAID, whop_membership_id: 'mem_devClean' }],
     student_membership_discounts: [{
       student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null,
-      renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: iso(NOW - DAY),
+      renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: iso(NOW - DAY), source: 'membership',
     }],
     lessons_next: [
       { id: 'a1l01', type: 'watch', sort_order: 1, duration_seconds: 300 },

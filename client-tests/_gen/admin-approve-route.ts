@@ -4,7 +4,7 @@ import { DISCOUNT_WINDOW_DAYS } from "./constants.ts";
 import { createWhopPromoCode } from "./stub-admin.ts";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
 import { getCurriculumResetAt } from "./curriculum-reset.ts";
-import { checkMembershipDiscount } from "./membership-discount.ts";
+import { checkMembershipDiscount, teamThirtyCodeFor } from "./membership-discount.ts";
 import {
   approvalVerdict,
   couponApprovalRefusal,
@@ -16,13 +16,15 @@ import {
  * Approve a pending discount request.
  *
  * Flow (one click for Astrid):
- *   0. The coupon (admin rebuild 2, D5): a student whose Whop membership
- *      already has a discount on its next renewal gets no 30%, whatever the
- *      rule says and with `override` too. Whop is asked now
- *      (checkMembershipDiscount); when it does not answer, the stored row
- *      decides; with neither, nothing blocks. The refusal is a 400 with
- *      code "has-discount" and names the code. `overrideCoupon` skips it
- *      (below).
+ *   0. The coupon (admin rebuild 2, D5): a student who already has a coupon
+ *      gets no 30%, whatever the rule says and with `override` too. Whop is
+ *      asked now (checkMembershipDiscount, the owner's rule since T-122's
+ *      third fix round: a code other than the student's own 30% on any
+ *      course membership or course payment, then a price under 97.00);
+ *      when it does not answer, the stored row decides if it is a coupon, or
+ *      no coupon written by that rule (its source set, v113); with neither,
+ *      nothing blocks. The refusal is a 400 with code "has-discount" and
+ *      names the code. `overrideCoupon` skips it (below).
  *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
  *      the ads are not checked (the owner's decision: the 30% already asks
  *      for 61 videos), so students.ad_submissions_verified decides nothing
@@ -296,8 +298,10 @@ export async function POST(request: NextRequest) {
   // Generate the code via Whop API.
   // Format: ECOM30-{first 6 chars of student id, uppercased}. Stable
   // per-student so a re-run would collide on Whop's side rather than
-  // silently mint a duplicate.
-  const code = `ECOM30-${studentRow.id.slice(0, 6).toUpperCase()}`;
+  // silently mint a duplicate. teamThirtyCodeFor makes it, and the coupon
+  // check reads a code by that name on this student's membership or payment
+  // as their own 30%, never a coupon (T-122's third fix round).
+  const code = teamThirtyCodeFor(studentRow.id);
 
   // Optional plan scoping. If WHOP_DISCOUNT_PLAN_IDS is set, the code
   // only works on those specific plans (comma-separated plan IDs).

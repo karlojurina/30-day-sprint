@@ -101,7 +101,9 @@ const OCT_2 = '2026-10-02T10:00:00.000Z'
  * The student, their Whop membership checked and holding no discount (the
  * stored row; no Whop key here): since the owner's review of 2026-10-21 a
  * coupon check that cannot run writes nothing, so Apply goes in only with an
- * answer on file.
+ * answer on file. The row holds its source: since T-122's third fix round a
+ * stored "no coupon" answers only when the rule of that round wrote it
+ * (v113's source set).
  */
 function freshDb(paid = OCT_2, requests = []) {
   setCatalog({ v2: true, lessonsTable: 'lessons' })
@@ -109,7 +111,7 @@ function freshDb(paid = OCT_2, requests = []) {
     students: [{ id: 's1', whop_user_id: 'user_1', supabase_user_id: 'auth-1', first_paid_at: paid, joined_at: paid, whop_membership_id: 'mem_devClean' }],
     student_membership_discounts: [{
       student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null,
-      renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-01T08:00:00.000Z',
+      renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-01T08:00:00.000Z', source: 'membership',
     }],
     lessons: LESSONS,
     lesson_videos: Object.keys(lengths).map((lesson_id) => ({ lesson_id, created_at: '2026-10-12T00:00:00.000Z' })),

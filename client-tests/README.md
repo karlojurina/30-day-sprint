@@ -130,17 +130,27 @@ from the planned ones instead of the rows written, and no pace after a failed
 read. The sections added in its fix round fail on each of those 6, and on 8
 breaks of the two rules that round added (the read limit, and no tick for a
 streak that already counts today). `streak.test.mjs` runs the catch-up's one
-streak rule too. Since 2026-10-22 a section holds the four action items
-finished with Done alone (`isDoneOnly`) beside `a5l22`, which keeps its link:
-dry counts, then a write that adds one of the four with both halves at Whop's
-time, finishes one with a link saved before (the link kept), gives one that
-holds a login's watch half the action half alone at Whop's time, leaves one
-done in the app and `a5l22`'s action half alone, and dates both halves at the
-run's clock when Whop gives no time; Triple Threat's `finishedAt` on the rows,
-the change log's `actions_finished`, a second pass that writes nothing, the
-undo from the change log putting every row back as the snapshot holds it, and
-a failed write of the action half (that member failed, the next pass writes
-it, and no member counted as getting rows for it).
+streak rule too. Since 2026-10-22 a section holds the four action items of
+AI Ads + Content finished with Done alone (`isDoneOnly`) beside `a5l23`, the
+Static Ad Brief, which keeps its link: dry counts, then a write that adds one
+of the four with both halves at Whop's time, finishes one with a link saved
+before (the link kept), gives one that holds a login's watch half the action
+half alone at Whop's time, leaves one done in the app and `a5l23`'s action
+half alone, and dates both halves at the run's clock when Whop gives no time;
+Triple Threat's `finishedAt` on the rows, the change log's
+`actions_finished`, a second pass that writes nothing, the undo from the
+change log putting every row back as the snapshot holds it, and a failed
+write of the action half (that member failed, the next pass writes it, and no
+member counted as getting rows for it). A second section holds the two of the
+seven with a video, `a5l08` and `a5l12`, where a row can hold a Done pressed
+before the video and no watch half: the dry counts leave that row's action
+half out; the write finishes its watch half at Whop's time and keeps the
+student's Done, adds `a5l12` with both halves, finishes `a5l23` as before,
+and leaves `a5l08` alone for a member Whop lists without it; the change log's
+`actions_finished` holds only the half the run wrote; the undo puts every row
+back with the Done still there; and a Done pressed between the run's read and
+its write is never written over (the next pass finishes the watch half
+alone).
 
 `achievements-v112.test.mjs` (2026-10-21, the badges for the new course,
 migration v112) runs every rule v112 changed on the real files:
@@ -176,39 +186,54 @@ them (with no switch it is the old rule); Triple Threat and the eight taken
 out are left out of it.
 
 `done-only.test.mjs` (2026-10-22, the owner's ask: the four action items of
-AI Ads + Content need no Discord link, only Done) holds the change on the
-real files. The list (`DONE_ONLY_ACTION_ITEMS` and `isDoneOnly` in
-`action-items.ts`) against `course_catalog.json`: the four are exactly the
-action items of AI Ads + Content, every one a setup lesson, and the other
-six are the course's other action items; no other file in `src/` writes the
-four ids in a string (the admin dev page's made-up student who did `a6l03`
-aside). The lesson page's block, `ActionItemBlock.tsx`, compiled here as
-Next compiles it into `_gen/done-only-block.mjs` (the CSS module stood in by
-a proxy that names each class by its own name) and rendered by React's
-server renderer: the Done kind before, with a link saved before the change
-and after Done (one button, Done, then "Completed on <date>." and nothing
-else, never a field, a link or a word of Discord), and the Discord kind as
-it was. `mark-action-shipped` through its own `POST` on the new course: each
-of the four completes with no link and the same steps after it; each of the
-other six without a link is refused with `PASTE_LINK_FIRST`, its video
-watched or not, and with a link goes through; a link already on a row of
-the four is kept, one sent in the body is never written, an undo is refused
-and a failed read is a 500. `save-action-link`, copied by `build.mjs` for
-this suite, still stores a link sent for one of the four. After Done, the
-row is complete by `isLessonComplete`, the real `update-streak.ts` counts the
-day (and only once), the real `evaluateAchievements` gives what a hand-in
-with a link gives, and the real map (`catalog.ts`, `map-model.ts`, on the
-whole course) moves the next lesson from `a6l03` to `a6l04`. The journey's
-drawer (`buildStudentDetail`, `actionItemStatus`) says "Done" with no link
-for the four, a link saved before the change included, and "Handed in" with
-it for the others. Each of 16 rules was broken once (the list ignored, one
-of the four left out, a link item put in, the route asking every action item
-or none for a link, the route skipping its failed read for the four or
-storing a link sent in the body, the view reading the link of one of the
-four, Done never offered, the block ignoring the kind, showing a field or
-another word on the button, the lesson page never passing the kind, the
-drawer showing the link, saying Handed in or keeping its own words), and the
-suite failed every time.
+AI Ads + Content need no Discord link, only Done; then his answer the same
+day that of Static Ads only the Static Ad Brief is sent to the coaches, so
+`a5l08`, `a5l12` and `a5l22` joined them) holds the change on the real
+files. The list (`DONE_ONLY_ACTION_ITEMS` and `isDoneOnly` in
+`action-items.ts`) against `course_catalog.json`: the seven are the four
+action items of AI Ads + Content, every one a setup lesson, and three of
+Static Ads, checked with its fourth by the titles the owner named (The
+Backbone and Imitation with a video, the Brand Deck a setup lesson, the
+Static Ad Brief with a video); the other three, `a3l17`, `a3l25` and
+`a5l23`, are the course's other action items. No other file in `src/` writes
+the seven ids in a string but three development fixtures (the admin dev
+page's made-up student who did `a6l03`, its made-up rating of `a5l22`, the
+placeholder course's action items). The lesson page's block,
+`ActionItemBlock.tsx`, compiled here as Next compiles it into
+`_gen/done-only-block.mjs` (the CSS module stood in by a proxy that names
+each class by its own name) and rendered by React's server renderer: the
+Done kind before, with a link saved before and after Done (one button, Done,
+then "Completed on <date>." and nothing else, never a field, a link or a word
+of Discord); on a video lesson, Done before the video ("Action completed on
+<date>. Watch the video to finish the lesson.", the Discord kind's words),
+the video before Done (still Done) and both; and the Discord kind as it was.
+`mark-action-shipped` through its own `POST` on the new course: each of the
+five with no video completes with no link and the same steps after it; on
+`a5l08` and `a5l12` Done writes the action half alone with the steps of an
+action done before its video (no "last active"), the same as the Discord
+kind's hand-in on `a5l23` before its video, and after the video both halves
+with the video's time kept; each of the other three without a link is
+refused with `PASTE_LINK_FIRST`, its video watched or not, and with a link
+goes through; a link already on a row of the seven is kept, one sent in the
+body is never written, an undo is refused and a failed read is a 500.
+`save-action-link`, copied by `build.mjs` for this suite, still stores a link
+sent for one of the seven. After Done, the row is complete by
+`isLessonComplete`, the real `update-streak.ts` counts the day (and only
+once), the real `evaluateAchievements` gives what a hand-in with a link
+gives, and the real map (`catalog.ts`, `map-model.ts`, on the whole course)
+moves the next lesson from `a6l03` to `a6l04`. On `a5l08` Done before its
+video counts no video anywhere one is counted: the lesson is not complete,
+it is in neither the watched set nor `videoDoneIds` (the 30%, which asks
+for videos up to its gate `a4l17` only), Triple Threat finds no finish, the
+streak day is the action's, the badges are Took the Shot alone as for a
+hand-in before its video, and Perfectionist waits for it with every other
+lesson of the course done; the real `lesson-watched` refuses the video at
+80% and finishes it played to its end, the Done kept, and Perfectionist then
+comes. The map holds the student at `a5l08` after Done alone and opens
+`a5l09` with both halves, in either order. The journey's drawer
+(`buildStudentDetail`, `actionItemStatus`) says "Done" with no link for the
+seven (on `a5l08` before its video too, the action's word), a link saved
+before included, and "Handed in" with it for the others.
 
 Its section 6 (the same day, the adversarial check's should-fix: a lesson
 finished on Whop counts in the app) runs the Whop webhook and the backfill
@@ -216,18 +241,47 @@ finished on Whop counts in the app) runs the Whop webhook and the backfill
 on the same stand-in with made-up Whop ids. The webhook gives `a6l03` both
 halves at the moment it arrives (the steps after a lesson once, a retry
 nothing) and `a6l10`, with a link saved before, both halves with the link
-kept; `a5l22` gets the watch half alone as before, and a row of the four that
-already holds the watch half alone is left to the backfill. The backfill adds
-`a6l03` with the action half at Whop's time, and the real map then opens
-`a6l04`; in one visit with three of the four, `a5l22` and an older row of
-`a6l17`, it counts 4 rows as new (not the older row), dates each action half
-at Whop's time, fills the older row's, leaves `a5l22` waiting, and the real
-badge engine gives Took the Shot and no Triple Threat, where the same rows with
-the sync's own time would make 3 on one day. Also `whopActionTime` itself, a
-lesson Whop lists twice, and a failed read or write of the four's rows (an
-error on the sync row, then filled at the next visit). Each of 21 rules of the
+kept; `a5l23` gets the watch half alone as before, and a row of the seven
+that already holds the watch half alone is left to the backfill. On the two
+with a video: `a5l08` with no row gets both halves; `a5l12` with Done pressed
+before its video gets the watch half and keeps the Done (every write of the
+action half asks for an empty one), and a retry writes nothing. The backfill
+adds `a6l03` with the action half at Whop's time, and the real map then
+opens `a6l04`; in one visit with three of the four, `a5l23` and an older row
+of `a6l17`, it counts 4 rows as new (not the older row), dates each action
+half at Whop's time, fills the older row's, leaves `a5l23` waiting, and the
+real badge engine gives Took the Shot and no Triple Threat, where the same
+rows with the sync's own time would make 3 on one day. It adds `a5l08` with
+both halves, finishes `a5l12` with its Done kept, leaves a pressed `a5l08`
+without a watch half when Whop lists the lessons around it and not it (and
+so does the webhook for another lesson), and fills the action half of an
+`a5l08` watched in the app that Whop lists. Also `whopActionTime` itself, a
+lesson Whop lists twice, and a failed read or write of the seven's rows (an
+error on the sync row, then filled at the next visit).
+
+Before the three of Static Ads joined: each of 16 rules was broken once
+(the list ignored, one of the four left out, a link item put in, the route
+asking every action item or none for a link, the route skipping its failed
+read for the four or storing a link sent in the body, the view reading the
+link of one of the four, Done never offered, the block ignoring the kind,
+showing a field or another word on the button, the lesson page never
+passing the kind, the drawer showing the link, saying Handed in or keeping
+its own words), and the suite failed every time; each of 21 rules of the
 three writers and `whopActionTime` was broken once, and `done-only`,
-`whop-catchup`, `whop-webhook` or `whop-backfill` failed every time.
+`whop-catchup`, `whop-webhook` or `whop-backfill` failed every time. With
+them, 17 more breaks, each run against `done-only`, `whop-catchup`,
+`whop-webhook`, `whop-webhook-old-rows`, `whop-backfill`,
+`achievements-v112`, `action-items` and `action-shipped-route`, and each
+failing one: the list without `a5l08`, `a5l12` or `a5l22`, or with `a5l23`;
+Done writing both halves on a video lesson; the view or the block saying
+"Completed on" before the video; the webhook writing the action half over a
+pressed Done, never finishing such a row, or giving a Done-only row the
+watch half alone; the catch-up planning or writing the action half over a
+pressed Done, its finish with no guard, or its dry count counting a pressed
+Done; the backfill with its skip and its filter both gone, or finishing a
+row Whop does not list; the drawer showing the link. The backfill with its
+skip alone gone fails nothing: its update's filter still writes nothing over
+a press.
 
 The crons (bug hunt of 19 October) run with less stood in than the routes
 above: `engagement-alerts.test.mjs` copies the real route, `discord.ts`,

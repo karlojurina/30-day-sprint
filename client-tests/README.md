@@ -706,6 +706,63 @@ ab12cd student), and the approval with no answer refused. `admin-discounts`
 no Whop key; `admin-review` (100) follows the reads' order; `admin-owner-review`
 (58) counts the seventh refusal carrying `code: "rule"`.
 
+T-122's fifth fix round (2026-10-22, `night/admin3`), the last: the fourth
+round's re-check passed with nothing blocking, and this round's items are its
+cases. `membership-discount` (634, +98) runs a section of its own, 96 checks
+with their own fixtures (ids `f5`), one case per item through
+`judgeStudentDiscount`, both request routes, the normal Approve (a founder,
+the stand-in's login) and the cron, beside the controls (a 97.00 checkout with
+no code; a no-code student with two canceled course memberships at 2.0 s an
+answer, let in by both routes in 6.5 s, the two read 250 ms apart, the last
+started at 4.5 s). (1) THE RULE STAMP: the "no coupon" a89ff1c or the
+world-engine preview stored (source `membership`, a step's word alone) and
+this rule's stamped row written over by a build from before T-122 (an upsert
+of the eight v111 columns through the stand-in client, which keeps the stamp
+and takes a new `checked_at`) are the 503 with Whop down, and Approve's
+refusal, each with its log line; a stamped row from one write still answers;
+`stampedByThisRule` alone. (2) The students read failing in the check: a
+stored no coupon is the 503 (it let the request in) with a warning line, and
+Approve's refusal in the team's words; a stored coupon still refuses. (3) A
+membership read wrapped, `{}`, with no code field or of another id is no
+answer (`bad_shape`), and the key's older `promo_code` still reads; welcome50
+on a payment row naming no buyer refuses, and a 10.00 row naming no buyer at
+the first payment's moment never judges by its price. (4) Another product's
+membership on file naming its code: let in with the course membership at
+97.00 through the user, refused with welcome50 on it, and the course one on
+file let in. (5) A 0.00 of 97.00, 873.00 of 970.00, EUR 44.95 of 89.90 and a
+refunded 48.50 of 97.00, none naming a code, refuse by the subtotal; the
+student's own 30% named on a payment is no coupon by their request; a plan
+change's 12.34 of 97.00 is not judged; `discountWithoutCode` alone. (6) A
+10.00 add-on listed before the 97.00 checkout at the first payment's moment
+lets in, the same with no billing reason too (the highest price), and a 48.50
+checkout beside a 97.00 one-time charge refuses (the checkout); the canceled
+memberships read at once (the two read 250 ms apart), one on a 100% code
+refused inside the 8 s; `firstRealPayment` alone. (7) The v2 list answering
+410 or 404: the live answer lets in, the row stored with no source, then with
+Whop down that row is the 503 and Approve's refusal; a coupon judged with the
+list unusable keeps its stamp. The cron writes every case past a stand-in of
+v113's check (an upsert carrying a `source` that is not this rule's fails
+23514), each coupon stamped, the no coupons stamped but the two judged without
+the list, the four unreadable membership reads in `failed`, and lists the four
+refused by a subtotal in `refused_by_subtotal` and the checkout refused by the
+price in `refused_by_price`. Against `f7e6b27` in a scratch copy (`git
+archive`, this file copied in) 78 of the section's 96 checks fail and 18 pass:
+the controls, the Approve answers both builds give, and two the old code
+refuses only because it does not know this round's stamp. Earlier checks moved
+with the round: the stored source reads as the stamp (`R5` and `stampedBy` in
+the suite), the seeds of this rule's rows carry it, and three changed their
+answer: with no course product named nothing is read (the membership on file
+was, and its code answered), a membership read answering `{}` is no answer (a
+known limit until now), and a stored no coupon holding a step's word alone is
+no answer; the fourth round's section gains two checks on the preview's row
+(stamped and naming welcome50, and naming no code with the preview's word, each
+the 503). `admin-discounts` (29), `admin-owner-review` (58),
+`discount-double-submit` (33) and `discount-september` (65) seed their stored
+no coupon with this rule's stamp; `admin-review` (100) answers a membership
+read with the id asked for (its stand-in answered `mem_x` for any) and names
+the course product for its stalled cron run, since a check with none named
+stops before any read.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

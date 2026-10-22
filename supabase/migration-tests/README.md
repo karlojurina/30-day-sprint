@@ -23,11 +23,20 @@ Exit code 0 = every assertion passed. Failures print first and last.
 rebuild 2, D5, in a file of its own so the lanes that added v109 and v110
 to `run.mjs` merged without touching it), then `v113.test.mjs` (v113 and
 its undo, T-122: `student_membership_discounts.source`, the step of the
-coupon check that answered; a row carrying it refused before v113, pasted
-twice, only the three words or empty, the undo keeping every row, and v113
-on a database without v111). On `night/admin2` with the 5 lanes merged:
-`PASS 702   FAIL 0`, then `PASS 22   FAIL 0`. On `night/admin3` for
-T-122: `PASS 702   FAIL 0`, `PASS 22   FAIL 0`, then `PASS 23   FAIL 0`.
+coupon check that answered, since T-122's fifth fix round THE RULE STAMP,
+the rule's version and the step (`r5-membership`, `r5-user`,
+`r5-payment`), with `source_checked_at`, the `checked_at` of the write that
+set it; a row carrying them refused before v113, pasted twice, only this
+rule's three values or empty, an earlier round's words (`membership`,
+`user`, `payment`) refused and emptied from a database that holds the
+earlier copy of the file, the older builds' writes made as PostgREST makes
+them, an earlier round's refused whole and one from before T-122 keeping the
+stamp with a new `checked_at`, the undo dropping both columns and keeping
+every row, and v113 on a database without v111). On `night/admin2` with the
+5 lanes merged: `PASS 702   FAIL 0`, then `PASS 22   FAIL 0`. On
+`night/admin3` for T-122: `PASS 702   FAIL 0`, `PASS 22   FAIL 0`, then
+`PASS 23   FAIL 0`; for its fifth fix round (2026-10-22): `PASS 702   FAIL
+0`, `PASS 22   FAIL 0`, then `PASS 34   FAIL 0`.
 
 ## What it actually checks
 

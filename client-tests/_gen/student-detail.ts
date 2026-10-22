@@ -40,6 +40,7 @@ import { activityLabel, type ActivityLabel } from "./curriculum-reset.ts";
 import { discountStatusWords, type DiscountTone } from "./discount-status.ts";
 import { isCanceling } from "./metrics-definitions.ts";
 import { whopPulled } from "./thirty-view.ts";
+import { isDoneOnly } from "./action-items.ts";
 import type { CourseActivity } from "./types-erased.ts";
 import { bareUsername, dayNumber, readOf, type Problem, type Read } from "./people-common.ts";
 
@@ -196,7 +197,13 @@ export interface StudentDetail {
   lessonsDone: Read<number>;
   streak: Read<number>;
   areas: Read<AreaProgress[]>;
-  actionItems: Read<Array<{ id: string; title: string; shipped: boolean; link: string | null }>>;
+  /**
+   * Every action item of the course with what the drawer says of it
+   * (actionItemStatus): "Handed in" with its Discord link, or "Done" for one
+   * with nothing to post (isDoneOnly, the four of AI Ads + Content), whose
+   * link is always null; "Not yet" until the action is done.
+   */
+  actionItems: Read<Array<{ id: string; title: string; shipped: boolean; status: ActionItemStatus; link: string | null }>>;
   discount: Read<{ status: string; text: string; tone: DiscountTone; code: string | null; askedAt: string } | null>;
   sync: Read<SyncView>;
   /** The program link the Welcome DM sends, or null when it is not set or could not be read (the sentence then has no link). */
@@ -204,6 +211,18 @@ export interface StudentDetail {
   /** Which course is live could not be read: what that means for the page, and the read's own words. */
   courseProblem: Problem | null;
   generatedAt: string;
+}
+
+/** What the journey's drawer says of an action item. */
+export type ActionItemStatus = "Handed in" | "Done" | "Not yet";
+
+/**
+ * "Handed in" for an action item done with its Discord link, "Done" for one
+ * done with nothing to post (isDoneOnly), "Not yet" for either before it is.
+ */
+export function actionItemStatus(shipped: boolean, doneOnly: boolean): ActionItemStatus {
+  if (!shipped) return "Not yet";
+  return doneOnly ? "Done" : "Handed in";
 }
 
 /** The first of `reads` that failed, or null when every one worked. */
@@ -276,11 +295,15 @@ export function buildStudentDetail(
       .filter((l) => l.requires_action || l.type === "action")
       .map((l) => {
         const c = completions.find((x) => x.lesson_id === l.id);
+        const shipped = Boolean(c?.action_completed_at) || Boolean(c?.completed_at && l.type === "action");
+        // A Done-only action item has nothing posted: no link is shown, even one saved before 2026-10-22.
+        const doneOnly = isDoneOnly(l.id);
         return {
           id: l.id,
           title: l.title?.trim() || l.id,
-          shipped: Boolean(c?.action_completed_at) || Boolean(c?.completed_at && l.type === "action"),
-          link: c?.discord_message_link ?? null,
+          shipped,
+          status: actionItemStatus(shipped, doneOnly),
+          link: doneOnly ? null : (c?.discord_message_link ?? null),
         };
       }),
   };

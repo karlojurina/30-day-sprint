@@ -32,13 +32,24 @@ const NO_ANSWER = "Couldn't reach the server. Nothing was saved, so try again.";
  * The state comes from the student's row (`row`), as the context holds it;
  * this component only keeps what is being typed. The caller gives it a `key`
  * per lesson, so nothing typed carries over to the next lesson.
+ *
+ * DONE ONLY (`doneOnly`, the owner, 2026-10-22): an action item with nothing
+ * to post (isDoneOnly in action-items.ts, the four of AI Ads + Content) has
+ * no field, no link and no word of Discord. The Milestone box above says what
+ * to do; this block holds one button, Done, which calls `onComplete` as the
+ * complete button does, so the same request makes the same writes. Then it
+ * says "Completed on <date>." and nothing else, whatever link the row may
+ * hold from before. data-hand-in tells the two kinds apart ("link", "done").
  */
 export function ActionItemBlock({
+  doneOnly = false,
   separateWatchHalf,
   row,
   onSave,
   onComplete,
 }: {
+  /** Finished with Done alone: no Discord link (isDoneOnly). */
+  doneOnly?: boolean;
   /** The lesson's other half comes from watching its video (a watch lesson). */
   separateWatchHalf: boolean;
   /** The student's completion row for this lesson, or null. */
@@ -48,7 +59,7 @@ export function ActionItemBlock({
   /** Complete the action. Resolves to null, or to the message to show. */
   onComplete: () => Promise<string | null>;
 }) {
-  const view = actionItemView(row, separateWatchHalf);
+  const view = actionItemView(row, separateWatchHalf, doneOnly);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -162,23 +173,48 @@ export function ActionItemBlock({
 
   const day = view.completedAt ? dayOf(view.completedAt) : null;
 
+  const completedLine = view.state === "completed" && view.completedAt && (
+    // Focused after the complete button, which is gone by then. Not a control: no ring.
+    <p ref={stateRef} tabIndex={-1} className={u.submitState}>
+      <span className={u.doneDot} aria-hidden="true" />
+      <span>
+        {view.waitingOnVideo ? "Action completed on " : "Completed on "}
+        <time dateTime={view.completedAt}>{day}</time>.
+        {view.waitingOnVideo && " Watch the video to finish the lesson."}
+      </span>
+    </p>
+  );
+
+  const errorLine = error && (
+    <p id={errorId} role="alert" className={u.submitError}>
+      <span className={u.errorMark} aria-hidden="true" />
+      <span>{error}</span>
+    </p>
+  );
+
+  if (doneOnly) {
+    return (
+      <section className={u.submit} aria-label="Action item" data-action-item={view.state} data-hand-in="done">
+        {completedLine}
+        {view.canComplete && (
+          <div className={u.submitActions}>
+            <button ref={completeRef} type="button" className={u.primary} onClick={complete} disabled={busy !== null}>
+              {busy === "complete" ? "Saving…" : "Done"}
+            </button>
+          </div>
+        )}
+        {errorLine}
+      </section>
+    );
+  }
+
   return (
-    <section className={u.submit} aria-labelledby={headingId} data-action-item={view.state}>
+    <section className={u.submit} aria-labelledby={headingId} data-action-item={view.state} data-hand-in="link">
       <h2 id={headingId} className={u.submitLabel}>
         Discord link
       </h2>
 
-      {view.state === "completed" && view.completedAt && (
-        // Focused after the complete button, which is gone by then. Not a control: no ring.
-        <p ref={stateRef} tabIndex={-1} className={u.submitState}>
-          <span className={u.doneDot} aria-hidden="true" />
-          <span>
-            {view.waitingOnVideo ? "Action completed on " : "Completed on "}
-            <time dateTime={view.completedAt}>{day}</time>.
-            {view.waitingOnVideo && " Watch the video to finish the lesson."}
-          </span>
-        </p>
-      )}
+      {completedLine}
 
       {showForm ? (
         <>
@@ -254,12 +290,7 @@ export function ActionItemBlock({
         </div>
       )}
 
-      {error && (
-        <p id={errorId} role="alert" className={u.submitError}>
-          <span className={u.errorMark} aria-hidden="true" />
-          <span>{error}</span>
-        </p>
-      )}
+      {errorLine}
     </section>
   );
 }

@@ -9,6 +9,7 @@ import { useStudent } from "@/contexts/StudentContext";
 import { LessonPlayer } from "@/components/world/LessonPlayer";
 import { LessonText } from "@/components/world/LessonText";
 import { ActionItemBlock } from "@/components/world/ActionItemBlock";
+import { isDoneOnly } from "@/lib/world/action-items";
 import { LessonRating } from "@/components/world/LessonRating";
 import { ratingRefusal } from "@/lib/world/lesson-rating";
 import { useLessonTransport } from "@/lib/world/useLessonTransport";
@@ -63,7 +64,9 @@ import u from "@/components/world/world-ui.module.css";
  *
  * AN ACTION ITEM (requires_action) gets its hand-in last, under the text (or
  * under the Milestone box when there is no text): the Discord link, Save, and
- * the complete button (ActionItemBlock.tsx). On a lesson with no video the
+ * the complete button (ActionItemBlock.tsx); for one of the four with nothing
+ * to post (isDoneOnly, AI Ads + Content, 2026-10-22) a Done button alone,
+ * which completes it the same way. On a lesson with no video the
  * button completes the lesson, and "Next lesson" lights the moment the context
  * says it is done. On a video lesson it completes the action half, and the
  * lesson is done once the video is watched too; "Next lesson" lights as soon
@@ -280,6 +283,7 @@ export function LessonScreen({
       {lesson.requires_action && (
         <ActionItemBlock
           key={lesson.id}
+          doneOnly={isDoneOnly(lesson.id)}
           separateWatchHalf={watch}
           row={(completions ?? []).find((c) => c.lesson_id === lesson.id) ?? null}
           onSave={(link) => saveDiscordLink(lesson.id, link)}

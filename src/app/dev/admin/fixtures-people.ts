@@ -30,6 +30,7 @@
 import type { Answer } from "@/lib/admin/admin-transport";
 import { MONTHLY_97_PLAN_IDS } from "@/lib/constants";
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE } from "@/lib/world/discount";
+import { isDoneOnly } from "@/lib/world/action-items";
 import type { InsightsTransport, PeopleTransport, TasksTransport } from "@/lib/admin/people-transport";
 import type { CourseActivity } from "@/lib/useJourneyPaceCounts";
 import type { OutreachInsights } from "@/lib/outreach-insights";
@@ -71,30 +72,33 @@ const okAnswer = <T>(data: T): Answer<T> => ({ ok: true, status: 200, data });
 const errAnswer = <T>(error: string): Answer<T> => ({ ok: false, status: 500, error });
 
 // ── The course: 8 areas of 3 lessons, one of them an action item, and one
-// lesson outside progress. Titles are made up.
+// lesson outside progress. Titles are made up. a6l03 is one of the real
+// course's action items with nothing to post (isDoneOnly, 2026-10-22), so
+// the drawer says Done for it with no link, and no link is ever saved on it.
 const AREAS = [
   ["a1", "Foundations"],
   ["a2", "Research"],
   ["a3", "Hooks"],
   ["a4", "Scripts"],
   ["a5", "Editing"],
-  ["a6", "Statics"],
+  ["a6", "AI Ads"],
   ["a7", "Clients"],
   ["a8", "Scale"],
 ] as const;
 const REGIONS = AREAS.map(([id, name], i) => ({ id, name, order_num: i + 1 }));
 const LESSONS: DetailLesson[] = [
   ...AREAS.flatMap(([area, name]) =>
-    [1, 2, 3].map(
-      (n): DetailLesson => ({
-        id: `${area}l0${n}`,
+    [1, 2, 3].map((n): DetailLesson => {
+      const id = `${area}l0${n}`;
+      return {
+        id,
         region_id: area,
-        title: n === 3 ? `${name}: hand in your work` : `${name}, part ${n}`,
+        title: n !== 3 ? `${name}, part ${n}` : isDoneOnly(id) ? `${name}: study the winners` : `${name}: hand in your work`,
         type: n === 3 ? "action" : "watch",
         requires_action: n === 3,
         counts_toward_progress: true,
-      }),
-    ),
+      };
+    }),
   ),
   { id: "a8l99", region_id: "a8", title: "Bonus call recording", type: "watch", requires_action: false, counts_toward_progress: false },
 ];
@@ -121,6 +125,8 @@ interface Person {
   canceling?: string;
   /** Lessons done, in the course's order (the first N counting lessons). */
   done: number;
+  /** Lessons done ahead of the course's order, counted in `done`: the first done minus these counting lessons, then these. */
+  ahead?: string[];
   /** The last counted lesson, after the switch. */
   lastLesson?: string;
   exempt?: boolean;
@@ -173,9 +179,11 @@ const PEOPLE: Person[] = [
   },
   {
     // A username longer than a journey card is wide: it ends in an ellipsis there, its whole text in a title.
+    // He did AI Ads' action item ahead of the order, so his drawer holds both kinds: four handed in with
+    // their links, and a6l03 done with nothing to post (admin-pages.mjs reads them).
     id: "p-maximilian", name: "Maximilian Featherstonehaugh-Smythe", email: "max.featherstonehaugh.smythe@example.com",
     username: "max.featherstonehaugh.smythe", status: "active", paid: "2026-10-09T10:00:00.000Z", lastActive: "2026-10-21T06:00:00.000Z",
-    done: 14, lastLesson: "2026-10-21T05:30:00.000Z", streak: { current: 6, last: "2026-10-21" },
+    done: 14, ahead: ["a6l03"], lastLesson: "2026-10-21T05:30:00.000Z", streak: { current: 6, last: "2026-10-21" },
   },
   // Paid in September, before 1 October: on neither All students nor the journey (the owner's review, 2026-10-21).
   {
@@ -242,13 +250,17 @@ function listStudent(p: Person): ListStudent {
 }
 
 function completionsOf(p: Person) {
-  const counting = LESSONS.filter((l) => l.counts_toward_progress !== false).slice(0, p.done);
+  const ahead = p.ahead ?? [];
+  const inOrder = LESSONS.filter((l) => l.counts_toward_progress !== false && !ahead.includes(l.id)).slice(0, p.done - ahead.length);
+  const counting = [...inOrder, ...LESSONS.filter((l) => ahead.includes(l.id))];
   return counting.map((l) => ({
     lesson_id: l.id,
     completed_at: p.lastLesson ?? SWITCH_AT,
     action_completed_at: l.requires_action ? (p.lastLesson ?? SWITCH_AT) : null,
     skipped_at: null,
-    discord_message_link: l.requires_action ? `https://discord.com/channels/100000000000000001/100000000000000002/1000000000000${p.done}0${l.id.length}` : null,
+    // A Done-only action item has nothing posted, so no link (isDoneOnly).
+    discord_message_link:
+      l.requires_action && !isDoneOnly(l.id) ? `https://discord.com/channels/100000000000000001/100000000000000002/1000000000000${p.done}0${l.id.length}` : null,
   }));
 }
 

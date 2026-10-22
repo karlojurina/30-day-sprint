@@ -612,6 +612,12 @@
   background: var(--color-surface-2);
 }
 
+/* A Done-only action item's block has no label above its button or its
+   completed line, so whichever comes first sits on the card's own padding. */
+.submit > :first-child {
+  margin-top: 0;
+}
+
 /* Secondary ink: the tertiary measures under 4:1 on this surface. */
 .submitLabel {
   margin: 0;

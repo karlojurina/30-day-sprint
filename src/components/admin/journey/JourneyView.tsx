@@ -382,7 +382,8 @@ function JourneyDrawer({ studentId, transport, onClose }: { studentId: string; t
                     {loaded.data.actionItems.data.map((a) => (
                       <li key={a.id} className="flex flex-wrap items-center" style={{ gap: 8, fontSize: 13 }}>
                         <span style={{ flex: "1 1 160px", minWidth: 0, color: a.shipped ? "var(--color-text-primary)" : "var(--color-text-secondary)" }}>{a.title}</span>
-                        <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{a.shipped ? "Handed in" : "Not yet"}</span>
+                        {/* The builder's word (actionItemStatus, student-detail.ts): Handed in, Done (nothing to post, so never a link) or Not yet. */}
+                        <span style={{ fontSize: 12, color: "var(--color-text-secondary)" }}>{a.status}</span>
                         {a.link && (
                           <a
                             href={a.link}

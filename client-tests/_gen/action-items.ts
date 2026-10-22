@@ -26,7 +26,32 @@
  * is a watch lesson since migration v74), and the routes only take the second
  * reading on the new course's catalog, so the live app writes exactly what it
  * wrote before.
+ *
+ * DONE WITH NO LINK (the owner, 2026-10-22). Some action items have nothing
+ * to post: the four of AI Ads + Content (study the winning AI ads, choose a
+ * visual style, step away and think, take a piece of content apart). Their
+ * block is a Done button and no link field, and the button writes what the
+ * complete button writes. mark-action-shipped completes them with no link
+ * saved, and the admin drawer says Done and shows no link. Every other action
+ * item still needs its link. DONE_ONLY_ACTION_ITEMS below is the one list.
  */
+
+/**
+ * The action items finished with Done alone, by lesson id: the four of
+ * AI Ads + Content in supabase/catalog/course_catalog.json. The list lives
+ * here, beside the rules that read it, so it ships with the code: a column in
+ * the catalog would need a migration pasted by hand and code that works
+ * before and after the paste. The ids are the course's own (the old course's
+ * run from l001 to l078, so none of them is one of these), and
+ * client-tests/done-only.test.mjs fails when the catalog no longer has these
+ * four as the action items of AI Ads + Content.
+ */
+export const DONE_ONLY_ACTION_ITEMS: ReadonlySet<string> = new Set(["a6l03", "a6l10", "a6l17", "a6l19"]);
+
+/** Is this action item finished with Done alone, with no Discord link? */
+export function isDoneOnly(lessonId: string | null | undefined): boolean {
+  return typeof lessonId === "string" && DONE_ONLY_ACTION_ITEMS.has(lessonId);
+}
 
 /** The old route's pattern, unchanged. Also the database's CHECK constraint (v28). */
 export const DISCORD_MESSAGE_LINK_RE =
@@ -39,7 +64,8 @@ export const DISCORD_LINK_ERROR =
 /**
  * Said when there is no link yet: by the lesson page when Save is pressed with
  * nothing in the field, and by mark-action-shipped when the new course's
- * complete button arrives with no link saved. One sentence for both.
+ * complete button arrives with no link saved (never for a Done-only action
+ * item). One sentence for both.
  */
 export const PASTE_LINK_FIRST = "Paste the link to your Discord message first.";
 
@@ -181,12 +207,13 @@ export type ActionItemState = "empty" | "saved" | "completed";
 
 export interface ActionItemView {
   state: ActionItemState;
-  /** The saved link, or null. */
+  /** The saved link, or null. Always null on a Done-only action item. */
   link: string | null;
   /**
    * The complete button can be pressed: a link is saved and the action is not
    * done. The old app's rule (LessonSheet, canShip): the link first, and the
-   * video does not have to be watched first.
+   * video does not have to be watched first. A Done-only action item needs no
+   * link: its Done button can be pressed until the action is done.
    */
   canComplete: boolean;
   /** When the action was done, or null. */
@@ -198,18 +225,21 @@ export interface ActionItemView {
 /**
  * The block's state from the student's row for the lesson (null when there is
  * none). `separateWatchHalf`: whether the lesson's other half comes from
- * watching (watchHalfIsSeparate).
+ * watching (watchHalfIsSeparate). `doneOnly`: the action item is finished with
+ * Done alone (isDoneOnly), so a link on its row (one saved before 2026-10-22)
+ * is never read: it is "empty" until Done, then "completed", never "saved".
  */
 export function actionItemView(
   row: (CompletionHalves & { discord_message_link?: string | null }) | null | undefined,
   separateWatchHalf: boolean,
+  doneOnly = false,
 ): ActionItemView {
-  const link = row?.discord_message_link && row.discord_message_link.length > 0 ? row.discord_message_link : null;
+  const link = !doneOnly && row?.discord_message_link && row.discord_message_link.length > 0 ? row.discord_message_link : null;
   const completedAt = row?.action_completed_at ?? null;
   return {
     state: completedAt ? "completed" : link ? "saved" : "empty",
     link,
-    canComplete: !completedAt && link !== null,
+    canComplete: !completedAt && (doneOnly || link !== null),
     completedAt,
     waitingOnVideo: completedAt !== null && separateWatchHalf && !row?.completed_at,
   };

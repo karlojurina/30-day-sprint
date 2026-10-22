@@ -204,6 +204,13 @@ gen('../src/app/api/student/mark-action-shipped/route.ts', './_gen/mark-action-s
   ...toStub('next/server', '@supabase/supabase-js', '../_lib/update-streak', '@/lib/achievements',
     '@/lib/csm-events', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'),
 ])
+// The link's own route, for done-only.test.mjs (2026-10-22): a link sent for
+// one of the action items with nothing to post is stored as before.
+gen('../src/app/api/student/save-action-link/route.ts', './_gen/save-action-link-route.ts', [
+  GATE,
+  ['from "@/lib/world/action-items"', 'from "./action-items.ts"'],
+  ...toStub('next/server', '@supabase/supabase-js', '@/lib/catalog-tables'),
+])
 gen('../src/app/api/student/skip-lesson/route.ts', './_gen/skip-lesson-route.ts', [
   GATE,
   ...toStub('next/server', '@supabase/supabase-js', '@/lib/csm-task-evaluation', '@/lib/catalog-tables'),
@@ -547,6 +554,8 @@ gen('../src/lib/admin/student-detail.ts', './_gen/student-detail.ts', [
   ['from "@/lib/admin/thirty-view"', 'from "./thirty-view.ts"'],
   // The 30% statuses' one map (the review's fix round), copied at the end of this file.
   ['from "@/lib/admin/discount-status"', 'from "./discount-status.ts"'],
+  // The Done-only action items (2026-10-22): action-items.ts, copied near the top of this file.
+  ['from "@/lib/world/action-items"', 'from "./action-items.ts"'],
 ])
 gen('../src/lib/admin/journey-board.ts', './_gen/journey-board.ts', [
   ...PEOPLE,

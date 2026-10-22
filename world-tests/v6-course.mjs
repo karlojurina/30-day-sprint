@@ -13,8 +13,9 @@
  * supabase/catalog/course_catalog.json and course-lengths.fixture.json.
  * Headless Chrome on the real GPU, autoplay allowed, muted, 1691x1278. Takes
  * about 9 minutes (42 page loads with the warm-up's three on 2026-10-16, one
- * more when row 2 fails, and row 12 watches a 67 second clip in real time):
- * run it in the background.
+ * more when row 2 fails, and row 12 watches a 67 second clip in real time;
+ * 54 page loads with rows 26 and 27 on 2026-10-22, 6 minutes with no test
+ * video): run it in the background.
  *
  * One PASS or FAIL line per row of the table, with what was measured after it.
  * Every row loads its own fresh page in its own browser context. The five
@@ -101,6 +102,19 @@
  * Strategy done." with Creative Strategy at 16 of 18, and its button starts How
  * To Land Clients. Finished before a place already done (AI Ads + Content),
  * Static Ads' card names both, as it always did.
+ *
+ * ROWS 26 AND 27: ACTION ITEMS WITH NOTHING TO POST (the owner, 2026-10-22).
+ * The four of AI Ads + Content (a6l03, a6l10, a6l17, a6l19; action-items.ts,
+ * DONE_ONLY_ACTION_ITEMS) are finished with Done alone. On a6l03 the block is
+ * one button, Done, with no field, no link and no word of Discord; a real
+ * click makes the lesson done, puts "Completed on <date>." in the block and
+ * nothing else, counts it on the map and lights "Next lesson", which opens
+ * a6l04 (26). a5l22 still asks for the link: the field and Save, Save with
+ * nothing in it refused in the route's words, "Complete lesson" only once a
+ * link is saved, never a Done button; then the page of every other action
+ * item is opened and its block's kind read: the four the Done kind, the six
+ * the Discord kind (27). Row 26 takes lesson-a6l03-done-before.png and
+ * lesson-a6l03-done-after.png, row 27 lesson-a5l22-still-link.png (G6).
  *
  * ROW 12 PLAYS A REAL VIDEO. In course mode every lesson that has a video
  * plays the harness's test video 1, and the stand-in server holds it to that
@@ -237,12 +251,15 @@
  *              element holding the "Milestone" label, the innermost element
  *              saying "Not recorded yet.", and the text's ul, ol, li value,
  *              strong, br and a (href, target, rel)
- *   the block  (rows 21, 22) outside `main`: section[data-action-item] (its
- *              value is the state: empty, saved, completed), its input, its
+ *   the block  (rows 21, 22, 26, 27) outside `main`: section[data-action-item]
+ *              (its value is the state: empty, saved, completed) and its
+ *              data-hand-in (the kind: link, done), its h2, its input, its
  *              p[role="alert"], its link, its buttons by their words ("Save",
- *              "Complete lesson", "Complete the action", "Edit link"), the
- *              foot's "Done." and the "Next lesson" link, the "Mark watched
- *              (dev)" button, and window.__fixture.completed()
+ *              "Complete lesson", "Complete the action", "Edit link", "Done"),
+ *              the foot's "Done." and the "Next lesson" link, the "Mark
+ *              watched (dev)" button, window.__fixture.completed(), and
+ *              (row 26, back on the map) the place's panel and
+ *              window.__worldProgress().done
  *   the wait   (rows 17 to 20) window.__fixture.calls (getEmbed, by lesson),
  *              the placeholder [data-video-veil] outside `main` (data-gone,
  *              its computed opacity, visibility, pointer-events and its
@@ -1134,6 +1151,8 @@ const ACTION = ({ first, id }) => {
   const alert = block?.querySelector('p[role="alert"]') ?? null
   const link = block?.querySelector('a[href]') ?? null
   const complete = button(/^Complete (lesson|the action)$/)
+  // Rows 26 and 27 (2026-10-22): which kind of hand-in the block is, its label, and its Done button.
+  const doneButton = button(/^Done$/)
   const next = [...document.querySelectorAll('a')].filter(outside).find((a) => /Next lesson/.test(a.textContent)) ?? null
   let words = ''
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT)
@@ -1145,6 +1164,11 @@ const ACTION = ({ first, id }) => {
   const at = document.activeElement
   return {
     state: block?.dataset.actionItem ?? null,
+    kind: block?.dataset.handIn ?? null,
+    label: block ? block.getAttribute('aria-label') ?? norm(document.getElementById(block.getAttribute('aria-labelledby') ?? '')?.textContent) : null,
+    heading: block?.querySelector('h2') ? norm(block.querySelector('h2').textContent) : null,
+    buttons: block ? [...block.querySelectorAll('button')].map((b) => norm(b.textContent)) : [],
+    doneButton: doneButton ? norm(doneButton.textContent) : null,
     text: block ? norm(block.textContent) : null,
     input: input ? { value: input.value, invalid: input.getAttribute('aria-invalid'), name: input.getAttribute('aria-labelledby') ? norm(document.getElementById(input.getAttribute('aria-labelledby'))?.textContent) : null } : null,
     alert: alert ? norm(alert.textContent) : null,
@@ -1189,6 +1213,16 @@ const GOOD_LINK = 'https://discord.com/channels/1100000000000000001/120000000000
 const THREAD_LINK = 'https://discord.com/channels/1100000000000000001/1200000000000000002'
 /** The old route's words for a wrong link, typed here from it. */
 const OLD_LINK_ERROR = 'That doesn\'t look like a Discord message link. Right-click the message in #ad-review and click "Copy Message Link."'
+/** Rows 26 and 27: the words for "no link yet" (action-items.ts, PASTE_LINK_FIRST), typed here. */
+const PASTE_FIRST = 'Paste the link to your Discord message first.'
+/**
+ * Rows 26 and 27 (the owner, 2026-10-22): the action items with nothing to post, the four of AI Ads + Content
+ * (action-items.ts, DONE_ONLY_ACTION_ITEMS), and the six that still ask for the Discord link. Typed here, on purpose.
+ */
+const DONE_ONLY = ['a6l03', 'a6l10', 'a6l17', 'a6l19']
+const LINK_KIND = ['a3l17', 'a3l25', 'a5l08', 'a5l12', 'a5l22', 'a5l23']
+/** Rows 26 and 27 read pages with no lesson text: a first line no paragraph has. */
+const NO_TEXT = '\u0000'
 
 /** What a row clicks. Each returns one element or null. */
 const FIND = {
@@ -1693,6 +1727,8 @@ const ROWS = [
   [23, 'A lesson with no video never holds a student'],
   [24, "A place's minutes count its action items' lengths"],
   [25, 'A place done right before one with no video: the done card names it alone'],
+  [26, 'An action item with nothing to post (a6l03): Done, and the next lesson opens'],
+  [27, 'The other action items still ask for the Discord link (a5l22 in full, then every one by kind)'],
 ]
 const nameOf = (id) => ROWS.find((r) => r[0] === id)[1]
 
@@ -1713,8 +1749,8 @@ const GAPS = [
   ],
   [
     'G6',
-    "How an action item's Discord block looks",
-    'not a script verdict. A person looks at the pictures row 21 takes in shots/v6/course/: lesson-a5l22-action-empty.png, lesson-a5l22-action-error.png, lesson-a5l22-action-saved.png, lesson-a5l22-action-done.png.',
+    "How an action item's block looks, the Discord kind and the Done kind",
+    'not a script verdict. A person looks at the pictures rows 21, 26 and 27 take in shots/v6/course/: lesson-a5l22-action-empty.png, lesson-a5l22-action-error.png, lesson-a5l22-action-saved.png, lesson-a5l22-action-done.png, lesson-a6l03-done-before.png, lesson-a6l03-done-after.png, lesson-a5l22-still-link.png.',
   ],
 ]
 
@@ -3109,6 +3145,146 @@ try {
         `b) ${a5.at(-1)} watched last, ${NAMES[5]} done before it: "${NAMES[4]} and ${NAMES[5]} done." and "Start ${NAMES[7]}"`,
         b.pre.place === 4 && b.pre.celebrations === 0 && b.card.title === `${NAMES[4]} and ${NAMES[5]} done.` && b.card.button === `Start ${NAMES[7]}` && b.after.place === 7,
         { before: b.pre, card: b.card, after: b.after },
+      )
+      r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
+    })
+
+    // 26 ── An action item with nothing to post (the owner, 2026-10-22): the brief, one button, Done; pressed, the
+    // lesson is done as a hand-in makes it, the map counts it and "Next lesson" opens the next one.
+    await runRow(26, nameOf(26), async (r) => {
+      const id = DONE_ONLY[0]
+      const lesson = lessonOf(id)
+      const place = PLACES[5].counting
+      const nextId = place[place.findIndex((l) => l.id === id) + 1].id
+      const arg = { first: NO_TEXT, id }
+      const inFile = place.filter((l) => l.action_brief)
+      r.check(
+        `course_catalog.json: the action items of ${NAMES[5]} are ${DONE_ONLY.join(', ')}, setup lessons with a brief and no length`,
+        same(inFile.map((l) => l.id), DONE_ONLY) && inFile.every((l) => l.type === 'setup' && LENGTHS[l.id] === undefined),
+        inFile.map((l) => `${l.id} ${l.type}`),
+      )
+      const page = await r.open(url(`/a6/${id}`, { arrive: 0, poster: 'off' }))
+      await waitLesson(page, lesson.title, 'row 26', LOAD_MS)
+      await waitFor(page, () => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main')), { timeout: 10000, what: 'row 26: the action item block' })
+      await sleep(500)
+      const before = await page.evaluate(ACTION, arg)
+      const s = await page.evaluate(SNAP)
+      r.check("the Milestone box with the JSON's brief, word for word, above the block", /Milestone/.test(s.outside) && s.outside.includes(norm(lesson.action_brief)) && !!before.boxes.milestone && before.boxes.milestone.bottom <= before.boxes.block?.top,
+        `${norm(lesson.action_brief).slice(0, 70)}…`)
+      r.check(
+        'before: the Done kind, one button that says "Done", no field, no link, no label and no word of Discord on the page; the lesson not done, "Next lesson" off',
+        before.kind === 'done' && before.state === 'empty' && same(before.buttons, ['Done']) && before.input === null && before.link === null && before.heading === null &&
+          !/discord/i.test(s.outside) && before.done === false && !before.saysDone && before.next?.disabled === 'true',
+        { kind: before.kind, state: before.state, buttons: before.buttons, label: before.label, text: before.text, next: before.next, done: before.done },
+      )
+      r.values.shots = [await r.shot('lesson-a6l03-done-before')]
+
+      // Done, with a real click.
+      await pressBlockButton(page, '^Done$', 'row 26: Done')
+      await waitFor(page, () => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main') && x.dataset.actionItem === 'completed'), { timeout: 5000, what: 'row 26: the completed state' })
+      await sleep(400)
+      const after = await page.evaluate(ACTION, arg)
+      const today = await page.evaluate(() => new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }))
+      r.check(
+        `after: "Completed on ${today}." and nothing else in the block: no link, no "No link saved", no "Add a link", no button`,
+        after.kind === 'done' && after.state === 'completed' && after.text === `Completed on ${today}.` && after.link === null && after.buttons.length === 0,
+        after.text,
+      )
+      r.check('the lesson is done: in the done set, and "Done." in the foot', after.done === true && after.saysDone, { done: after.done, saysDone: after.saysDone })
+      r.check(`"Next lesson" is lit and leads to ${nextId}`, after.next?.disabled === 'false' && after.next?.href === `${APP}/a6/${nextId}`, after.next)
+      r.check('the keyboard is on the completed line (the button it was on is gone)', /^Completed on/.test(after.focus ?? ''), after.focus)
+      r.values.shots.push(await r.shot('lesson-a6l03-done-after'))
+
+      // The next lesson opens.
+      await click(page, () => [...document.querySelectorAll('a')].find((x) => !x.closest('main, nextjs-portal') && /Next lesson/.test(x.textContent ?? '')), null, { what: 'row 26: Next lesson' })
+      await waitLesson(page, lessonOf(nextId).title, `row 26: ${nextId}`)
+      const at = await page.evaluate(() => location.pathname)
+      r.check(`"Next lesson" opens ${nextId}, ${lessonOf(nextId).title}`, at === `${APP}/a6/${nextId}`, at)
+
+      // Back on the map (the map holds still under a lesson page and takes the student's progress once it is
+      // shut): the place's panel and the map's own count have it.
+      await page.keyboard.press('Escape')
+      await waitPath(page, `${APP}/a6`, 'row 26: back to the place')
+      await waitPanel(page, 5, 'row 26: the place')
+      const p = await readPanel(page, 'row 26: the place')
+      const row3 = p.rows.find((x) => x.n === 3) ?? null
+      const counted = await page.evaluate(() => window.__worldProgress?.()?.done ?? null)
+      const n = COUNTING[5]
+      r.check(
+        `back on the map: ${NAMES[5]}'s row 3 is done, its count line "1 of ${n} · ${n - 1} to go", and the map counts 1 there`,
+        row3?.kind === 'done' && row3?.title === lesson.title && p.count === `1 of ${n} · ${n - 1} to go` && counted?.[5] === 1,
+        { row3, count: p.count, counted },
+      )
+      r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
+    })
+
+    // 27 ── The other action items still ask for the Discord link. a5l22 in full: the field, Save with nothing in it
+    // refused in the route's words, the complete button only once a link is saved, never a Done button. Then every
+    // other action item's page by kind: the four of AI Ads + Content the Done kind, the six the Discord kind.
+    await runRow(27, nameOf(27), async (r) => {
+      const actions = PLACES.flatMap((p) => p.counting).filter((l) => l.action_brief)
+      r.check(
+        `course_catalog.json: 10 action items, the 4 of ${NAMES[5]} and these 6 (${LINK_KIND.join(', ')})`,
+        actions.length === 10 && same(actions.filter((l) => !DONE_ONLY.includes(l.id)).map((l) => l.id), LINK_KIND),
+        actions.map((l) => l.id),
+      )
+      const id = 'a5l22'
+      const lesson = lessonOf(id)
+      const arg = { first: NO_TEXT, id }
+      const inState = (state) => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main') && x.dataset.actionItem === state)
+      let page = await r.open(url(`/a5/${id}`, { arrive: 0, poster: 'off' }))
+      await waitLesson(page, lesson.title, 'row 27', LOAD_MS)
+      await waitFor(page, () => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main')), { timeout: 10000, what: 'row 27: the action item block' })
+      await sleep(500)
+      const empty = await page.evaluate(ACTION, arg)
+      r.check(
+        `${id}: the Discord kind, "Discord link" over a field and Save; no Done button and no complete button`,
+        empty.kind === 'link' && empty.heading === 'Discord link' && empty.input?.name === 'Discord link' && /\bSave\b/.test(empty.text) && empty.doneButton === null && empty.complete === null && empty.done === false,
+        { kind: empty.kind, heading: empty.heading, buttons: empty.buttons },
+      )
+      r.values.shots = [await r.shot('lesson-a5l22-still-link')]
+      await pressBlockButton(page, '^Save$', 'row 27: Save with nothing in the field')
+      await waitFor(page, () => [...document.querySelectorAll('section[data-action-item] p[role="alert"]')].some((x) => !x.closest('main')), { timeout: 5000, what: 'row 27: the error line' })
+      await sleep(200)
+      const nothing = await page.evaluate(ACTION, arg)
+      r.check(
+        `Save with nothing in the field: "${PASTE_FIRST}", nothing saved, still no complete button`,
+        nothing.alert === PASTE_FIRST && nothing.state === 'empty' && nothing.complete === null && nothing.done === false,
+        { alert: nothing.alert, state: nothing.state },
+      )
+      await typeLink(page, GOOD_LINK, 'row 27')
+      await page.keyboard.press('Enter')
+      await waitFor(page, inState, { arg: 'saved', timeout: 5000, what: 'row 27: the saved state' })
+      await sleep(300)
+      const saved = await page.evaluate(ACTION, arg)
+      r.check(
+        'a link saved: "Complete lesson" comes, and still no Done button',
+        saved.state === 'saved' && saved.link?.href === GOOD_LINK && saved.complete === 'Complete lesson' && saved.doneButton === null,
+        { state: saved.state, complete: saved.complete, buttons: saved.buttons },
+      )
+
+      // Every other action item: its page opened, its block's kind read.
+      const kinds = {}
+      for (const other of actions.filter((l) => l.id !== id)) {
+        const what = `row 27, ${other.id}`
+        page = await r.open(url(`/${other.area}/${other.id}`, { arrive: 0, poster: 'off' }))
+        await waitLesson(page, other.title, what, LOAD_MS)
+        await waitFor(page, () => [...document.querySelectorAll('section[data-action-item]')].some((x) => !x.closest('main')), { timeout: 10000, what: `${what}: the action item block` })
+        await sleep(300)
+        const a = await page.evaluate(ACTION, { first: NO_TEXT, id: other.id })
+        kinds[other.id] = { kind: a.kind, field: !!a.input, heading: a.heading, buttons: a.buttons, discord: /discord/i.test(a.text ?? '') }
+      }
+      const wrong = Object.entries(kinds)
+        .filter(([lid, k]) =>
+          DONE_ONLY.includes(lid)
+            ? !(k.kind === 'done' && !k.field && k.heading === null && same(k.buttons, ['Done']) && !k.discord)
+            : !(k.kind === 'link' && k.field && k.heading === 'Discord link' && !k.buttons.includes('Done')),
+        )
+        .map(([lid, k]) => `${lid}: ${show(k)}`)
+      r.check(
+        `every other action item by kind: ${DONE_ONLY.join(', ')} the Done kind (one button, Done, no field, no word of Discord); ${LINK_KIND.filter((x) => x !== id).join(', ')} the Discord kind (the field, no Done)`,
+        Object.keys(kinds).length === 9 && wrong.length === 0,
+        wrong.length ? wrong : Object.entries(kinds).map(([lid, k]) => `${lid} ${k.kind}`).join(', '),
       )
       r.check('no request to /api in the whole row', r.api.length === 0, r.api.map((x) => `${x.method} ${x.path}`).slice(0, 3))
     })

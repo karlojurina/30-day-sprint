@@ -72,7 +72,10 @@
  *           44px, and no bold word glued to the next one. Since the owner's
  *           answer of 2026-10-21 All students and the journey hold course
  *           members on a $97 monthly plan alone (the hidden one too, never a
- *           yearly or an ETfB owner's plan), and their headers say so
+ *           yearly or an ETfB owner's plan), and their headers say so. Since
+ *           2026-10-22 the drawer's action items: one with nothing to post
+ *           (a6l03) says "Done" with no link, the others "Handed in" with
+ *           their post's link or "Not yet"
  *   feedback  /dev/admin/feedback/lessons (admin rebuild 2, WI-7): full,
  *           empty, loading, error, unplaced and stray; the areas in route
  *           order with their counts, a lesson's average and count, its 3
@@ -1979,6 +1982,33 @@ if (wanted('people')) {
     expect(fits, 'at 1440px wide all six columns are in the window')
     const small = await smallTaps()
     expect(small.length === 0, 'Journey: every card and button 44px tall or more', JSON.stringify(small.slice(0, 4)))
+  }
+  // The action items with nothing to post (the owner, 2026-10-22; isDoneOnly in src/lib/world/action-items.ts): the
+  // drawer says "Done" and shows no link for one, "Handed in" with its post's link for the others. Maximilian did
+  // AI Ads' (a6l03, one of the four) ahead of the order, so his drawer holds both kinds.
+  console.log('\nJourney: the drawer\'s action items, the two kinds')
+  for (const size of [[1440, 900], [390, 844]]) {
+    const label = `Journey, Maximilian's action items, ${size.join('x')}`
+    await go('/dev/admin/journey?drawer=p-maximilian', size)
+    await page.waitForFunction(() => [...document.querySelectorAll('aside[role="dialog"] section')].some((s) => s.querySelector('h2')?.textContent.trim() === 'Action items' && s.querySelector('li')), { timeout: 15000 })
+    const rows = await page.$$eval('aside[role="dialog"] section', (ss) => {
+      const block = ss.find((s) => s.querySelector('h2')?.textContent.trim() === 'Action items')
+      return [...block.querySelectorAll('li')].map((li) => ({
+        text: li.innerText.replace(/\s+/g, ' ').trim(),
+        links: [...li.querySelectorAll('a')].map((a) => ({ words: a.textContent.trim(), href: a.getAttribute('href') })),
+      }))
+    })
+    const row = (title) => rows.find((r) => r.text.startsWith(title)) ?? null
+    const done = row('AI Ads: study the winners')
+    expect(!!done && done.text === 'AI Ads: study the winners Done' && done.links.length === 0,
+      `${label}: AI Ads' action item, done, says "Done" and has no link (nothing was posted)`, JSON.stringify(done))
+    const handed = ['Foundations', 'Research', 'Hooks', 'Scripts'].map((n) => row(`${n}: hand in your work`))
+    expect(handed.every((r) => r && /^\w+: hand in your work Handed in Open the post$/.test(r.text) && r.links.length === 1 && /^https:\/\/discord\.com\/channels\/\d+\/\d+\/\d+$/.test(r.links[0].href)),
+      `${label}: the four handed in say "Handed in" with their post's link, as before`, JSON.stringify(handed))
+    const open = ['Editing', 'Clients', 'Scale'].map((n) => row(`${n}: hand in your work`))
+    expect(rows.length === 8 && open.every((r) => r && / Not yet$/.test(r.text) && r.links.length === 0),
+      `${label}: the three not done say "Not yet", with no link; 8 rows in all`, JSON.stringify(open))
+    await check(label, `journey-drawer-action-items-${size[0]}`)
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, 'people: no error in the browser console', errs.slice(0, 3).join(' || '))

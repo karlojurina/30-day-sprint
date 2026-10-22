@@ -8,6 +8,7 @@ import { checkMembershipDiscount, teamThirtyCodeFor } from "@/lib/membership-dis
 import {
   approvalVerdict,
   couponApprovalRefusal,
+  couponUncheckedApprovalRefusal,
   explainOldCourseRequest,
   loadDiscountReads,
 } from "@/lib/world/discount-server";
@@ -20,11 +21,18 @@ import {
  *      gets no 30%, whatever the rule says and with `override` too. Whop is
  *      asked now (checkMembershipDiscount, the owner's rule since T-122's
  *      third fix round: a code other than the student's own 30% on any
- *      course membership or course payment, then a price under 97.00);
+ *      course membership or course payment, then with no code anywhere the
+ *      price of the first real course payment, under 97.00 since the fourth);
  *      when it does not answer, the stored row decides if it is a coupon, or
- *      no coupon written by that rule (its source set, v113); with neither,
- *      nothing blocks. The refusal is a 400 with code "has-discount" and
- *      names the code. `overrideCoupon` skips it (below).
+ *      no coupon written by that rule (its source set, v113) naming no code
+ *      but the student's own. The refusal is a 400 with code "has-discount"
+ *      and names the code. `overrideCoupon` skips it (below). With neither
+ *      an answer from Whop nor a stored row that answers, the normal Approve
+ *      is refused since T-122's fourth fix round, once the rule below has had
+ *      its say (503, code "rule", the reason in the team's words:
+ *      couponUncheckedApprovalRefusal); until then it went on. Approve
+ *      anyway (`override`, a founder's or an admin's) still goes on, which
+ *      the page offers on that refusal.
  *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
  *      the ads are not checked (the owner's decision: the 30% already asks
  *      for 61 videos), so students.ad_submissions_verified decides nothing
@@ -74,7 +82,11 @@ import {
  *                    2026-10-19).
  */
 
-/** The refusals Approve anyway skips with `override`: the 30% rule said no, or a read it needs failed. */
+/**
+ * The refusals Approve anyway skips with `override`: the 30% rule said no, or
+ * a read it needs failed, and since T-122's fourth fix round the coupon check
+ * gave no answer.
+ */
 const RULE = { code: "rule" } as const;
 
 export async function POST(request: NextRequest) {
@@ -138,7 +150,9 @@ export async function POST(request: NextRequest) {
   // D5: a discount already on the next renewal, before the rule and before
   // `override`. No Whop code is made for this student, unless a founder or an
   // admin pressed Approve anyway on the row the coupon refuses
-  // (`overrideCoupon`): then Whop is not asked at all.
+  // (`overrideCoupon`): then Whop is not asked at all. A check that gave no
+  // answer is remembered, and refuses the normal Approve after the rule.
+  let couponUnchecked: { liveFail: string | null } | null = null;
   if (!overrideCoupon) {
     const coupon = await checkMembershipDiscount(supabase, discountReq.student_id);
     if (coupon.discounted) {
@@ -147,6 +161,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    if (coupon.source === "none") couponUnchecked = { liveFail: coupon.liveFail };
   }
 
   if (CATALOG_IS_V2) {
@@ -286,8 +301,26 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // T-122's fourth fix round: the coupon check gave no answer (Whop down or
+  // refusing, nothing stored that answers), so the normal Approve makes no
+  // code for a student who may hold a coupon. Approve anyway (`override`)
+  // still goes on, its log line saying the check gave no answer.
+  if (couponUnchecked !== null && !override) {
+    console.warn(
+      `[discount approve] request ${requestId}: nothing approved, the coupon check gave no answer (${couponUnchecked.liveFail ?? "no answer"})`,
+    );
+    return NextResponse.json(
+      { error: couponUncheckedApprovalRefusal(couponUnchecked.liveFail), ...RULE },
+      { status: 503 },
+    );
+  }
+
   if (override || overrideCoupon) {
-    const skipped = [override ? "Eligibility gates skipped." : null, overrideCoupon ? "The coupon check skipped." : null]
+    const skipped = [
+      override ? "Eligibility gates skipped." : null,
+      overrideCoupon ? "The coupon check skipped." : null,
+      couponUnchecked !== null ? "The coupon check gave no answer." : null,
+    ]
       .filter(Boolean)
       .join(" ");
     console.warn(

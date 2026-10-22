@@ -509,15 +509,18 @@ export type CoursePaymentsRead =
  * under THE RULE above (a $0 one, a refunded one, one whose total or paid_at
  * does not read), with `real` false. `kept` counts the real ones. The coupon
  * check judges them (membership-discount.ts, T-122): a code on any of them,
- * then the price of the real ones. The same pinned read as
+ * then the price of the first real one (since its fourth fix round; of every
+ * real one until then), and it reads them beside the user's memberships, at
+ * the same time. The same pinned read as
  * fetchFirstPaymentForUser, GET /api/v1/payments?user_id=<id>&status=paid
  * &first=100, every page, every row's user checked; on the caller's key, its
  * pace (shared with its other Whop reads) and its limits: no request starts
  * after `startBy` and no answer is waited on past `answerBy`.
  *
  * THE $0 PAYMENTS. The pinned list gives them with the rest, and takes no
- * parameter for them: Whop's changelog entry for 2026-09-02 (API Versions,
- * docs.whop.com, read 2026-10-22), which every later version keeps, says
+ * parameter for them: Whop's changelog entry 2026-09-02-1 (API Versions,
+ * docs.whop.com, read 2026-10-22; T-122's third fix round named it
+ * 2026-09-02, the entry below it), which every later version keeps, says
  * "Zero-amount payments are included, so the proxy's `include_free` is
  * gone", and "An invalid `status` is a `400`, as is any proxy-only filter
  * (...) rather than an unfiltered page". `include_free` ("Defaults to false,

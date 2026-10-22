@@ -22,24 +22,32 @@
  * answer, and since its third fix round by the owner's rule as he put it: a
  * promo code other than the student's own 30% on the membership on file, on
  * any course membership found through their Whop user (read whatever the one
- * on file said) or on any course payment, the $0 ones too, is a coupon; with
- * no code anywhere, a real payment in dollars under 97.00 that is no plan
- * change is one. `by_source` counts the answers by the step that answered,
- * and `failed` holds
- * only the students Whop gave no answer for (no connection, a 5xx, a 429
- * after its retries, no answer in time, a refused key, payments it could not
- * judge, or a deployment that cannot ask). The first dry run on production
- * (2026-10-21, before T-122) could not read 46 of 290: 22 payment ids where
- * the membership's belongs, 24 memberships with no plan or no renewal price.
+ * on file said; since its fourth, those that no longer grant access too) or
+ * on any course payment, the $0 ones too, is a coupon; with no code
+ * anywhere, the student's first real course payment in dollars under 97.00
+ * that is no plan change is one (every real payment until the fourth).
+ * `by_source` counts the answers by the step that answered, and `failed`
+ * holds only the students Whop gave no answer for (no connection, a 5xx, a
+ * 429 after its retries, no answer in time, a refused key, payments or a
+ * list of memberships it could not judge, a membership read it could not
+ * read, or a deployment that cannot ask). Since the fourth fix round
+ * `user_list_unusable` counts the students whose Whop user's list answered a
+ * 404 or another 4xx (judged without it), and `refused_by_price` lists the
+ * students the price alone refused, by student id, with that payment's price
+ * and billing_reason. The first dry run on production (2026-10-21, before T-122)
+ * could not read 46 of 290: 22 payment ids where the membership's belongs, 24
+ * memberships with no plan or no renewal price.
  *
  * ?mode=dry reads Whop and writes nothing, for the first look after a deploy:
  * it passes when `checked` is above 0 and `failed` is empty, and
  * `discounted` is about the number of students in the window who came in on
- * a code, a used one included (evolve10, welcome50, a 100% first month).
- * After the deploy of T-122's third fix round, with v113 pasted, the run in
- * write mode is repeated until `left` is 0, so every stored row is one this
- * rule wrote (its source set): until then a stored "no coupon" holds no
- * source, and the request routes give their 503 for it when Whop does not
+ * a code, a used one included (evolve10, welcome50, a 100% first month);
+ * `refused_by_price` is for the owner to rule on. After the deploy of T-122's
+ * fourth fix round, and with v113 pasted only once no older build can write
+ * to the database, the run in write mode is repeated until `left` is 0,
+ * before anyone approves, so every stored row is one this rule wrote (its
+ * source set): until then a stored "no coupon" holds no source, and the
+ * request routes and the normal Approve refuse for it when Whop does not
  * answer.
  *
  * Auth: CRON_SECRET as a bearer, like every cron (src/lib/cron-auth.ts), with
@@ -48,7 +56,8 @@
  * Whop read failed, or when Whop
  * answered no read before the time ran out, so nothing was checked (the
  * review's fix round; that run answered 200, ok); 500 without WHOP_API_KEY. No request starts after 240 s; a student not reached is read
- * first by the next run. No answer names a student, an email or a Whop id.
+ * first by the next run. No answer names a student, an email or a Whop id:
+ * student ids only.
  */
 
 import { NextRequest, NextResponse } from "next/server";

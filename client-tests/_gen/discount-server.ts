@@ -372,6 +372,37 @@ export function couponApprovalRefusal(code: string | null): string {
 }
 
 /**
+ * The approve route's refusal of the normal Approve when the coupon check
+ * gave no answer (checkMembershipDiscount's source "none": Whop gave none and
+ * nothing stored answers), in the team's words, by `liveFail`, the reason the
+ * check could not answer (T-122's fourth fix round; until then the approval
+ * went on, a code made for a student who might hold a coupon). A founder's or
+ * an admin's Approve anyway still goes on: the page offers it on the refusal
+ * (the route's code "rule").
+ */
+export function couponUncheckedApprovalRefusal(liveFail: string | null): string {
+  switch (liveFail) {
+    case "no_whop_user":
+      return "The student's Whop account is not on file, so the coupon check couldn't run and nothing was approved. Check the coupon in Whop.";
+    case "no_api_key":
+      return "This deployment has no Whop key, so the coupon check couldn't run and nothing was approved.";
+    case "no_course_product":
+      return "This deployment doesn't name the course's Whop product, so the coupon check couldn't run and nothing was approved.";
+    case "student_unread":
+      return "Couldn't read this student's details, so the coupon check couldn't run and nothing was approved. Try again.";
+    case "http_401_403":
+      return "Whop refused this deployment's key, so the coupon check couldn't run and nothing was approved.";
+    case "filter_ignored":
+    case "bad_page":
+    case "too_many_pages":
+    case "bad_shape":
+      return "Whop answered the coupon check in a way it can't read, so nothing was approved. Try again in a minute.";
+    default:
+      return "Whop gave no answer to the coupon check, so nothing was approved. Try again in a minute.";
+  }
+}
+
+/**
  * Which state of the new rule refused a request: what explainOldCourseRequest
  * reads. "late-request" and "another-request" are madeOutsideApply's.
  */

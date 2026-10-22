@@ -513,11 +513,13 @@ console.log('\n=== The coupon rule: a stored id that is not a membership, and a 
     if (realProducts === undefined) delete process.env.WHOP_PRODUCT_ID
     else process.env.WHOP_PRODUCT_ID = realProducts
   }
+  // Since T-122's fourth fix round the user's list and the payments are read at the same time, and a membership naming
+  // no code has its plan read no more (the list, the membership and its plan, in a row, until then).
   ok(answer.source === 'live' && answer.via === 'user' && !answer.discounted && answer.saved && found.rows('student_membership_discounts')[0]?.whop_membership_id === 'mem_devPay'
-       && show(asked.slice(0, 3)) === show(['/api/v2/memberships', '/api/v1/memberships/mem_devPay', '/api/v1/plans/plan_m']),
+       && show(asked.slice(0, 3)) === show(['/api/v2/memberships', '/api/v1/payments', '/api/v1/memberships/mem_devPay']),
      'a payment id where the membership id belongs: the course membership is found through the Whop user and read (T-122), its answer stored', show({ answer, asked }))
   ok(downAnswer.source === 'none' && downAnswer.liveFail === 'network' && warned.some((w) => w.includes('student s-pay: Whop gave no answer (network), so no answer is on file')),
-     'Whop down for it: no answer on file (the request routes refuse, the approve route goes on), and a line says so', warned.join(' | '))
+     'Whop down for it: no answer on file (the request routes refuse, and since T-122\'s fourth fix round the normal Approve too), and a line says so', warned.join(' | '))
 
   const members = Array.from({ length: 3 }, (_, i) => ({ id: `s-${i}`, whop_membership_id: `mem_${i}`, first_paid_at: '2026-10-10T08:00:00.000Z', membership_status: 'active' }))
   const hung = await MD.refreshMembershipDiscounts(fakeClient(new FakeDb({ students: members, discount_requests: [], student_membership_discounts: [] })), {

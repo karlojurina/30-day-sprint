@@ -12,7 +12,9 @@
  * fix round the owner's rule as he put it: a code other than the student's
  * own 30% on the membership on file, on any course membership found through
  * their Whop user or on any course payment, then with no code anywhere a
- * price under 97.00), and Whop's answer
+ * price under 97.00; since its fourth, the memberships that no longer grant
+ * access read for a code too, and the price that of the first real course
+ * payment alone), and Whop's answer
  * is written to student_membership_discounts, so the list read after it
  * shows the row as Whop has it now: with the coupon gone, the 30% rule
  * decides the row again and Approve is back. No Whop code is made and the

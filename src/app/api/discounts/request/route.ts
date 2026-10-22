@@ -27,16 +27,19 @@ import {
  * gets no 30%. Whop is asked now (checkMembershipDiscount; since T-122's
  * third fix round the owner's rule as he put it: a promo code other than the
  * student's own 30% on the membership on file, on any course membership found
- * through their Whop user or on any course payment, the $0 ones too, is a
- * coupon; with no code anywhere, a real payment in dollars under 97.00 that
- * is no plan change is one). When Whop does not answer, the stored row
- * decides if it says a coupon, or says none and this rule wrote it (its
- * source set, which needs v113; a row with no source, as every row written
- * before v113 is, does not answer, and without v113 a stored "no coupon"
- * never does). With neither, since the owner's review (2026-10-21) nothing
- * is written and the student reads "We couldn't check your membership just
- * now. Try again in a minute." (membershipUncheckedRefusal, a 503); the
- * request used to go through and leave the coupon to the approve route.
+ * through their Whop user (since its fourth, those that no longer grant
+ * access too) or on any course payment, the $0 ones too, is a coupon; with
+ * no code anywhere, the student's first real course payment in dollars under
+ * 97.00 that is no plan change is one, a later charge never). When Whop does
+ * not answer, the stored row decides if it says a coupon, or says none, this
+ * rule wrote it (its source set, which needs v113; a row with no source, as
+ * every row written before v113 is, does not answer, and without v113 a
+ * stored "no coupon" never does) and it names no code but the student's own
+ * by the promo id on their own request (since the fourth fix round). With
+ * neither, since the owner's review (2026-10-21) nothing is written and the
+ * student reads "We couldn't check your membership just now. Try again in a
+ * minute." (membershipUncheckedRefusal, a 503); the request used to go
+ * through and leave the coupon to the approve route.
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */

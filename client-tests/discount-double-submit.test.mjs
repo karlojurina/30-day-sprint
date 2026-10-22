@@ -76,7 +76,9 @@ async function heard(fn) {
  * review of 2026-10-21 a coupon check that cannot run writes nothing, so the
  * routes reach the write only with an answer on file. The row holds its
  * source: since T-122's third fix round a stored "no coupon" answers only
- * when the rule of that round wrote it (v113's source set).
+ * when the rule of that round wrote it (v113's source set), and since its
+ * fifth only with the rule's stamp (`source` with the rule's version,
+ * `source_checked_at` its checked_at).
  */
 function newCourseDb() {
   setCatalog({ v2: true, lessonsTable: 'lessons_next' })
@@ -84,7 +86,8 @@ function newCourseDb() {
     students: [{ id: 's1', supabase_user_id: 'auth-1', first_paid_at: PAID, joined_at: PAID, whop_membership_id: 'mem_devClean' }],
     student_membership_discounts: [{
       student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null,
-      renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: iso(NOW - DAY), source: 'membership',
+      renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: iso(NOW - DAY),
+      source: 'r5-membership', source_checked_at: iso(NOW - DAY),
     }],
     lessons_next: [
       { id: 'a1l01', type: 'watch', sort_order: 1, duration_seconds: 300 },

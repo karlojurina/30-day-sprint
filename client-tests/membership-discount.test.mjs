@@ -320,6 +320,14 @@ async function quiet(fn) {
 }
 const BANNED = /—|\bunlock|ecomtalent/i
 const LINE = "You can't apply for this discount because you already have a discount applied to your account."
+/**
+ * THE RULE STAMP (T-122's fifth fix round): the `source` a row this rule writes carries, the step with the rule's
+ * version before it. The step's word alone until then, which v113's check now refuses. A checked row written by this
+ * rule also carries `source_checked_at`, its own `checked_at`.
+ */
+const R5 = (step) => `r5-${step}`
+/** A stored row as this rule writes it: its stamp, and source_checked_at its checked_at. */
+const stampedBy = (row, step) => ({ ...row, source: R5(step), source_checked_at: row.checked_at })
 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n=== The rule, on its own ===')
@@ -518,14 +526,16 @@ const paths = () => whop.log.map((r) => `${r.path}${r.path.endsWith('/membership
 {
   // The membership on file reads as before (source "membership"), and nothing else is asked.
   const onFile = await judge('mem_devEvolve', 'user_devEvolvePay')
-  ok(onFile.ok && onFile.source === 'membership' && onFile.row.discounted === true && onFile.row.source === 'membership' && onFile.row.whop_membership_id === 'mem_devEvolve'
+  // Since T-122's fifth fix round the row carries THE RULE STAMP: the step with the rule's version, and the time of its write.
+  ok(onFile.ok && onFile.source === 'membership' && onFile.row.discounted === true && onFile.row.source === R5('membership') && onFile.row.source_checked_at === onFile.row.checked_at
+       && onFile.row.whop_membership_id === 'mem_devEvolve'
        && !whop.log.some((r) => r.path.startsWith('/api/v2/') || r.path === '/api/v1/payments'),
      'a membership on file that reads: THE RULE on it, source "membership", no user or payment read', show(onFile))
 
   // 22 of the 46: a payment's id where the membership's belongs.
   const viaUser = await judge('pay_devPayment', 'user_devEvolvePay')
   ok(viaUser.ok && viaUser.source === 'user' && viaUser.row.discounted === true && viaUser.row.promo_code === 'evolve10'
-       && viaUser.row.whop_membership_id === 'mem_devEvolve' && viaUser.row.source === 'user' && viaUser.row.renewal_price === 87.3 && viaUser.row.plan_renewal_price === 97,
+       && viaUser.row.whop_membership_id === 'mem_devEvolve' && viaUser.row.source === R5('user') && viaUser.row.renewal_price === 87.3 && viaUser.row.plan_renewal_price === 97,
      'a payment\'s id on file: the course membership found through the Whop user, evolve10 on it: discounted, the membership it judged stored', show(viaUser))
   // Since T-122's fourth fix round the user's list and the payments are read at the same time (one after the other
   // until then, so a Whop slower than 2 s an answer gave the request routes' 503), and the membership the list names
@@ -557,7 +567,7 @@ const paths = () => whop.log.map((r) => `${r.path}${r.path.endsWith('/membership
   // payment on a coupon (here mem_devOdd; it named the membership whose read gave no price until then).
   const price = await judge('mem_devNullPrice', 'user_devOdd')
   ok(price.ok && price.source === 'payment' && price.row.discounted === true && price.row.renewal_price === 87.3 && price.row.plan_renewal_price === 97
-       && price.row.promo_code_id === 'promo_devEvolve' && price.row.promo_code === 'evolve10' && price.row.whop_membership_id === 'mem_devOdd' && price.row.source === 'payment' && price.noRealPayment === false,
+       && price.row.promo_code_id === 'promo_devEvolve' && price.row.promo_code === 'evolve10' && price.row.whop_membership_id === 'mem_devOdd' && price.row.source === R5('payment') && price.noRealPayment === false,
      'a null renewal price, the latest real payment 87.30 (on evolve10): discounted, the payment\'s total and the 97.00 stored, the code named, the payment\'s membership named', show(price))
   // Since T-122's third fix round the user's course memberships are read whatever the one on file said (a code on a
   // second membership is a coupon), so the list comes before the payments; until then it was not read here.
@@ -633,9 +643,12 @@ const paths = () => whop.log.map((r) => `${r.path}${r.path.endsWith('/membership
   process.env.WHOP_PRODUCT_ID = ''
   const noProduct = await judge('pay_devPayment', 'user_devEvolvePay')
   const noProductOnFile = await judge('mem_devEvolve', 'user_devEvolvePay')
+  const noProductReads = whop.log.length
   process.env.WHOP_PRODUCT_ID = COURSE
-  ok(show(noProduct) === show({ ok: false, fail: 'no_course_product' }) && noProductOnFile.ok && noProductOnFile.source === 'membership',
-     'WHOP_PRODUCT_ID naming no course product: no answer where the course must be found, and the membership on file still reads', show(noProduct))
+  // Since T-122's fifth fix round the membership on file is checked against the course's products too, so with none
+  // named nothing is read (the membership on file still read, and its code answered, until then).
+  ok(show(noProduct) === show({ ok: false, fail: 'no_course_product' }) && show(noProductOnFile) === show({ ok: false, fail: 'no_course_product' }) && noProductReads === 0,
+     'WHOP_PRODUCT_ID naming no course product: no answer, before any read (the membership on file is the course\'s only by those products)', show([noProduct, noProductOnFile]))
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -817,8 +830,9 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const row = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
   ok(show(live.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'membership', liveFail: null, saved: true }), 'Whop answers: discounted, evolve10, live from the membership on file, and saved', show(live.value))
   ok(row && row.student_id === 's1' && row.whop_membership_id === 'mem_devEvolve' && row.promo_code === 'evolve10' && row.promo_code_id === 'promo_devEvolve'
-       && row.renewal_price === 87.3 && row.plan_renewal_price === 97 && row.discounted === true && row.checked_at === new Date().toISOString() && row.source === 'membership',
-     'and the answer is stored for the map and the admin page, with the step that answered (v113)', show(row))
+       && row.renewal_price === 87.3 && row.plan_renewal_price === 97 && row.discounted === true && row.checked_at === new Date().toISOString()
+       && row.source === R5('membership') && row.source_checked_at === row.checked_at,
+     'and the answer is stored for the map and the admin page, with the rule\'s stamp: the step that answered with the rule\'s version, and the time of this write (v113)', show(row))
   ok(live.lines.length === 0, 'nothing is logged when Whop answers')
 }
 {
@@ -861,7 +875,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const r2 = await quiet(() => checkMembershipDiscount(fakeClient(noMembership), 's1', { apiKey: KEY }))
   const row2 = noMembership.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
   ok(show(r2.value) === show({ discounted: false, code: null, source: 'live', via: 'user', liveFail: null, saved: true })
-       && row2.whop_membership_id === 'mem_devFull' && row2.source === 'user' && row2.discounted === false && r2.lines.length === 0,
+       && row2.whop_membership_id === 'mem_devFull' && row2.source === R5('user') && row2.discounted === false && r2.lines.length === 0,
      'no membership on file: the course membership found through the Whop user answers (full price), and its row replaces the old one', show({ answer: r2.value, row: row2 }))
 }
 {
@@ -877,7 +891,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const r3 = await quiet(() => checkMembershipDiscount(fakeClient(odd), 's1', { apiKey: KEY }))
   const row3 = odd.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
   ok(show(r3.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'payment', liveFail: null, saved: true })
-       && row3.source === 'payment' && row3.renewal_price === 87.3 && row3.plan_renewal_price === 97 && row3.whop_membership_id === 'mem_devOdd',
+       && row3.source === R5('payment') && row3.renewal_price === 87.3 && row3.plan_renewal_price === 97 && row3.whop_membership_id === 'mem_devOdd',
      'a null renewal price: the latest real payment (87.30) answers, stored with source payment for the payment\'s membership (since the second fix round)', show(row3))
   // Whop down while the user is asked, with a row stored through the user before: the stored row decides (the id on file names no membership).
   resetWhop()
@@ -1061,7 +1075,7 @@ for (const [name, route, path, body] of [
     r = await quiet(() => post(route, path, body))
     const stored = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
     const wrote = db.rows('discount_requests').length
-    ok(r.value.status === status && (status === 400 ? r.value.body.error === LINE && wrote === 0 : wrote === 1) && stored?.source === source && stored?.discounted === (status === 400),
+    ok(r.value.status === status && (status === 400 ? r.value.body.error === LINE && wrote === 0 : wrote === 1) && stored?.source === R5(source) && stored?.discounted === (status === 400),
        `${why}: ${status === 400 ? '400, the student\'s line, nothing written' : '200, the request goes in'} (source ${source}, stored)`, show({ status: r.value.status, body: r.value.body, source: stored?.source }))
   }
   // Whop down at the steps T-122 added: still the 503 and nothing written.
@@ -1117,14 +1131,15 @@ for (const [name, route, path, body] of [
   ok(r.value.status === 400 && r.value.body.error === LINE && db.rows('discount_requests').length === 0,
      'Whop down, a payment\'s id on file, a row stored through the Whop user saying evolve10: refused with the line, not the 503', show(r.value))
   // T-122's third fix round: a stored "no coupon" answers only when this rule wrote it, its source set (v113). Until
-  // then any stored "no discount" let the request in, the rows production's cron wrote by the rule before too.
+  // then any stored "no discount" let the request in, the rows production's cron wrote by the rule before too. Since
+  // its fifth the source carries the rule's version and source_checked_at its checked_at (stampedBy).
   const noCoupon = { ...storedEvolve('s1'), promo_code_id: null, promo_code: null, renewal_price: 97, discounted: false }
   resetWhop()
   whop.answer = () => 'throw'
-  db = readyDb('mem_devEvolve', { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...noCoupon, source: 'membership' }] })
+  db = readyDb('mem_devEvolve', { [MEMBERSHIP_DISCOUNTS_TABLE]: [stampedBy(noCoupon, 'membership')] })
   r = await quiet(() => post(route, path, body))
   ok(r.value.status === 200 && db.rows('discount_requests').length === 1,
-     'Whop down, the stored row for this membership says no coupon and holds its source: the request goes in on the stored answer', show(r.value))
+     'Whop down, the stored row for this membership says no coupon and holds this rule\'s stamp: the request goes in on the stored answer', show(r.value))
   resetWhop()
   whop.answer = () => 'throw'
   db = readyDb('mem_devEvolve', { [MEMBERSHIP_DISCOUNTS_TABLE]: [noCoupon] })
@@ -1310,7 +1325,7 @@ async function listedRow(db) {
   const row = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
   ok(r.value.status === 200 && show(r.value.body) === show({ discounted: false, code: null }),
      'a csm checks again: 200, Whop shows no code now, and nothing else in the answer', show(r.value))
-  ok(row.discounted === false && row.whop_membership_id === 'mem_devFull' && row.source === 'membership' && row.checked_at === new Date().toISOString() && db.rows(MEMBERSHIP_DISCOUNTS_TABLE).length === 1,
+  ok(row.discounted === false && row.whop_membership_id === 'mem_devFull' && row.source === R5('membership') && row.checked_at === new Date().toISOString() && db.rows(MEMBERSHIP_DISCOUNTS_TABLE).length === 1,
      'the stored row is Whop\'s answer, read now, with its source (still one row per student)', show(row))
   const after = await listedRow(db)
   ok(after?.verdict?.ok === true && after.verdict.reason === null && after.coupon?.discounted === false,
@@ -1407,7 +1422,7 @@ async function listedRow(db) {
      'a payment\'s id on file: the stored row counts (no membership id to compare), so the row is the coupon\'s', show(before?.couponCheck))
   const r = await quiet(() => checkAgain())
   const row = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
-  ok(r.value.status === 200 && show(r.value.body) === show({ discounted: false, code: null }) && row.whop_membership_id === 'mem_devFull' && row.source === 'user' && row.discounted === false,
+  ok(r.value.status === 200 && show(r.value.body) === show({ discounted: false, code: null }) && row.whop_membership_id === 'mem_devFull' && row.source === R5('user') && row.discounted === false,
      'checked again: 200, the course membership found through the Whop user renews at full price, stored for that membership', show({ body: r.value.body, row }))
   const after = await listedRow(db)
   ok(after?.verdict?.ok === true && after.coupon?.discounted === false && after.couponCheck === 'stored',
@@ -1415,19 +1430,19 @@ async function listedRow(db) {
   resetWhop()
   const none = checkDb(null, {}, 'user_devEvolvePay')
   const r2 = await quiet(() => checkAgain())
-  ok(r2.value.status === 200 && show(r2.value.body) === show({ discounted: true, code: 'evolve10' }) && none.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].source === 'user',
+  ok(r2.value.status === 200 && show(r2.value.body) === show({ discounted: true, code: 'evolve10' }) && none.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].source === R5('user'),
      'no membership on file: 200, evolve10 on the one found through the Whop user', show(r2.value))
   resetWhop()
   const odd = checkDb('mem_devNullPrice', {}, 'user_devCtl97')
   const r3 = await quiet(() => checkAgain())
-  ok(r3.value.status === 200 && show(r3.value.body) === show({ discounted: false, code: null }) && odd.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].source === 'payment'
+  ok(r3.value.status === 200 && show(r3.value.body) === show({ discounted: false, code: null }) && odd.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].source === R5('payment')
        && (await listedRow(odd))?.verdict?.ok === true,
      'a null renewal price: 200, judged by the real payments (one, 97.00, no code on it), and the list shows Approve again', show(r3.value))
   // T-122's second fix round: an 87.30 on evolve10 before the newest 97.00 is a coupon (the newest alone gave Approve back until then).
   resetWhop()
   const oddFull = checkDb('mem_devNullPrice', {}, 'user_devOddFull')
   const r3b = await quiet(() => checkAgain())
-  ok(r3b.value.status === 200 && show(r3b.value.body) === show({ discounted: true, code: 'evolve10' }) && oddFull.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].source === 'payment'
+  ok(r3b.value.status === 200 && show(r3b.value.body) === show({ discounted: true, code: 'evolve10' }) && oddFull.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].source === R5('payment')
        && oddFull.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].whop_membership_id === 'mem_devNullPrice' && (await listedRow(oddFull))?.verdict?.reason === 'has-discount',
      'a null renewal price, the newest payment 97.00 and an 87.30 on evolve10 before it: 200 naming evolve10, the row for the membership on file (the payment names none), and the list keeps the coupon\'s row', show(r3b.value))
   resetWhop()
@@ -1522,13 +1537,14 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
   ok(rows.get('s-evolve')?.discounted === true && rows.get('s-evolve')?.promo_code === 'evolve10' && rows.get('s-used')?.discounted === true && rows.get('s-used')?.promo_code === 'welcome50'
        && rows.get('s-full')?.discounted === false && rows.get('s-year')?.discounted === true && rows.get('s-pending')?.discounted === true && rows.get('s-rejected')?.discounted === true,
      'each row as Whop said: evolve10 yes, a used code still named yes (no until the third fix round), full price no, yearly code yes; a pending and a rejected request are read too')
-  ok(rows.get('s-pay')?.discounted === true && rows.get('s-pay')?.source === 'user' && rows.get('s-pay')?.whop_membership_id === 'mem_devEvolve'
-       && rows.get('s-missing')?.discounted === true && rows.get('s-missing')?.source === 'user' && rows.get('s-missing')?.whop_membership_id === 'mem_devEvolve2'
-       && rows.get('s-null-price')?.discounted === true && rows.get('s-null-price')?.source === 'payment' && rows.get('s-null-price')?.renewal_price === 87.3
-       && rows.get('s-no-plan')?.discounted === true && rows.get('s-no-plan')?.source === 'payment' && rows.get('s-no-plan')?.renewal_price === 87.3
-       && rows.get('s-no-course')?.discounted === true && rows.get('s-no-course')?.source === 'payment'
-       && rows.get('s-none')?.discounted === false && rows.get('s-none')?.source === 'payment' && rows.get('s-none')?.renewal_price === null
-       && rows.get('s-evolve')?.source === 'membership',
+  ok(rows.get('s-pay')?.discounted === true && rows.get('s-pay')?.source === R5('user') && rows.get('s-pay')?.whop_membership_id === 'mem_devEvolve'
+       && rows.get('s-missing')?.discounted === true && rows.get('s-missing')?.source === R5('user') && rows.get('s-missing')?.whop_membership_id === 'mem_devEvolve2'
+       && rows.get('s-null-price')?.discounted === true && rows.get('s-null-price')?.source === R5('payment') && rows.get('s-null-price')?.renewal_price === 87.3
+       && rows.get('s-no-plan')?.discounted === true && rows.get('s-no-plan')?.source === R5('payment') && rows.get('s-no-plan')?.renewal_price === 87.3
+       && rows.get('s-no-course')?.discounted === true && rows.get('s-no-course')?.source === R5('payment')
+       && rows.get('s-none')?.discounted === false && rows.get('s-none')?.source === R5('payment') && rows.get('s-none')?.renewal_price === null
+       && rows.get('s-evolve')?.source === R5('membership')
+       && [...rows.values()].filter((x) => x.student_id !== 's-down').every((x) => x.source_checked_at === x.checked_at),
      'T-122\'s rows: a payment\'s id and an unknown id through the Whop user (evolve10, stored for the membership judged), no price 87.30 yes, no plan with an 87.30 on evolve10 before its 97.00 yes (no until the second fix round), no course membership 87.30 yes, no payment at all no; each with its source')
   ok(!rows.has('s-sept') && !rows.has('s-canceled') && !rows.has('s-expired') && !rows.has('s-nopay') && !rows.has('s-approved') && !rows.has('s-applied'),
      'nobody outside the window and nobody with the 30% already is written')
@@ -1655,7 +1671,7 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
        && b.written === 6 && show(b.failed) === show({}),
      '6 read and written: 4 discounted (the yearly code, the tax on top, evolve10 beside a newer free membership with a payment\'s id or the free one on file), 3 through the Whop user and 3 from the latest payment, none failed', show(b))
   ok(rows.get('f-year')?.discounted === true && rows.get('f-year')?.plan_renewal_price === 970 && rows.get('f-taxed')?.discounted === true && rows.get('f-taxed')?.renewal_price === 87.3
-       && rows.get('f-free-later')?.whop_membership_id === 'mem_devEvolve3' && rows.get('f-free-on-file')?.whop_membership_id === 'mem_devEvolve3' && rows.get('f-free-on-file')?.source === 'user'
+       && rows.get('f-free-later')?.whop_membership_id === 'mem_devEvolve3' && rows.get('f-free-on-file')?.whop_membership_id === 'mem_devEvolve3' && rows.get('f-free-on-file')?.source === R5('user')
        && rows.get('f-free-full')?.discounted === false && rows.get('f-free-full')?.whop_membership_id === 'mem_devFull' && rows.get('f-ctl-tax')?.discounted === false,
      'each row as the fix round reads it: the code\'s membership named, the prices compared stored, the controls none', show([...rows.values()].map((x) => [x.student_id, x.whop_membership_id, x.discounted, x.renewal_price, x.plan_renewal_price])))
 }
@@ -1834,17 +1850,24 @@ console.log('\n=== vercel.json, the migration and its undo ===')
   // T-122's column (supabase/migration-tests/v113.test.mjs pastes it on Postgres).
   const v113 = read('../supabase/migrations/2026_v113_membership_discount_source.sql').replace(/--.*$/gm, '')
   const v113undo = read('../supabase/undo/2026_v113_undo.sql').replace(/--.*$/gm, '')
-  ok(/add column if not exists source text;/.test(v113) && /check \(source is null or source in \('membership', 'user', 'payment'\)\)/.test(v113)
+  // Since T-122's fifth fix round the source carries the rule's version (r5-...), and source_checked_at the time of the
+  // write that set it; an earlier round's word is emptied before the check goes on (a dev database with the earlier copy).
+  ok(/add column if not exists source text;/.test(v113) && /add column if not exists source_checked_at timestamptz;/.test(v113)
+       && /check \(source is null or source in \('r5-membership', 'r5-user', 'r5-payment'\)\)/.test(v113)
+       && /update public\.student_membership_discounts\s+set source = null,\s+source_checked_at = null\s+where source is not null\s+and source not in \('r5-membership', 'r5-user', 'r5-payment'\);/.test(v113)
        && /^begin;/m.test(v113) && /^commit;/m.test(v113) && /set local lock_timeout = '5s';/.test(v113) && !/create policy|grant |revoke /.test(v113),
-     'v113 adds source, held to the three steps or empty, in one transaction with 5 seconds for a lock, and touches no policy or privilege')
-  ok(/drop column if exists source;/.test(v113undo) && /alter table if exists public\.student_membership_discounts/.test(v113undo), 'its undo drops the column, and runs again with nothing to drop')
+     'v113 adds source, held to this rule\'s three values or empty, and source_checked_at, in one transaction with 5 seconds for a lock, and touches no policy or privilege')
+  ok(/drop column if exists source;/.test(v113undo) && /drop column if exists source_checked_at;/.test(v113undo) && /alter table if exists public\.student_membership_discounts/.test(v113undo),
+     'its undo drops both columns, and runs again with nothing to drop')
   const src = read('../src/lib/membership-discount.ts')
   // Until T-122's third fix round no read named source. Since then the request routes' fallback does, to tell a stored
   // "no coupon" this rule wrote; on a database without v113 it reads again without it (run in the round's own section).
+  // Since the fifth it names source_checked_at with it, and reads checked_at.
   ok(/MEMBERSHIP_DISCOUNT_COLUMNS =\s+"student_id, whop_membership_id, promo_code_id, promo_code, renewal_price, plan_renewal_price, discounted, checked_at";/.test(src)
-       && (src.match(/`\$\{STORED_FALLBACK_COLUMNS\}, source`/g) ?? []).length === 1 && !/\.select\("[^"]*source/.test(src)
+       && /STORED_FALLBACK_COLUMNS = "whop_membership_id, promo_code_id, promo_code, discounted, checked_at";/.test(src)
+       && (src.match(/`\$\{STORED_FALLBACK_COLUMNS\}, source, source_checked_at`/g) ?? []).length === 1 && !/\.select\("[^"]*source/.test(src)
        && /if \(!lacksSourceColumn\(withSource\.error\)\) return null;\s+const bare = await read\(STORED_FALLBACK_COLUMNS\);/.test(src),
-     'one read names source, the request routes\' fallback, and on a database without v113 it reads again without it, so every read still answers there')
+     'one read names source and source_checked_at, the request routes\' fallback, and on a database without v113 it reads again without them, so every read still answers there')
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2123,7 +2146,7 @@ console.log('\n=== T-122\'s second fix round: every real payment, a named code, 
     ok(r.value.status === 200 && b.ok === true && b.checked === coupons.length + ins.length + 2 && b.written === b.checked && show(b.failed) === show({})
          && b.discounted === coupons.length + 1,
        `the cron: ${coupons.length + ins.length + 2} students read and written, ${coupons.length + 1} discounted (the round's cases, and the ECOM30 code of a student holding no request), none failed`, show(b))
-    ok(coupons.every((s) => rows.get(s.id)?.discounted === true) && blocking.every(([, , , want], i) => rows.get(`c-${i}`)?.source === want.source && rows.get(`c-${i}`)?.whop_membership_id === want.membership),
+    ok(coupons.every((s) => rows.get(s.id)?.discounted === true) && blocking.every(([, , , want], i) => rows.get(`c-${i}`)?.source === R5(want.source) && rows.get(`c-${i}`)?.whop_membership_id === want.membership),
        'each case stored as a coupon, with the step that found it and the membership it names', show(coupons.map((s) => [s.id, rows.get(s.id)?.discounted, rows.get(s.id)?.source, rows.get(s.id)?.whop_membership_id])))
     ok(ins.every((s) => rows.get(s.id)?.discounted === false) && rows.get(T_USED)?.discounted === true && rows.get(T_USED)?.promo_code === THIRTY_NAME && rows.get('k-full')?.discounted === false,
        'each control stored with no coupon, the full-price membership with a tax of unknown behaviour too; the ECOM30 code named for an id starting ab12cd, on a student holding no request, a coupon', show([...ins, { id: T_USED }, { id: 'k-full' }].map((s) => [s.id, rows.get(s.id)?.discounted])))
@@ -2327,7 +2350,7 @@ console.log('\n=== T-122\'s third fix round: a code anywhere is a coupon, then t
     const r = row3(await judge3(membership, user))
     ok(show(r) === show(w), `${why}: a coupon (judgeStudentDiscount)`, show(r))
     const rs = await routes3(membership, user)
-    ok(refused3(rs) && rs.every((x) => x.stored.source === w.source && x.stored.membership === w.membership),
+    ok(refused3(rs) && rs.every((x) => x.stored.source === R5(w.source) && x.stored.membership === w.membership),
        `${why}: both request routes 400 with the student's line, nothing written, the coupon stored (source ${w.source})`, show(brief(rs)))
   }
   for (const [why, membership, user, w] of controls3) {
@@ -2411,15 +2434,17 @@ console.log('\n=== T-122\'s third fix round: a code anywhere is a coupon, then t
     let rs = await routes3('mem_r3K1', 'user_r3K1', stored(noCoupon))
     ok(unchecked(rs) && rs.every((x) => x.lines.some((l) => l.includes('Whop gave no answer (network), so no answer is on file (the stored row says no coupon and holds no source'))),
        'Whop down, a stored "no coupon" with no source (as production\'s cron wrote them by the rule before): both routes 503, nothing written', show(brief(rs)))
-    rs = await routes3('mem_r3K1', 'user_r3K1', stored({ ...noCoupon, source: 'membership' }))
-    ok(rs.every((x) => x.status === 200 && x.written === 1 && x.stored?.discounted === false && x.stored?.source === 'membership'),
-       'Whop down, the same row with its source (this rule wrote it): both routes 200, the request written on the stored answer', show(brief(rs)))
+    // Since T-122's fifth fix round "this rule wrote it" is the rule's stamp (stampedBy): its version in the source, and
+    // source_checked_at its checked_at.
+    rs = await routes3('mem_r3K1', 'user_r3K1', stored(stampedBy(noCoupon, 'membership')))
+    ok(rs.every((x) => x.status === 200 && x.written === 1 && x.stored?.discounted === false && x.stored?.source === R5('membership')),
+       'Whop down, the same row with this rule\'s stamp: both routes 200, the request written on the stored answer', show(brief(rs)))
     rs = await routes3('mem_r3K1', 'user_r3K1', stored(coupon))
     ok(rs.every((x) => x.status === 400 && x.error === LINE && x.written === 0), 'Whop down, a stored coupon with no source: still refused with the student\'s line', show(brief(rs)))
     // A database without v113: the read naming source is refused, made again without it; a coupon still answers, "no coupon" never.
     const noV113 = (q) => (q.table === MEMBERSHIP_DISCOUNTS_TABLE && q.op === 'select' && /\bsource\b/.test(q.columns ?? '')
       ? { code: '42703', message: 'column student_membership_discounts.source does not exist' } : null)
-    rs = await routes3('mem_r3K1', 'user_r3K1', { ...stored({ ...noCoupon, source: 'membership' }), failWhen: noV113 })
+    rs = await routes3('mem_r3K1', 'user_r3K1', { ...stored(stampedBy(noCoupon, 'membership')), failWhen: noV113 })
     ok(unchecked(rs), 'without v113, Whop down, a stored "no coupon": both routes 503 (the source cannot be read, so it never answers there)', show(brief(rs)))
     rs = await routes3('mem_r3K1', 'user_r3K1', { ...stored(coupon), failWhen: noV113 })
     ok(rs.every((x) => x.status === 400 && x.error === LINE && x.written === 0), 'without v113, Whop down, a stored coupon: refused with the line, read again without source', show(brief(rs)))
@@ -2433,12 +2458,14 @@ console.log('\n=== T-122\'s third fix round: a code anywhere is a coupon, then t
       return { ...r.value, selects: db.calls(MEMBERSHIP_DISCOUNTS_TABLE, 'select').map((c) => c.columns) }
     }
     const a = await check(noCoupon)
-    const b = await check({ ...noCoupon, source: 'payment' })
+    const b = await check(stampedBy(noCoupon, 'payment'))
+    const b2 = await check({ ...noCoupon, source: 'payment' })
     const c = await check({ ...noCoupon, source: 'someone' })
-    const d = await check({ ...noCoupon, source: 'user' }, noV113)
-    ok(a.source === 'none' && b.source === 'stored' && b.discounted === false && c.source === 'none' && d.source === 'none'
-         && show(d.selects) === show(['whop_membership_id, promo_code_id, promo_code, discounted, source', 'whop_membership_id, promo_code_id, promo_code, discounted']),
-       'checkMembershipDiscount: "no coupon" with no source none, with a step\'s source stored, with any other value none; without v113 read twice and none', show({ a: a.source, b: b.source, c: c.source, d }))
+    const d = await check(stampedBy(noCoupon, 'user'), noV113)
+    // A step's word alone (an earlier round's build wrote it) answered until T-122's fifth fix round; now this rule's stamp alone does.
+    ok(a.source === 'none' && b.source === 'stored' && b.discounted === false && b2.source === 'none' && c.source === 'none' && d.source === 'none'
+         && show(d.selects) === show(['whop_membership_id, promo_code_id, promo_code, discounted, checked_at, source, source_checked_at', 'whop_membership_id, promo_code_id, promo_code, discounted, checked_at']),
+       'checkMembershipDiscount: "no coupon" with no source none, with this rule\'s stamp stored, with a step\'s word alone or any other value none; without v113 read twice and none', show({ a: a.source, b: b.source, b2: b2.source, c: c.source, d }))
   }
 
   // The approve route names the code teamThirtyCodeFor makes, the name the check reads as the student's own.
@@ -2478,9 +2505,9 @@ console.log('\n=== T-122\'s third fix round: a code anywhere is a coupon, then t
     ok(r.value.status === 200 && b.ok === true && b.checked === coupons.length + ins.length && b.written === b.checked && show(b.failed) === show({})
          && b.discounted === coupons.length && show(b.by_source) === show(expected) && b.left === 0,
        `the cron: ${coupons.length + ins.length} students read and written, the ${coupons.length} cases discounted, none failed, each counted by its step`, show(b))
-    ok(blocking3.every(([, , , w], i) => rows.get(cid(100 + i))?.discounted === true && rows.get(cid(100 + i))?.source === w.source && rows.get(cid(100 + i))?.whop_membership_id === w.membership),
+    ok(blocking3.every(([, , , w], i) => rows.get(cid(100 + i))?.discounted === true && rows.get(cid(100 + i))?.source === R5(w.source) && rows.get(cid(100 + i))?.whop_membership_id === w.membership),
        'each case stored as a coupon, with its source and the membership it names', show(coupons.map((s) => [s.id.slice(-3), rows.get(s.id)?.discounted, rows.get(s.id)?.source])))
-    ok(controls3.every(([, , , w], i) => rows.get(cid(200 + i))?.discounted === false && rows.get(cid(200 + i))?.source === w.source),
+    ok(controls3.every(([, , , w], i) => rows.get(cid(200 + i))?.discounted === false && rows.get(cid(200 + i))?.source === R5(w.source)),
        'each control stored with no coupon and its source', show(ins.map((s) => [s.id.slice(-3), rows.get(s.id)?.discounted, rows.get(s.id)?.source])))
     // The answer's own field user_list_unusable (T-122's fourth fix round) is a name, not a Whop id.
     ok(!BANNED.test(show(b)) && !/mem_|promo_|pay_|user_/.test(show(b).replaceAll('"user_list_unusable"', '')), 'the answer names no Whop id')
@@ -2696,7 +2723,7 @@ console.log('\n=== T-122\'s fourth fix round: stored rows, the v2 list, ended me
     const r = row4(await judge4(membership, user))
     ok(show(r) === show(w), `${why}: a coupon (judgeStudentDiscount)`, show(r))
     const rs = await routes4(membership, user)
-    ok(refused4(rs) && rs.every((x) => x.stored.source === w.source && x.stored.membership === w.membership),
+    ok(refused4(rs) && rs.every((x) => x.stored.source === R5(w.source) && x.stored.membership === w.membership),
        `${why}: both request routes 400 with the student's line, nothing written, the coupon stored (source ${w.source})`, show(brief4(rs)))
   }
   for (const [why, membership, user, w] of letInCases) {
@@ -2807,22 +2834,33 @@ console.log('\n=== T-122\'s fourth fix round: stored rows, the v2 list, ended me
     ok(w.ok && w.row.discounted === true && w.row.promo_code_id === 'promo_r4W50' && w.row.promo_code === null && w.row.plan_renewal_price === null
          && !ctx2.plans.has(MONTHLY) && !ctx2.promoNames.has('promo_r4W50'),
        'a plan and a code\'s name answering a body that cannot be read: the code is a coupon all the same, named by its id, and neither answer is kept for the next read', show({ row: w.ok && w.row, plans: [...ctx2.plans.keys()], names: [...ctx2.promoNames.keys()] }))
+    // A known limit until T-122's fifth fix round, when it read as a membership naming no code and no renewal price and
+    // the payments decided (no code on them here: no coupon). An object of another id, or naming no code field, is no
+    // answer since.
     const s4 = row4(await judge4('mem_r4S4', 'user_r4S4'))
-    ok(show(s4) === show(want('payment', false, 'mem_r4S4', null, 97, 97)),
-       'known limit: a 200 whose body is an object naming none of the fields read reads as a membership with no code and no renewal price, so the payments decide (here no code on them: no coupon)', show(s4))
+    ok(show(s4) === show({ ok: false, fail: 'bad_shape' }),
+       'a 200 whose body is an object naming none of the fields read (`{}`, no id): no answer (bad_shape), never "no code"', show(s4))
   }
 
   // Probe-we's row and the stored fallback: a stored no coupon answers only naming no code, or the student's own 30%
   // by the promo id on their own approved or applied request.
   const weRow = { student_id: SID, whop_membership_id: 'mem_r4WE', promo_code_id: 'promo_r4W50', promo_code: 'welcome50', renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-21T09:00:00.500Z', source: 'membership' }
+  // Since T-122's fifth fix round the preview's row is no answer by its source alone (a step's word, no stamp of this
+  // rule), whatever it names; the cases below that test the code carry this rule's stamp (stampedBy).
+  const weStamped = stampedBy(weRow, 'membership')
   {
     let rs = await routes4('mem_r4WE', 'user_r4WE', { down: true, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [weRow] } })
-    ok(unchecked4(rs) && rs.every((x) => x.lines.some((l) => l.includes('Whop gave no answer (network)') && l.includes("names a code that is not the student's own 30%"))),
-       'probe-we: the world-engine preview\'s stored no coupon (source membership, naming welcome50), Whop down: both routes 503, nothing written (the request went in on it until this round), and the log says why', show(brief4(rs)))
+    ok(unchecked4(rs) && rs.every((x) => x.lines.some((l) => l.includes('Whop gave no answer (network)') && l.includes("its source is an older rule's"))),
+       'probe-we: the world-engine preview\'s stored no coupon (source membership, naming welcome50), Whop down: both routes 503, nothing written (the request went in on it until the fourth round), and the log says why', show(brief4(rs)))
+    rs = await routes4('mem_r4WE', 'user_r4WE', { down: true, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [weStamped] } })
+    ok(unchecked4(rs) && rs.every((x) => x.lines.some((l) => l.includes("names a code that is not the student's own 30%"))),
+       'the same row stamped by this rule, still naming welcome50: both routes 503 by its code, and the log says why', show(brief4(rs)))
     rs = await routes4('mem_r4WE', 'user_r4WE', { delayMs: 2100, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [weRow] } })
     ok(refused4(rs) && rs.every((x) => x.ms <= 8000), `the same row, Whop slow (2.1 s an answer): Whop's own answer refuses inside the 8 s (${rs.map((x) => `${x.ms} ms`).join(', ')})`, show(brief4(rs)))
+    rs = await routes4('mem_r4WE', 'user_r4WE', { down: true, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...weStamped, promo_code_id: null, promo_code: null }] } })
+    ok(rs.every((x) => x.status === 200 && x.written === 1), 'control: the stamped row naming no code, Whop down: the stored answer lets the request in', show(brief4(rs)))
     rs = await routes4('mem_r4WE', 'user_r4WE', { down: true, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...weRow, promo_code_id: null, promo_code: null }] } })
-    ok(rs.every((x) => x.status === 200 && x.written === 1), 'control: the same row naming no code, Whop down: the stored answer lets the request in', show(brief4(rs)))
+    ok(unchecked4(rs), 'the preview\'s row naming no code (its source a step\'s word alone), Whop down: both routes 503 (it let the request in until the fifth fix round)', show(brief4(rs)))
     const check = async (row, requests = []) => {
       round4Whop()
       whop.answer = () => 'throw'
@@ -2830,18 +2868,18 @@ console.log('\n=== T-122\'s fourth fix round: stored rows, the v2 list, ended me
       return (await quiet(() => checkMembershipDiscount(fakeClient(db), SID, { apiKey: KEY }))).value
     }
     const mine = (status, whopPromoId) => [{ id: 'r4', student_id: SID, status, created_at: AT.later, promo_code: OWN, whop_promo_id: whopPromoId }]
-    const ownRow = { ...weRow, promo_code_id: 'promo_r4Own', promo_code: OWN }
-    const a = await check(weRow)
-    const b = await check({ ...weRow, promo_code_id: null, promo_code: null })
+    const ownRow = { ...weStamped, promo_code_id: 'promo_r4Own', promo_code: OWN }
+    const a = await check(weStamped)
+    const b = await check({ ...weStamped, promo_code_id: null, promo_code: null })
     const c = await check(ownRow, mine('applied', 'promo_r4Own'))
     const c2 = await check(ownRow, mine('approved', 'promo_r4Own'))
     const d = await check(ownRow, mine('approved', 'promo_r4Elsewhere'))
     const e = await check(ownRow)
     const f = await check(ownRow, mine('rejected', 'promo_r4Own'))
-    const g = await check({ ...weRow, source: undefined })
+    const g = await check({ ...weStamped, source: undefined, source_checked_at: undefined })
     ok(a.source === 'none' && b.source === 'stored' && b.discounted === false && c.source === 'stored' && c.discounted === false && c2.source === 'stored'
          && d.source === 'none' && e.source === 'none' && f.source === 'none' && g.source === 'none',
-       'checkMembershipDiscount, Whop down: a stored no coupon with a source answers naming no code (b), or their own 30% by the promo id on their applied or approved request (c); welcome50 (a), their code\'s name with another promo id on the request (d), with no request (e) or a rejected one (f), and no source (g) are no answer', show({ a: a.source, b: b.source, c: c.source, c2: c2.source, d: d.source, e: e.source, f: f.source, g: g.source }))
+       'checkMembershipDiscount, Whop down: a stored no coupon with this rule\'s stamp answers naming no code (b), or their own 30% by the promo id on their applied or approved request (c); welcome50 (a), their code\'s name with another promo id on the request (d), with no request (e) or a rejected one (f), and no source (g) are no answer', show({ a: a.source, b: b.source, c: c.source, c2: c2.source, d: d.source, e: e.source, f: f.source, g: g.source }))
   }
 
   // Approve when the coupon check gives no answer: the normal Approve refused, Approve anyway going on.
@@ -2938,7 +2976,7 @@ console.log('\n=== T-122\'s fourth fix round: stored rows, the v2 list, ended me
        'refused_by_price: the $1 and the $5 first weeks, each with its price and billing_reason, for the owner to rule on; no student a code refused, no Whop id', show(d.refused_by_price))
     const write = await run()
     ok(write.status === 200 && write.b.written === write.b.checked
-         && refusedCases.every(([, , , w], i) => write.rows.get(cid(100 + i))?.discounted === true && write.rows.get(cid(100 + i))?.source === w.source && write.rows.get(cid(100 + i))?.whop_membership_id === w.membership)
+         && refusedCases.every(([, , , w], i) => write.rows.get(cid(100 + i))?.discounted === true && write.rows.get(cid(100 + i))?.source === R5(w.source) && write.rows.get(cid(100 + i))?.whop_membership_id === w.membership)
          && [...letInCases, ...fallThroughCases].every((c, i) => write.rows.get(cid(i < letInCases.length ? 200 + i : 300 + i - letInCases.length))?.discounted === false)
          && noAnswerCases.every((c, i) => !write.rows.has(cid(400 + i))),
        'the write run: each case stored as a coupon with its source and the membership it names, the controls and the counted fall-throughs as none, nothing for the 7 that gave no answer', show([...write.rows.values()].map((x) => [x.student_id.slice(-3), x.discounted, x.source])))
@@ -2949,8 +2987,433 @@ console.log('\n=== T-122\'s fourth fix round: stored rows, the v2 list, ended me
     ok(stale.status === 500 && stale.b.ok === false && stale.b.checked === 0 && stale.b.failed.network === students.length && stale.rows.get(cid(109))?.discounted === false,
        'Whop down for the cron: every student failed (network), nothing written, the preview\'s row as it was', show({ failed: stale.b.failed, row: stale.rows.get(cid(109)) }))
     const healed = await run('', false, { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...weRow, student_id: cid(109) }] })
-    ok(healed.rows.get(cid(109))?.discounted === true && healed.rows.get(cid(109))?.promo_code === 'welcome50' && healed.rows.get(cid(109))?.source === 'membership',
+    ok(healed.rows.get(cid(109))?.discounted === true && healed.rows.get(cid(109))?.promo_code === 'welcome50' && healed.rows.get(cid(109))?.source === R5('membership'),
        'the next run Whop answers: the welcome50 student\'s row is the coupon, written by this rule', show(healed.rows.get(cid(109))))
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// T-122's fifth fix round (2026-10-22), the last. The fourth round passed its
+// re-check with nothing blocking; each case here is one of the re-check's own
+// (its probes a to e), run through judgeStudentDiscount, both request routes,
+// the normal Approve and the cron where it applies. (1) THE RULE STAMP: a
+// stored "no coupon" answers only when its source carries this rule's
+// version and its source_checked_at is its checked_at, so the row an earlier
+// round's build stored (a step's word alone: a89ff1c, the world-engine
+// preview) and this rule's row written over by a build from before T-122 are
+// no answer. (2) A student whose row cannot be read: only a stored coupon
+// answers. (3) A membership read answering an object of another id, or
+// naming no code field, is no answer; a payment naming no buyer is read for
+// its code. (4) A membership of another product on file is passed over. (5)
+// A payment naming no code that came to less than its subtotal is a coupon,
+// the student's own 30% exempt. (6) Among the real payments at the first
+// payment's moment the price judges the checkout, else the highest; the
+// ended memberships are read at once. (7) A no coupon judged without the
+// user's list is stored with no source. Every id and code here is made up.
+console.log('\n=== T-122\'s fifth fix round: the rule stamp, an unread student, the shapes, another product, a discount with no code, the read order, the v2 shutdown ===')
+{
+  const MD5 = await import('./_gen/membership-discount.ts')
+  const DS5 = await import('./_gen/discount-server.ts')
+  // This round's functions, read so the section also runs on a copy of the round before (each then answers undefined).
+  const missing = () => undefined
+  const stampedByThisRule = typeof MD5.stampedByThisRule === 'function' ? MD5.stampedByThisRule : missing
+  const storedSourceOf = typeof MD5.storedSourceOf === 'function' ? MD5.storedSourceOf : missing
+  const discountWithoutCode = typeof MD5.discountWithoutCode === 'function' ? MD5.discountWithoutCode : missing
+  const SID = '5a1b2c3d-0000-4000-8000-000000000005'
+  const OWN = 'ECOM30-5A1B2C'
+  const LINE_503 = "We couldn't check your membership just now. Try again in a minute."
+  // The first payments are paid at PAID, the first_paid_at readyDb stores.
+  const AT = { old: '2026-09-01T09:00:00.000Z', first: PAID, later: '2026-10-20T09:00:00.000Z' }
+  const eur = (amount) => ({ amount, currency: 'eur' })
+  /** Users whose payments list leaves the $0 rows out; memberships whose read answers as the test says. */
+  const omitZero = new Set()
+  const glitch = new Map()
+  const r5answer = (p, n, u) => {
+    const user = u.searchParams.get('user_id')
+    if (p === '/api/v1/payments' && omitZero.has(user)) {
+      const all = (whop.payments.get(user) ?? []).filter((x) => Number(x.total?.amount ?? x.total) !== 0)
+      return json(200, { data: all, page_info: { has_next_page: false, end_cursor: null } })
+    }
+    const read = p.match(/^\/api\/v1\/memberships\/(.+)$/)
+    if (read && glitch.has(read[1])) return glitch.get(read[1])(whop.memberships.get(read[1]))
+    return null
+  }
+  function round5Whop() {
+    resetWhop()
+    omitZero.clear()
+    glitch.clear()
+    for (const [id, code] of [['promo_f5Free100', 'freemonth'], ['promo_f5W50', 'welcome50'], ['promo_f5Other20', 'other20'], ['promo_f5Own', OWN]]) whop.promos.set(id, { id, code })
+    // Every membership here names its product, as Whop's schema has it (product_id is required).
+    const m = (id, promo, renewal, more = {}) => whop.memberships.set(id, { id, status: 'active', promo_code_id: promo, renewal_price: renewal, plan_id: MONTHLY, product_id: COURSE, ...more })
+    const P = (user, ...rows) => whop.payments.set(user, rows)
+    const one = (k) => whop.byUser.set(`user_f5${k}`, [v2(`mem_f5${k}`, `user_f5${k}`)])
+    const ended = (more = {}) => ({ status: 'canceled', valid: false, ...more })
+    // F: the control, 97.00 at the checkout and no code anywhere.
+    m('mem_f5F', null, '97.00'); one('F')
+    P('user_f5F', pay('pay_f5F', 'user_f5F', '97.00', AT.first, { membership_id: 'mem_f5F', billing_reason: 'subscription_create' }))
+    // S (item 1): a 100% first month on a membership since canceled, its 0.00 checkout left out of the list, back at
+    // 97.00 on a new one (probe-b's S1 to S3).
+    m('mem_f5Sold', 'promo_f5Free100', '97.00', { status: 'canceled' })
+    m('mem_f5Snew', null, '97.00')
+    whop.byUser.set('user_f5S', [v2('mem_f5Snew', 'user_f5S', { created_at: 1_760_900_000 }), v2('mem_f5Sold', 'user_f5S', ended({ created_at: 1_758_000_000 }))])
+    P('user_f5S',
+      pay('pay_f5Sb', 'user_f5S', '97.00', AT.first, { membership_id: 'mem_f5Snew', billing_reason: 'subscription_create' }),
+      pay('pay_f5Sa', 'user_f5S', '0.00', AT.old, { subtotal: money('97.00'), membership_id: 'mem_f5Sold', promo_code_id: 'promo_f5Free100', billing_reason: 'subscription_create' }))
+    omitZero.add('user_f5S')
+    // U (item 2): welcome50 on the membership on file now; this rule's no coupon stored for the canceled one before it.
+    m('mem_f5Uold', null, '97.00', { status: 'canceled' })
+    m('mem_f5Unew', 'promo_f5W50', '97.00')
+    whop.byUser.set('user_f5U', [v2('mem_f5Unew', 'user_f5U', { created_at: 1_760_900_000 }), v2('mem_f5Uold', 'user_f5U', ended({ created_at: 1_758_000_000 }))])
+    P('user_f5U',
+      pay('pay_f5Ub', 'user_f5U', '48.50', AT.later, onCode('promo_f5W50', '97.00', { membership_id: 'mem_f5Unew' })),
+      pay('pay_f5Ua', 'user_f5U', '97.00', AT.first, { membership_id: 'mem_f5Uold' }))
+    // W, E, K, I (item 3): a 100% code on the membership on file, its 0.00 checkout left out, the membership read
+    // answering the object wrapped, `{}`, with no code field, or of another id. Leg: the key's older shape, the code
+    // under promo_code alone, read as before.
+    for (const [k, answer] of [
+      ['W', (mm) => json(200, { data: mm })],
+      ['E', () => json(200, {})],
+      ['K', (mm) => json(200, Object.fromEntries(Object.entries(mm).filter(([key]) => key !== 'promo_code_id')))],
+      ['I', (mm) => json(200, { ...mm, id: 'mem_f5Someone' })],
+      ['Leg', (mm) => { const { promo_code_id, ...rest } = mm; return json(200, { ...rest, promo_code: { id: promo_code_id } }) }],
+    ]) {
+      m(`mem_f5${k}`, 'promo_f5Free100', '97.00'); one(k)
+      P(`user_f5${k}`,
+        pay(`pay_f5${k}b`, `user_f5${k}`, '97.00', AT.first, { membership_id: `mem_f5${k}`, billing_reason: 'subscription_cycle' }),
+        pay(`pay_f5${k}a`, `user_f5${k}`, '0.00', AT.old, { subtotal: money('97.00'), membership_id: `mem_f5${k}`, promo_code_id: 'promo_f5Free100' }))
+      omitZero.add(`user_f5${k}`)
+      glitch.set(`mem_f5${k}`, answer)
+    }
+    // B (item 3): welcome50 named on the first payment alone, that row naming no buyer; B2 the control, a 10.00 row
+    // naming no buyer and no code at the first payment's moment, the checkout 97.00 after it.
+    m('mem_f5B', null, '97.00'); one('B')
+    P('user_f5B',
+      pay('pay_f5Bb', 'user_f5B', '97.00', AT.later, { membership_id: 'mem_f5B', billing_reason: 'subscription_cycle' }),
+      { ...pay('pay_f5Ba', 'user_f5B', '48.50', AT.first, onCode('promo_f5W50', '97.00', { membership_id: 'mem_f5B', billing_reason: 'subscription_create' })), user: null })
+    m('mem_f5B2', null, '97.00'); one('B2')
+    P('user_f5B2',
+      pay('pay_f5B2b', 'user_f5B2', '97.00', AT.later, { membership_id: 'mem_f5B2', billing_reason: 'subscription_create' }),
+      { ...pay('pay_f5B2a', 'user_f5B2', '10.00', AT.first, { membership_id: null, billing_reason: 'one_time' }), user: null })
+    // O (item 4): a membership of another product on file naming that product's code (39.20 of 49.00), the course
+    // membership found through the user: O1 naming no code, O2 naming welcome50; O3 the course one on file.
+    for (const k of ['O1', 'O2', 'O3']) {
+      const user = `user_f5${k}`
+      m(`mem_f5${k}x`, 'promo_f5Other20', '39.20', { plan_id: 'plan_f5Other', product_id: OTHER })
+      m(`mem_f5${k}`, k === 'O2' ? 'promo_f5W50' : null, '97.00')
+      whop.byUser.set(user, [v2(`mem_f5${k}x`, user, { product: OTHER, plan: 'plan_f5Other', created_at: 1_760_900_000 }), v2(`mem_f5${k}`, user)])
+      P(user,
+        pay(`pay_f5${k}b`, user, '39.20', AT.later, { subtotal: money('49.00'), product_id: OTHER, membership_id: `mem_f5${k}x`, promo_code_id: 'promo_f5Other20' }),
+        pay(`pay_f5${k}a`, user, k === 'O2' ? '48.50' : '97.00', AT.first, { subtotal: money('97.00'), membership_id: `mem_f5${k}`, billing_reason: 'subscription_create', ...(k === 'O2' ? { promo_code_id: 'promo_f5W50' } : {}) }))
+    }
+    // X (item 5): a discount with no code named. X2 a 100% first month's 0.00 of 97.00, then 97.00; X3 a first-year
+    // 873.00 of 970.00; X4 welcome50's EUR 44.95 of 89.90; X7 48.50 of 97.00 since refunded, then 97.00. X5 the
+    // student's own 30% (67.90 of 97.00, named) after a 97.00 checkout; X6 a plan change's 12.34 of 97.00.
+    m('mem_f5X2', null, '97.00'); one('X2')
+    P('user_f5X2',
+      pay('pay_f5X2b', 'user_f5X2', '97.00', AT.later, { membership_id: 'mem_f5X2', billing_reason: 'subscription_cycle' }),
+      pay('pay_f5X2a', 'user_f5X2', '0.00', AT.first, { subtotal: money('97.00'), membership_id: 'mem_f5X2', billing_reason: 'subscription_create' }))
+    m('mem_f5X3', null, '970.00', { plan_id: YEAR970 }); whop.byUser.set('user_f5X3', [v2('mem_f5X3', 'user_f5X3', { plan: YEAR970 })])
+    P('user_f5X3', pay('pay_f5X3', 'user_f5X3', '873.00', AT.first, { subtotal: money('970.00'), membership_id: 'mem_f5X3', plan_id: YEAR970, billing_reason: 'subscription_create' }))
+    m('mem_f5X4', null, eur('89.90'), { plan_id: 'plan_f5Eur' }); one('X4')
+    P('user_f5X4', pay('pay_f5X4', 'user_f5X4', '44.95', AT.first, { currency: 'eur', total: eur('44.95'), subtotal: eur('89.90'), membership_id: 'mem_f5X4', billing_reason: 'subscription_create' }))
+    m('mem_f5X5', null, '97.00'); one('X5')
+    P('user_f5X5',
+      pay('pay_f5X5b', 'user_f5X5', '67.90', AT.later, onCode('promo_f5Own', '97.00', { membership_id: 'mem_f5X5', billing_reason: 'subscription_cycle' })),
+      pay('pay_f5X5a', 'user_f5X5', '97.00', AT.first, { membership_id: 'mem_f5X5', billing_reason: 'subscription_create' }))
+    m('mem_f5X6', null, '97.00'); one('X6')
+    P('user_f5X6',
+      pay('pay_f5X6b', 'user_f5X6', '12.34', AT.later, { subtotal: money('97.00'), membership_id: 'mem_f5X6', billing_reason: 'subscription_update' }),
+      pay('pay_f5X6a', 'user_f5X6', '97.00', AT.first, { membership_id: 'mem_f5X6', billing_reason: 'subscription_create' }))
+    m('mem_f5X7', null, '97.00'); one('X7')
+    P('user_f5X7',
+      pay('pay_f5X7b', 'user_f5X7', '97.00', AT.first, { membership_id: 'mem_f5X7', billing_reason: 'subscription_create' }),
+      pay('pay_f5X7a', 'user_f5X7', '48.50', AT.old, { subtotal: money('97.00'), membership_id: 'mem_f5X7', substatus: 'refunded', refunded_amount: money('48.50'), billing_reason: 'subscription_create' }))
+    // L (item 6): at the first payment's moment, L2 a 10.00 add-on listed before the 97.00 checkout; L3 the same
+    // naming no billing reason; L4 a 48.50 checkout (no discount shown) beside a 97.00 one-time charge.
+    for (const [k, small, big] of [['L2', ['10.00', 'one_time'], ['97.00', 'subscription_create']], ['L3', ['10.00', null], ['97.00', null]], ['L4', ['97.00', 'one_time'], ['48.50', 'subscription_create']]]) {
+      m(`mem_f5${k}`, null, '97.00'); one(k)
+      P(`user_f5${k}`,
+        pay(`pay_f5${k}b`, `user_f5${k}`, small[0], AT.first, { membership_id: null, billing_reason: small[1] }),
+        pay(`pay_f5${k}a`, `user_f5${k}`, big[0], AT.first, { membership_id: `mem_f5${k}`, billing_reason: big[1] }))
+    }
+    // T (item 6): two course memberships since canceled beside the one on file; T2 no code anywhere, T3 the older
+    // one on a 100% first month whose 0.00 checkout is left out.
+    for (const k of ['T2', 'T3']) {
+      const user = `user_f5${k}`
+      m(`mem_f5${k}`, null, '97.00')
+      m(`mem_f5${k}e0`, null, '97.00', { status: 'canceled' })
+      m(`mem_f5${k}e1`, k === 'T3' ? 'promo_f5Free100' : null, '97.00', { status: 'canceled' })
+      whop.byUser.set(user, [v2(`mem_f5${k}`, user, { created_at: 1_760_900_000 }), v2(`mem_f5${k}e0`, user, ended({ created_at: 1_759_500_000 })), v2(`mem_f5${k}e1`, user, ended({ created_at: 1_758_000_000 }))])
+      P(user,
+        pay(`pay_f5${k}`, user, '97.00', AT.first, { membership_id: `mem_f5${k}`, billing_reason: 'subscription_create' }),
+        pay(`pay_f5${k}z`, user, '0.00', AT.old, { subtotal: money('97.00'), membership_id: `mem_f5${k}e1`, promo_code_id: 'promo_f5Free100' }))
+      omitZero.add(user)
+    }
+    // V (item 7): the v2 list answering 410 (V410) or 404 (V404), no code on the membership on file or the payments;
+    // Vc the same with a 0.00 checkout naming a 100% code listed.
+    for (const [k, status] of [['V410', 410], ['V404', 404], ['Vc', 410]]) {
+      m(`mem_f5${k}`, null, '97.00')
+      whop.byUser.set(`user_f5${k}`, status)
+      P(`user_f5${k}`,
+        pay(`pay_f5${k}b`, `user_f5${k}`, '97.00', AT.first, { membership_id: `mem_f5${k}`, billing_reason: 'subscription_create' }),
+        ...(k === 'Vc' ? [pay(`pay_f5${k}a`, `user_f5${k}`, '0.00', AT.old, { subtotal: money('97.00'), membership_id: 'mem_f5Vcold', promo_code_id: 'promo_f5Free100' })] : []))
+    }
+  }
+  const want = (source, discounted, membership, code, price, against) => ({ source, discounted, membership, code, price, against })
+  const row5 = (r) => (r.ok ? { source: r.source, discounted: r.row.discounted, membership: r.row.whop_membership_id, code: r.row.promo_code ?? r.row.promo_code_id, price: r.row.renewal_price, against: r.row.plan_renewal_price } : r)
+  const judge5 = async (onFile, user, more = {}) => {
+    round5Whop()
+    whop.answer = r5answer
+    return judgeStudentDiscount({ id: SID, whop_membership_id: onFile, whop_user_id: user, first_paid_at: PAID, ...more }, newReadContext(KEY))
+  }
+  /** Both request routes for the student: what each answered, wrote and stored, its Whop reads and when they started. */
+  async function routes5(membership, user, more = {}) {
+    const out = []
+    for (const [name, route, path, body] of [['request', requestRoute, 'request', { studentId: SID }], ['submit-feedback', feedbackRoute, 'submit-feedback', { answers: ANSWERS }]]) {
+      round5Whop()
+      whop.answer = more.down ? () => 'throw' : r5answer
+      whop.delayMs = more.delayMs ?? 0
+      const db = readyDb(membership, more.db ?? {}, user, SID)
+      if (more.failWhen) db.failWhen = more.failWhen
+      if (more.prepare) await more.prepare(db)
+      const t0 = Date.now()
+      const r = await quiet(() => post(route, path, body))
+      const stored = db.rows(MEMBERSHIP_DISCOUNTS_TABLE).find((x) => x.student_id === SID) ?? null
+      out.push({ name, status: r.value.status, error: r.value.body.error ?? null, state: r.value.body.state ?? null,
+        written: db.rows('discount_requests').length - (more.db?.discount_requests?.length ?? 0), rpc: db.calls('submit_discount_with_feedback', 'rpc').length,
+        stored: stored && { discounted: stored.discounted, source: stored.source ?? null, sameWrite: stored.source_checked_at === stored.checked_at, membership: stored.whop_membership_id },
+        asked: whop.log.length, starts: whop.log.map((x) => x.at - t0), ms: Date.now() - t0, lines: r.lines })
+    }
+    whop.delayMs = 0
+    return out
+  }
+  /** The normal Approve, a founder's (the stand-in's login), on a pending request of the student. */
+  async function approve5(membership, user, more = {}) {
+    round5Whop()
+    whop.answer = more.down ? () => 'throw' : r5answer
+    const db = readyDb(membership, {
+      discount_requests: [{ id: 'r5a', student_id: SID, status: 'pending', created_at: new Date(Date.parse(NOW) - 3_600_000).toISOString() }],
+      admin_config: [{ key: 'curriculum_reset_at', value: '2026-10-19T14:33:00.000Z' }],
+      ...(more.tables ?? {}),
+    }, user, SID)
+    if (more.failWhen) db.failWhen = more.failWhen
+    if (more.prepare) await more.prepare(db)
+    const made = promoCodes.length
+    const r = await quiet(async () => {
+      const res = await approveRoute(new Request('http://app/api/discounts/approve', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'r5a' }) }))
+      return { status: res.status, body: await res.json() }
+    })
+    return { status: r.value.status, code: r.value.body.code ?? null, error: r.value.body.error ?? null, made: promoCodes.length - made,
+      request: db.rows('discount_requests').find((x) => x.id === 'r5a')?.status, lines: r.lines }
+  }
+  const refused5 = (rs) => rs.every((x) => x.status === 400 && x.error === LINE && x.state === 'not-eligible' && x.written === 0 && x.rpc === 0 && x.stored?.discounted === true)
+  const letIn5 = (rs) => rs.every((x) => x.status === 200 && x.written === 1 && x.stored?.discounted === false)
+  const unchecked5 = (rs) => rs.every((x) => x.status === 503 && x.error === LINE_503 && x.state === 'read-failed' && x.written === 0 && x.rpc === 0)
+  const brief5 = (rs) => rs.map((x) => [x.name, x.status, x.written, x.stored?.discounted, x.stored?.source])
+  const approvedOk = (a) => a.status === 200 && a.made === 1 && a.request === 'approved'
+  const approveRefused = (a) => a.status === 400 && a.code === 'has-discount' && a.made === 0 && a.request === 'pending'
+  const approveUnchecked = (a, sentence) => a.status === 503 && a.code === 'rule' && a.error === sentence && a.made === 0 && a.request === 'pending'
+  const UNREADABLE = DS5.couponUncheckedApprovalRefusal('bad_shape')
+  const NO_WHOP = DS5.couponUncheckedApprovalRefusal('network')
+  const UNREAD = DS5.couponUncheckedApprovalRefusal('student_unread')
+
+  // The cases judged with Whop answering: what each comes to, both request routes, and the normal Approve.
+  const refusedCases = [
+    ['(1) S: a 100% first month on a membership since canceled, its 0.00 checkout left out, back at 97.00 on a new one', 'mem_f5Snew', 'user_f5S', want('user', true, 'mem_f5Sold', 'freemonth', 97, 97)],
+    ['(3) B: welcome50 named on the first payment alone, that row naming no buyer (it was skipped)', 'mem_f5B', 'user_f5B', want('payment', true, 'mem_f5B', 'welcome50', 48.5, 97)],
+    ['(3) Leg: the membership naming its 100% code in the key\'s older shape (promo_code { id }, no promo_code_id): still read', 'mem_f5Leg', 'user_f5Leg', want('membership', true, 'mem_f5Leg', 'freemonth', 97, 97)],
+    ['(4) O2: another product\'s membership on file naming its code, welcome50 on the course membership found through the user', 'mem_f5O2x', 'user_f5O2', want('user', true, 'mem_f5O2', 'welcome50', 97, 97)],
+    ['(5) X2: a 100% first month\'s 0.00 of a 97.00 subtotal naming no code, then 97.00', 'mem_f5X2', 'user_f5X2', want('payment', true, 'mem_f5X2', null, 0, 97)],
+    ['(5) X3: a first-year 873.00 of a 970.00 subtotal naming no code', 'mem_f5X3', 'user_f5X3', want('payment', true, 'mem_f5X3', null, 873, 970)],
+    ['(5) X4: welcome50\'s EUR 44.95 of an 89.90 subtotal naming no code', 'mem_f5X4', 'user_f5X4', want('payment', true, 'mem_f5X4', null, 44.95, 89.9)],
+    ['(5) X7: 48.50 of a 97.00 subtotal naming no code, since refunded, then 97.00', 'mem_f5X7', 'user_f5X7', want('payment', true, 'mem_f5X7', null, 48.5, 97)],
+    ['(6) L4: the 48.50 checkout (subscription_create) beside a 97.00 one-time charge at the same moment: the checkout judged', 'mem_f5L4', 'user_f5L4', want('payment', true, 'mem_f5L4', null, 48.5, 97)],
+    ['(7) Vc: the v2 list answering 410, a 0.00 checkout naming a 100% code listed: the coupon, its stamp kept', 'mem_f5Vc', 'user_f5Vc', want('payment', true, 'mem_f5Vcold', 'freemonth', 0, 97)],
+  ]
+  const letInCases = [
+    ['control F: 97.00 at the checkout, no code anywhere', 'mem_f5F', 'user_f5F', want('membership', false, 'mem_f5F', null, 97, null)],
+    ['(3) B2: a 10.00 row naming no buyer and no code at the first payment\'s moment, the 97.00 checkout after it: never judged by its price', 'mem_f5B2', 'user_f5B2', want('membership', false, 'mem_f5B2', null, 97, null)],
+    ['(4) O1: another product\'s membership on file naming its code (other20), the course membership found through the user at 97.00, no code (it was refused by the other product\'s code)', 'mem_f5O1x', 'user_f5O1', want('user', false, 'mem_f5O1', null, 97, null)],
+    ['(4) O3: the course membership on file, another product\'s naming its code on the list (left out by its product)', 'mem_f5O3', 'user_f5O3', want('membership', false, 'mem_f5O3', null, 97, null)],
+    ['(5) X6: a plan change\'s 12.34 of a 97.00 subtotal (subscription_update) after a 97.00 checkout: not judged by its subtotal', 'mem_f5X6', 'user_f5X6', want('membership', false, 'mem_f5X6', null, 97, null)],
+    ['(6) L2: a 10.00 add-on listed before the 97.00 checkout at the first payment\'s moment (it was refused by the 10.00)', 'mem_f5L2', 'user_f5L2', want('membership', false, 'mem_f5L2', null, 97, null)],
+    ['(6) L3: the same with no billing reason named: the highest price judged', 'mem_f5L3', 'user_f5L3', want('membership', false, 'mem_f5L3', null, 97, null)],
+    ['(6) T2: two course memberships since canceled beside the one on file, no code anywhere', 'mem_f5T2', 'user_f5T2', want('membership', false, 'mem_f5T2', null, 97, null)],
+    ['(7) V410: the v2 list answering 410, no code on the membership on file or the payments: the live answer lets in', 'mem_f5V410', 'user_f5V410', want('membership', false, 'mem_f5V410', null, 97, null)],
+    ['(7) V404: the same with a 404', 'mem_f5V404', 'user_f5V404', want('membership', false, 'mem_f5V404', null, 97, null)],
+  ]
+  const noAnswerCases = [
+    ['(3) W: a 100% code on the membership on file, its read answering the object wrapped ({ data: {...} }), the 0.00 checkout left out (it was let in)', 'mem_f5W', 'user_f5W'],
+    ['(3) E: the same read answering {} (it was let in)', 'mem_f5E', 'user_f5E'],
+    ['(3) K: the same read naming neither promo_code_id nor promo_code (it was let in)', 'mem_f5K', 'user_f5K'],
+    ['(3) I: the same read answering an object of another id', 'mem_f5I', 'user_f5I'],
+  ]
+  for (const [why, membership, user, w] of refusedCases) {
+    const r = await judge5(membership, user)
+    ok(show(row5(r)) === show(w) && r.row.source === R5(w.source) && r.row.source_checked_at === r.row.checked_at, `${why}: a coupon, stamped (judgeStudentDiscount)`, show(row5(r)))
+    const rs = await routes5(membership, user)
+    ok(refused5(rs) && rs.every((x) => x.stored.source === R5(w.source) && x.stored.sameWrite && x.stored.membership === w.membership),
+       `${why}: both request routes 400 with the student's line, nothing written, the coupon stored with this rule's stamp`, show(brief5(rs)))
+    const a = await approve5(membership, user)
+    ok(approveRefused(a), `${why}: the normal Approve refused (400, has-discount), no Whop code made`, show(a))
+  }
+  for (const [why, membership, user, w] of letInCases) {
+    const r = await judge5(membership, user)
+    const unusable = /V4/.test(membership)
+    ok(show(row5(r)) === show(w) && r.byPrice === null && r.bySubtotal === null && r.userListUnusable === unusable
+         && (unusable ? r.row.source === null && r.row.source_checked_at === null : r.row.source === R5(w.source) && r.row.source_checked_at === r.row.checked_at),
+       `${why}: no coupon (judgeStudentDiscount), ${unusable ? 'its row with no source (never trusted)' : 'stamped'}`, show({ row: row5(r), source: r.ok && r.row.source }))
+    const rs = await routes5(membership, user)
+    ok(letIn5(rs) && rs.every((x) => (unusable ? x.stored.source === null : x.stored.source === R5(w.source) && x.stored.sameWrite)),
+       `${why}: both request routes 200, the request written, the answer stored ${unusable ? 'with no source' : 'with this rule\'s stamp'}`, show(brief5(rs)))
+    const a = await approve5(membership, user)
+    ok(approvedOk(a), `${why}: the normal Approve goes on, the code made`, show({ status: a.status, error: a.error }))
+  }
+  for (const [why, membership, user] of noAnswerCases) {
+    const r = await judge5(membership, user)
+    ok(show(r) === show({ ok: false, fail: 'bad_shape' }), `${why}: no answer (bad_shape), never "no code" (judgeStudentDiscount)`, show(r))
+    const rs = await routes5(membership, user)
+    ok(unchecked5(rs) && rs.every((x) => x.stored === null), `${why}: both request routes 503, "${LINE_503}", nothing written or stored`, show(brief5(rs)))
+    const a = await approve5(membership, user)
+    ok(approveUnchecked(a, UNREADABLE), `${why}: the normal Approve refused, 503 code rule, "${UNREADABLE}"`, show(a))
+  }
+
+  // (1) THE RULE STAMP. S's stored "no coupon" from builds that are not this rule, Whop down: no answer.
+  {
+    const earlier = { student_id: SID, whop_membership_id: 'mem_f5Snew', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-21T09:00:00.750Z', source: 'membership' }
+    const stamped = stampedBy({ ...earlier, source: undefined }, 'membership')
+    // A build from before T-122 writes over this rule's row as PostgREST's upsert does: its eight columns, no source.
+    const writtenOver = async (db) => {
+      const { error } = await fakeClient(db).from(MEMBERSHIP_DISCOUNTS_TABLE).upsert([{ student_id: SID, whop_membership_id: 'mem_f5Snew', promo_code_id: null, promo_code: null,
+        renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-21T10:40:00.000Z' }], { onConflict: 'student_id' })
+      if (error) throw new Error(error.message)
+    }
+    let rs = await routes5('mem_f5Snew', 'user_f5S', { down: true, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [earlier] } })
+    ok(unchecked5(rs) && rs.every((x) => x.lines.some((l) => l.includes("its source is an older rule's"))),
+       '(1) S, Whop down, the "no coupon" a89ff1c or the world-engine preview stored for them (source membership, a step\'s word alone): both routes 503, nothing written (the request went in on it), the log says why', show(brief5(rs)))
+    let a = await approve5('mem_f5Snew', 'user_f5S', { down: true, tables: { [MEMBERSHIP_DISCOUNTS_TABLE]: [earlier] } })
+    ok(approveUnchecked(a, NO_WHOP), '(1) the normal Approve on that row, Whop down: refused, 503 code rule (it approved)', show(a))
+    rs = await routes5('mem_f5Snew', 'user_f5S', { down: true, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [stamped] }, prepare: writtenOver })
+    ok(unchecked5(rs) && rs.every((x) => x.lines.some((l) => l.includes('was written over since this rule wrote it'))),
+       '(1) this rule\'s stamped row written over by a build from before T-122 (its upsert keeps the stamp, with a new checked_at), Whop down: both routes 503, the log says why', show(brief5(rs)))
+    a = await approve5('mem_f5Snew', 'user_f5S', { down: true, tables: { [MEMBERSHIP_DISCOUNTS_TABLE]: [stamped] }, prepare: writtenOver })
+    ok(approveUnchecked(a, NO_WHOP), '(1) the normal Approve on that row, Whop down: refused, 503 code rule', show(a))
+    rs = await routes5('mem_f5F', 'user_f5F', { down: true, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [stampedBy({ ...earlier, whop_membership_id: 'mem_f5F', source: undefined }, 'membership')] } })
+    ok(rs.every((x) => x.status === 200 && x.written === 1), 'control: the control student\'s no coupon with this rule\'s stamp, Whop down: the stored answer lets the request in', show(brief5(rs)))
+    // Whop answering, the next write is this rule's, stamped, whatever the row held.
+    rs = await routes5('mem_f5Snew', 'user_f5S', { db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [earlier] } })
+    ok(refused5(rs) && rs.every((x) => x.stored.source === R5('user') && x.stored.sameWrite), '(1) Whop answering: refused live, and the row rewritten with this rule\'s stamp', show(brief5(rs)))
+    ok(stampedByThisRule(stamped) === true && !stampedByThisRule(earlier) && !stampedByThisRule({ ...stamped, checked_at: '2026-10-21T10:40:00.000Z' })
+         && !stampedByThisRule({ ...stamped, source: 'r4-membership' }) && !stampedByThisRule({ ...stamped, source_checked_at: null })
+         && stampedByThisRule({ ...stamped, source_checked_at: '2026-10-21T09:00:00.75+00:00' }) === true
+         && show(MD5.STORED_SOURCES) === show(['r5-membership', 'r5-user', 'r5-payment']) && storedSourceOf('user') === 'r5-user',
+       'stampedByThisRule: this rule\'s version and the same moment (as the database gives it back) alone; a step\'s word, another version, another checked_at or no time are not')
+  }
+
+  // (2) A student whose row cannot be read: only a stored coupon answers, and a line says so.
+  {
+    const unread = (q) => (q.table === 'students' && q.op === 'select' && q.columns === 'whop_membership_id, whop_user_id, first_paid_at' ? { code: 'XX000', message: 'connection reset' } : null)
+    const oldClean = stampedBy({ student_id: SID, whop_membership_id: 'mem_f5Uold', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: null, discounted: false, checked_at: '2026-10-13T09:00:00.000Z' }, 'membership')
+    let rs = await routes5('mem_f5Unew', 'user_f5U', { db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [oldClean] } })
+    ok(refused5(rs), '(2) control: U, the students read working, welcome50 on the membership on file now: refused live', show(brief5(rs)))
+    rs = await routes5('mem_f5Unew', 'user_f5U', { db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [oldClean] }, failWhen: unread })
+    ok(unchecked5(rs) && rs.every((x) => x.asked === 0 && x.lines.some((l) => l.includes(`student ${SID}: the student's row could not be read, so Whop was not asked and no answer is on file`))),
+       '(2) U, the students read failing, this rule\'s no coupon stored for the membership before: both routes 503 (the request went in on it), Whop not asked, a warning line', show(brief5(rs)))
+    const a = await approve5('mem_f5Unew', 'user_f5U', { tables: { [MEMBERSHIP_DISCOUNTS_TABLE]: [oldClean] }, failWhen: unread })
+    ok(approveUnchecked(a, UNREAD), `(2) the normal Approve, the students read failing: refused, 503 code rule, "${UNREAD}" (it approved)`, show(a))
+    const coupon = { ...oldClean, whop_membership_id: 'mem_f5Unew', promo_code_id: 'promo_f5W50', promo_code: 'welcome50', discounted: true }
+    rs = await routes5('mem_f5Unew', 'user_f5U', { db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [coupon] }, failWhen: unread })
+    ok(rs.every((x) => x.status === 400 && x.error === LINE && x.written === 0), '(2) the same with a stored coupon: refused with the student\'s line, as before', show(brief5(rs)))
+  }
+
+  // (5) The student's own 30% named on a payment stays no coupon by its subtotal: by the promo id on their request.
+  {
+    const own = row5(await judge5('mem_f5X5', 'user_f5X5', { ownThirtyPromoIds: ['promo_f5Own'] }))
+    const named = row5(await judge5('mem_f5X5', 'user_f5X5', { holdsOwnThirty: true }))
+    const none = row5(await judge5('mem_f5X5', 'user_f5X5'))
+    ok(show(own) === show(want('membership', false, 'mem_f5X5', null, 97, null)) && show(named) === show(own) && none.discounted === true && none.code === OWN,
+       `(5) X5: their own ${OWN} on a payment (67.90 of 97.00): no coupon by the promo id on their request or by the name beside one, never one by its subtotal; with no request of theirs, a coupon by the code`, show([own, named, none]))
+    const shown = (p) => discountWithoutCode(p)
+    const base = { total: 0, subtotal: 97, taxOnTop: 0, promoCodeId: null, billingReason: 'subscription_create' }
+    ok(show(shown(base)) === show({ price: 0, subtotal: 97 }) && shown({ ...base, total: 97 }) === null && shown({ ...base, total: 96.99 })?.price === 96.99
+         && shown({ ...base, total: 116.4, taxOnTop: 19.4 }) === null && shown({ ...base, total: 116.4, taxOnTop: 19.41 })?.price === 96.99
+         && shown({ ...base, promoCodeId: 'promo_x' }) === null && shown({ ...base, billingReason: 'subscription_update' }) === null
+         && shown({ ...base, subtotal: null }) === null && shown({ ...base, total: null }) === null,
+       'discountWithoutCode: the price (the total less a tax added on top) below the subtotal, in cents; a code named, a plan change, or a figure that does not read: not judged')
+  }
+
+  // (6) The price's first payment, and the ended memberships read at once.
+  {
+    const cp = (paidAt, total, billingReason = null, more = {}) => ({ real: true, paidAt, total, currency: 'usd', billingReason, productId: COURSE, membershipId: null, promoCodeId: null, promoCode: null, subtotal: total, taxOnTop: 0, ...more })
+    const addOn = cp(PAID, 10, 'one_time')
+    const checkout = cp(PAID, 97, 'subscription_create')
+    const big = cp(PAID, 97, null)
+    const small = cp(PAID, 48.5, 'subscription_create')
+    const noBuyer = cp('2026-10-01T09:00:00.000Z', 5, null, { buyerNamed: false })
+    const frp = MD5.firstRealPayment
+    ok(frp([addOn, checkout], PAID) === checkout && frp([checkout, addOn], PAID) === checkout && frp([cp(PAID, 10), big], PAID) === big
+         && frp([big, small], PAID) === small && frp([addOn, checkout], null) === checkout && frp([noBuyer, checkout], null) === checkout && frp([noBuyer], null) === null,
+       'firstRealPayment: at the first payment\'s moment the checkout (subscription_create), else the highest price, in any order; a row naming no buyer never')
+    const rs = await routes5('mem_f5T2', 'user_f5T2', { delayMs: 2000 })
+    ok(letIn5(rs) && rs.every((x) => x.asked === 5 && Math.max(...x.starts) <= 6000 && x.ms <= 8000 && x.starts[4] - x.starts[3] === 250),
+       `(6) T2, Whop taking 2.0 s an answer: both request routes 200, the request written; the two canceled memberships read at once, the last read started by 6 s and answered by 8 s (${rs.map((x) => `${x.name} ${x.ms} ms, reads started at ${x.starts.join(', ')} ms`).join('; ')}; the 503 until this round)`,
+       show(rs.map((x) => [x.name, x.status, x.asked, x.starts, x.ms])))
+    const coupon = await routes5('mem_f5T3', 'user_f5T3', { delayMs: 2000 })
+    ok(refused5(coupon) && coupon.every((x) => x.ms <= 8000 && x.stored.membership === 'mem_f5T3e1'),
+       `(6) T3, the same, the older canceled membership on a 100% first month: both routes 400 with the line inside the 8 s (${coupon.map((x) => `${x.ms} ms`).join(', ')})`, show(brief5(coupon)))
+    const t2 = await judge5('mem_f5T2', 'user_f5T2')
+    ok(show(paths().slice(3).sort()) === show(['/api/v1/memberships/mem_f5T2e0', '/api/v1/memberships/mem_f5T2e1']) && t2.ok && t2.row.discounted === false,
+       '(6) T2\'s reads: the one on file, the list beside the payments, then the two canceled ones', show(paths()))
+  }
+
+  // (7) A no coupon judged without the user's list is stored with no source, so Whop down it is no answer.
+  {
+    let stored = null
+    const keep = async (db) => { stored = db }
+    let rs = await routes5('mem_f5V410', 'user_f5V410', { prepare: keep })
+    const row = stored.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
+    ok(letIn5(rs) && row.source === null && row.source_checked_at === null && row.discounted === false,
+       '(7) V410, Whop answering: the request goes in on the live answer, its row stored with no source', show(row))
+    rs = await routes5('mem_f5V410', 'user_f5V410', { down: true, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...row }] } })
+    ok(unchecked5(rs) && rs.every((x) => x.lines.some((l) => l.includes('holds no source'))),
+       '(7) the same student a minute later, Whop down, that row stored: both routes 503 (it never answers for the stored fallback)', show(brief5(rs)))
+    const a = await approve5('mem_f5V410', 'user_f5V410', { down: true, tables: { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...row }] } })
+    ok(approveUnchecked(a, NO_WHOP), '(7) the normal Approve on that row, Whop down: refused, 503 code rule', show(a))
+  }
+
+  // The cron: every case in the window, judged and stored, each row as v113's check takes it (a check standing in for it
+  // here: a source of this rule or none); the answer lists the students refused by a subtotal, apart from the price's.
+  {
+    const cid = (k) => `5a1b2c3d-0000-4000-8000-${String(k).padStart(12, '0')}`
+    const sp = (k, membership, user) => ({ id: cid(k), first_paid_at: PAID, membership_status: 'active', whop_membership_id: membership, whop_user_id: user })
+    const students = [
+      ...refusedCases.map(([, membership, user], i) => sp(100 + i, membership, user)),
+      ...letInCases.map(([, membership, user], i) => sp(200 + i, membership, user)),
+      ...noAnswerCases.map(([, membership, user], i) => sp(300 + i, membership, user)),
+    ]
+    const v113Check = (q) => (q.table === MEMBERSHIP_DISCOUNTS_TABLE && q.op === 'upsert'
+      && [].concat(q.values).some((v) => v.source !== null && v.source !== undefined && !['r5-membership', 'r5-user', 'r5-payment'].includes(v.source))
+      ? { code: '23514', message: 'new row for relation "student_membership_discounts" violates check constraint "student_membership_discounts_source_check"' } : null)
+    round5Whop()
+    whop.answer = r5answer
+    const db = new FakeDb({ students })
+    db.failWhen = v113Check
+    installDb(db)
+    const r = await quiet(() => cron())
+    const b = r.value.body
+    const rows = new Map(db.rows(MEMBERSHIP_DISCOUNTS_TABLE).map((x) => [x.student_id, x]))
+    ok(r.value.status === 200 && b.ok === true && b.checked === refusedCases.length + letInCases.length && b.written === b.checked
+         && b.discounted === refusedCases.length && show(b.failed) === show({ bad_shape: noAnswerCases.length }) && b.user_list_unusable === 3 && b.left === 0,
+       `the cron: ${students.length} students, ${b.checked} answered and written past v113's check (${refusedCases.length} coupons), the ${noAnswerCases.length} membership reads it cannot read in failed, the 3 lists answering 410 or 404 counted`, show(b))
+    ok(refusedCases.every(([, , , w], i) => rows.get(cid(100 + i))?.discounted === true && rows.get(cid(100 + i))?.source === R5(w.source) && rows.get(cid(100 + i))?.source_checked_at === rows.get(cid(100 + i))?.checked_at)
+         && letInCases.every(([, membership], i) => rows.get(cid(200 + i))?.discounted === false && rows.get(cid(200 + i))?.source === (/V4/.test(membership) ? null : R5(letInCases[i][3].source)))
+         && noAnswerCases.every((c, i) => !rows.has(cid(300 + i))),
+       'each coupon stored with this rule\'s stamp, each no coupon too but those judged without the user\'s list (no source), nothing for the reads it cannot read', show([...rows.values()].map((x) => [x.student_id.slice(-3), x.discounted, x.source])))
+    const bySubtotal = (k, price, subtotal, currency) => ({ student_id: cid(k), price, subtotal, currency, billing_reason: 'subscription_create' })
+    ok(show(b.refused_by_subtotal) === show([bySubtotal(104, 0, 97, 'usd'), bySubtotal(105, 873, 970, 'usd'), bySubtotal(106, 44.95, 89.9, 'eur'), bySubtotal(107, 48.5, 97, 'usd')])
+         && show(b.refused_by_price) === show([{ student_id: cid(108), price: 48.5, billing_reason: 'subscription_create' }]),
+       'refused_by_subtotal: the four a payment naming no code refused by its subtotal, each with its price, subtotal, currency and billing reason; refused_by_price: the checkout the price alone refused', show({ subtotal: b.refused_by_subtotal, price: b.refused_by_price }))
+    ok(!BANNED.test(show(b)) && !/mem_|promo_|pay_|user_/.test(show(b).replaceAll('"user_list_unusable"', '')), 'the answer names no Whop id')
   }
 }
 

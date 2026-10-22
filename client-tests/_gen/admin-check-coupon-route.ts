@@ -14,7 +14,8 @@
  * their Whop user or on any course payment, then with no code anywhere a
  * price under 97.00; since its fourth, the memberships that no longer grant
  * access read for a code too, and the price that of the first real course
- * payment alone), and Whop's answer
+ * payment alone; since its fifth, a payment naming no code that came to less
+ * than its subtotal a coupon too), and Whop's answer
  * is written to student_membership_discounts, so the list read after it
  * shows the row as Whop has it now: with the coupon gone, the 30% rule
  * decides the row again and Approve is back. No Whop code is made and the

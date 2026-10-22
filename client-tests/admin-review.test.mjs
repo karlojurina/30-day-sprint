@@ -416,7 +416,8 @@ console.log("\n=== The 30% page: every row's coupon check ===")
     if (init?.headers?.['Api-Version-Date'] !== '2026-10-15-1') return new Response('{}', { status: 400 })
     if (path.includes('/memberships/mem_a1')) return json({ id: 'mem_a1', promo_code_id: 'promo_e10', plan_id: 'plan_m', renewal_price: '87.30' })
     if (path.includes('/memberships/mem_a2')) return new Response('boom', { status: 500 })
-    if (path.includes('/memberships/')) return json({ id: 'mem_x', promo_code_id: null, plan_id: 'plan_m', renewal_price: '97.00' })
+    // Whop answers the membership asked for (an answer of another id is no answer since T-122's fifth fix round).
+    if (path.includes('/memberships/')) return json({ id: decodeURIComponent(path.split('/memberships/')[1]), promo_code_id: null, plan_id: 'plan_m', renewal_price: '97.00' })
     if (path.includes('/plans/plan_m')) return json({ id: 'plan_m', renewal_price: '97.00' })
     if (path.includes('/promo_codes/promo_e10')) return json({ id: 'promo_e10', code: 'evolve10' })
     return new Response('{}', { status: 404 })
@@ -522,9 +523,15 @@ console.log('\n=== The coupon rule: a stored id that is not a membership, and a 
      'Whop down for it: no answer on file (the request routes refuse, and since T-122\'s fourth fix round the normal Approve too), and a line says so', warned.join(' | '))
 
   const members = Array.from({ length: 3 }, (_, i) => ({ id: `s-${i}`, whop_membership_id: `mem_${i}`, first_paid_at: '2026-10-10T08:00:00.000Z', membership_status: 'active' }))
+  // The course named, as on production: since T-122's fifth fix round a check with no course product named stops before
+  // any read (no_course_product), where it read the membership on file first.
+  const productsBefore = process.env.WHOP_PRODUCT_ID
+  process.env.WHOP_PRODUCT_ID = 'prod_devCourse'
   const hung = await MD.refreshMembershipDiscounts(fakeClient(new FakeDb({ students: members, discount_requests: [], student_membership_discounts: [] })), {
     mode: 'dry', startedAtMs: Date.now() - 10 * 60_000, apiKey: 'test-key',
   })
+  if (productsBefore === undefined) delete process.env.WHOP_PRODUCT_ID
+  else process.env.WHOP_PRODUCT_ID = productsBefore
   ok(!hung.ok && hung.checked === 0 && hung.left === 3 && /no membership read before the time ran out/.test(hung.error ?? ''),
      'a run in which Whop answered nothing before the time ran out is a failure (it answered ok: true)', show({ ok: hung.ok, checked: hung.checked, left: hung.left, error: hung.error }))
 }

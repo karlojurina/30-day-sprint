@@ -28,18 +28,22 @@ import {
  * third fix round the owner's rule as he put it: a promo code other than the
  * student's own 30% on the membership on file, on any course membership found
  * through their Whop user (since its fourth, those that no longer grant
- * access too) or on any course payment, the $0 ones too, is a coupon; with
- * no code anywhere, the student's first real course payment in dollars under
- * 97.00 that is no plan change is one, a later charge never). When Whop does
- * not answer, the stored row decides if it says a coupon, or says none, this
- * rule wrote it (its source set, which needs v113; a row with no source, as
- * every row written before v113 is, does not answer, and without v113 a
- * stored "no coupon" never does) and it names no code but the student's own
- * by the promo id on their own request (since the fourth fix round). With
- * neither, since the owner's review (2026-10-21) nothing is written and the
- * student reads "We couldn't check your membership just now. Try again in a
- * minute." (membershipUncheckedRefusal, a 503); the request used to go
- * through and leave the coupon to the approve route.
+ * access too) or on any course payment, the $0 ones too, is a coupon, and
+ * since its fifth so is a course payment naming no code that came to less
+ * than its subtotal; with neither anywhere, the student's first real course
+ * payment in dollars under 97.00 that is no plan change is one, a later
+ * charge never). When Whop does not answer, the stored row decides if it
+ * says a coupon, or says none, this rule wrote it and nothing since (its
+ * source carrying this rule's version and source_checked_at its checked_at,
+ * which needs v113 and since the fifth fix round; a row with no source, as
+ * every row written before v113 is, an earlier round's source, a row written
+ * over since, and without v113 any stored "no coupon", do not answer), it
+ * names no code but the student's own by the promo id on their own request
+ * (since the fourth fix round), and the student's row could be read (since
+ * the fifth). With neither, since the owner's review (2026-10-21) nothing is
+ * written and the student reads "We couldn't check your membership just now.
+ * Try again in a minute." (membershipUncheckedRefusal, a 503); the request
+ * used to go through and leave the coupon to the approve route.
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */

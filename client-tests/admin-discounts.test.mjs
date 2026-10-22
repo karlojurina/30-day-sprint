@@ -178,7 +178,9 @@ function tab(source, routes, { answer = null, teamMember = { id: 'team-1' } } = 
  * set, naming no code): with no Whop key here it gives the approve route its
  * answer, as the cron's row does on production when Whop does not answer.
  * Since T-122's fourth fix round a check with no answer refuses the normal
- * Approve, so without the row every Approve below would be that 503.
+ * Approve, so without the row every Approve below would be that 503. Since
+ * its fifth the row carries the rule's stamp: `source` with the rule's
+ * version, and `source_checked_at` its checked_at.
  */
 function freshDb(requests) {
   const db = new FakeDb({
@@ -192,7 +194,8 @@ function freshDb(requests) {
     })),
     student_membership_discounts: [{
       student_id: 'a1b2c3d4-0000-4000-8000-000000000001', whop_membership_id: null, promo_code_id: null, promo_code: null,
-      renewal_price: null, plan_renewal_price: null, discounted: false, checked_at: '2026-10-05T09:40:00.000Z', source: 'payment',
+      renewal_price: null, plan_renewal_price: null, discounted: false, checked_at: '2026-10-05T09:40:00.000Z',
+      source: 'r5-payment', source_checked_at: '2026-10-05T09:40:00.000Z',
     }],
   })
   installDb(db)

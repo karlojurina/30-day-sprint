@@ -2,7 +2,7 @@
  * The coupon check: does a student already have a coupon, so the 30% is not
  * theirs (admin rebuild 2, D5; every student answered since T-122,
  * 2026-10-21; the owner's rule as he put it since T-122's third fix round,
- * 2026-10-22, and its fourth, the same day).
+ * 2026-10-22, and its fourth and fifth, the same day).
  *
  * THE OWNER'S RULE (2026-10-21): "they should not be able to apply for the
  * code if they have a coupon already ... If they paid less than 97, most
@@ -21,25 +21,38 @@
  *      one-month 50% code both renew at 97.00), so a student who came in on
  *      one still shows it there, and a student who came in on a 100% first
  *      month and bought again at 97.00 on a new membership shows it on the
- *      old one.
- *   2. A CODE ON A PAYMENT. Any course payment of the student that names a
- *      promo code other than this student's own 30% code is a coupon,
- *      whatever its totals and whether they read: the $0 ones too (a 100%
- *      code's checkout), which the pinned payments list gives with the rest
- *      (first-payment.ts fetchCoursePayments).
- *   3. THE PRICE, only when no code shows anywhere, of the student's FIRST
- *      real course payment alone ("if they paid less than 97"): the one
- *      students.first_paid_at names, else the earliest real course payment
- *      the list gives (firstRealPayment). A real payment is paid, above 0,
- *      not refunded or lost in a dispute (first-payment.ts THE RULE). Naming
- *      no code, it is a coupon when its price is under 97.00, the price
- *      being its total less a tax added on top (`tax_behavior` exactly
- *      "exclusive"; with any other behaviour, or none, the total stands);
- *      the price judges it only in dollars (codes alone judge another
- *      currency) and when it is no charge for a change to the subscription
- *      (`billing_reason` "subscription_update"). A later charge never
- *      refuses a student by its price: a manual charge, an add-on
- *      (`one_time`), a plan change's 12.34 after a 97.00.
+ *      old one. A membership of another product (its `product_id`, which
+ *      Whop's schema requires, not one of the course's) is passed over since
+ *      the fifth fix round, so that product's own code never refuses a
+ *      course student.
+ *   2. A CODE ON A PAYMENT, OR A DISCOUNT ONE SHOWS. Any course payment of
+ *      the student that names a promo code other than this student's own
+ *      30% code is a coupon, whatever its totals and whether they read: the
+ *      $0 ones too (a 100% code's checkout), which the pinned payments list
+ *      gives with the rest (first-payment.ts fetchCoursePayments). Since the
+ *      fifth fix round so is any course payment naming no code whose price
+ *      (step 3's: its total less a tax added on top) is below its subtotal,
+ *      Whop's "price before discounts" (discountWithoutCode): a 0.00
+ *      checkout of a 97.00 subtotal, 873.00 of 970.00, EUR 44.95 of 89.90,
+ *      in whatever currency, refunded or not; a charge for a change to the
+ *      subscription (`billing_reason` "subscription_update") excepted. This
+ *      student's own 30% is named on its payment, so it stays no coupon.
+ *   3. THE PRICE, only when no code or discount shows anywhere, of the
+ *      student's FIRST real course payment alone ("if they paid less than
+ *      97"): the one students.first_paid_at names, else the earliest real
+ *      course payment the list gives (firstRealPayment), and among real
+ *      payments at that moment, since the fifth fix round, the checkout
+ *      (`billing_reason` "subscription_create"), else the highest price. A
+ *      real payment is paid, above 0, not refunded or lost in a dispute
+ *      (first-payment.ts THE RULE), and names its buyer. Naming no code, it
+ *      is a coupon when its price is under 97.00, the price being its total
+ *      less a tax added on top (`tax_behavior` exactly "exclusive"; with any
+ *      other behaviour, or none, the total stands); the price judges it only
+ *      in dollars (codes alone judge another currency) and when it is no
+ *      charge for a change to the subscription (`billing_reason`
+ *      "subscription_update"). A later charge never refuses a student by its
+ *      price: a manual charge, an add-on (`one_time`), a plan change's 12.34
+ *      after a 97.00.
  * THIS STUDENT'S OWN 30% CODE is never a coupon (isOwnThirtyCode): the Whop
  * promo id stored on their own approved or applied request; or, only beside
  * such a request, a code named, the case not minded, exactly as the approve
@@ -71,6 +84,18 @@
  * in another shape, holding another user's row or running past 4 pages, or
  * a membership read answering a body that could not be read, read as no
  * code.
+ * Until the fifth fix round a stored "no coupon" with a step's word as its
+ * source answered whichever build wrote it; a student whose row could not
+ * be read was answered by a stored "no coupon" of any membership; a
+ * membership read answering an object of another id, or naming no code
+ * field, read as no code; a payment naming no buyer was left out; a
+ * membership of another product on file was read for its code; a payment
+ * naming no code that came to less than its subtotal was judged by the price
+ * alone (only a dollar first payment under 97.00 refused); the price's first
+ * payment was the first listed at its moment, so a 10.00 add-on listed
+ * before the 97.00 checkout refused; and the ended memberships were read one
+ * after the other, so a student with two of them went past the request
+ * routes' limits when Whop took 2 seconds an answer.
  *
  * THE RULE, the membership on its own (readMembershipDiscount: the 30% page's
  * read of its Approved rows, and the prices a stored row holds): a promo code
@@ -93,27 +118,32 @@
  * back with no plan or no renewal price. Every student now ends in a yes or
  * a no, read in this order, the first coupon answering:
  *   - The membership on file (`students.whop_membership_id`): a code on it
- *     is source "membership". An id that is not a membership's, or one Whop
- *     does not know (a 404, or another 4xx for that one id), is passed over.
+ *     is source "membership". An id that is not a membership's, one Whop
+ *     does not know (a 404, or another 4xx for that one id), or since the
+ *     fifth fix round a membership of another product, is passed over.
  *   - Every course membership of the student found through their Whop user
  *     (findCourseMemberships), whatever the one on file said (since the
  *     third fix round): a code on any one is source "user", the row naming
  *     that membership. First those that grant access, active before
- *     past_due, then the newest; then, since the fourth fix round, those
- *     that no longer do (canceled, expired), the newest first, read for a
- *     code alone and never settled on. The course is the products
+ *     past_due, then the newest, read one after the other; then, since the
+ *     fourth fix round, those that no longer do (canceled, expired), the
+ *     newest first, read for a code alone and never settled on, and since
+ *     the fifth all at the same time. The course is the products
  *     WHOP_PRODUCT_ID names, less ETfB and Apex (courseProductIds); the
- *     setting names the course alone since 2026-10-20. The list is v2's, by
+ *     setting names the course alone since 2026-10-20, and with none named
+ *     nothing is read (no_course_product). The list is v2's, by
  *     user_id, the read the login's self-heal and the webhook make
  *     (fetchActiveMembershipForUser in whop-members.ts), with every row's
  *     user checked. Whop says v2 stops working on 13 November 2026; its v1
  *     successor in the reference for 2026-10-15-1 is GET /api/v1/memberships
  *     with user_id and product_id (task T-113), never tried here.
  *   - Every course payment (fetchCoursePayments), read at the same time as
- *     the user's list since the fourth fix round: a code on one is source
- *     "payment", the row naming that payment's membership (when it names
- *     none, the membership the check settled on) and its code; with no code
- *     anywhere, the price of the first real one (step 3), the same source.
+ *     the user's list since the fourth fix round, one naming no buyer too
+ *     since the fifth: a code on one, or a discount one shows with no code
+ *     named, is source "payment", the row naming that payment's membership
+ *     (when it names none, the membership the check settled on) and its
+ *     code; with neither anywhere, the price of the first real one (step 3),
+ *     the same source.
  * With no coupon the membership the check settled on answers with its own
  * source: the one on file when it read a renewal price above 0, else the
  * first found through the user that does, else the first found there that
@@ -134,24 +164,34 @@
  * too_many_pages; the user's list since the fourth fix round, when each read
  * as no memberships); or answers a membership read with a body it cannot
  * read (bad_shape: not JSON, or JSON that is no object, an array or a
- * string; since the fourth fix round, when it read as no code. An object
- * naming none of the fields read here still reads as a membership naming no
- * code and no renewal price, and the payments decide). Or when
- * the deployment cannot ask: no key, no course product in WHOP_PRODUCT_ID, a
- * student with no Whop user (the column is NOT NULL). Then the caller writes
- * nothing for that student, and the request routes refuse with "We couldn't
- * check your membership just now. Try again in a minute." unless a stored
- * row answers (WHO READS IT). A 404 or another 4xx for the user's list (a
- * 410 once v2 is gone) is no answer either way: the check goes on without
- * the list, by the membership on file and the payments, and the cron counts
- * those students (user_list_unusable), so a list that stopped answering
- * shows.
+ * string, since the fourth fix round; and since the fifth an object whose
+ * `id` is not the membership asked for, a wrapped body or `{}` among them,
+ * or one naming neither `promo_code_id` nor `promo_code`, the field Whop's
+ * schema requires on every membership, null when no code applies: each read
+ * as a membership naming no code until then, and the payments decided). Or
+ * when the deployment cannot ask: no key, no course product in
+ * WHOP_PRODUCT_ID, a student with no Whop user (the column is NOT NULL).
+ * Then the caller writes nothing for that student, and the request routes
+ * refuse with "We couldn't check your membership just now. Try again in a
+ * minute." unless a stored row answers (WHO READS IT). A 404 or another 4xx
+ * for the user's list (a 410 once v2 is gone) is no answer either way: the
+ * check goes on without the list, by the membership on file and the
+ * payments, and the cron counts those students (user_list_unusable), so a
+ * list that stopped answering shows.
+ *
+ * THE V2 SHUTDOWN (T-122's fifth fix round, until the list moves to v1,
+ * task T-113). A no coupon judged without the user's list (a 404 or another
+ * 4xx for it, a 410 once Whop turns v2 off on 13 November 2026) can miss a
+ * code on a second, canceled or expired course membership that no payment
+ * shows. The student gets that live answer all the same, but its row is
+ * stored with no source, so the stored fallback never answers with it.
  *
  * THE READS, all paced at 4 requests a second start to start, a 429 waited
  * out (Whop's "Try again in N seconds", or 15 s, at most 30) and retried
  * twice, as first-payment.ts reads payments; the v1 reads pinned to
  * 2026-10-15-1:
- *   GET /api/v1/memberships/{id}   promo_code_id, renewal_price, plan_id
+ *   GET /api/v1/memberships/{id}   id, promo_code_id, renewal_price, plan_id,
+ *                                  and since the fifth fix round product_id
  *   GET /api/v1/plans/{id}         the plan's renewal_price, once per plan
  *                                  per run (the cache), and since the fourth
  *                                  fix round only for a membership naming a
@@ -173,11 +213,15 @@
  *   GET /api/v1/payments?user_id=&status=paid&first=100   every page
  * The membership on file is read first; the user's list and the payments
  * then at the same time (since the fourth fix round), and the memberships
- * the list names after them. A student with no code anywhere and one course
- * membership costs 3 reads, two answers' time (the membership, then the
- * list beside the payments; 4 in a row until then, so a Whop slower than 2
- * seconds an answer gave the request routes' 503); one with a code on the
- * membership on file 3 (the membership, its plan, the code's name).
+ * the list names after them: those that grant access one after the other,
+ * then those that no longer do all at once (since the fifth fix round; one
+ * after the other until then). A student with no code anywhere and one
+ * course membership costs 3 reads, two answers' time (the membership, then
+ * the list beside the payments; 4 in a row until then, so a Whop slower than
+ * 2 seconds an answer gave the request routes' 503); with ended course
+ * memberships beside it, one answer's time more, however many; one with a
+ * code on the membership on file 3 (the membership, its plan, the code's
+ * name).
  * Every field is read in either shape Whop has used: a price as "87.30", a
  * number or { amount }, an id as a string or { id }.
  *
@@ -205,18 +249,22 @@
  * that payment's own, else the membership the check settled on; for a
  * "payment" row with no coupon the membership whose read gave no price, else
  * the first real payment's own (null when it names none; the newest
- * payment's until the fourth fix round). `source` (v113) is the step that
- * answered; a database without v113 refuses a row that carries it, so the
- * row is written again without it. On a membership row the prices are the
- * membership's renewal and its plan's (each empty when it did not read; the
- * plan's always empty on a membership naming no code since the fourth fix
- * round, which reads no plan for it).
+ * payment's until the fourth fix round). `source` (v113) is THE RULE STAMP:
+ * the step that answered with the rule's version before it ("r5-membership",
+ * "r5-user", "r5-payment", storedSourceOf; the step's word alone until the
+ * fifth fix round), or null on a no coupon judged without the user's list
+ * (THE V2 SHUTDOWN); `source_checked_at` (v113) is the `checked_at` of the
+ * write that set it. A database without v113 refuses a row that carries
+ * them, so the row is written again without them. On a membership row the
+ * prices are the membership's renewal and its plan's (each empty when it did
+ * not read; the plan's always empty on a membership naming no code since the
+ * fourth fix round, which reads no plan for it).
  * On a "payment" row `renewal_price` is the price the payment came to after
  * discounts (its total less any tax added on top, in its own currency; empty
  * when its total does not read) and `plan_renewal_price` what it is set
- * against: its subtotal when it names a code, 97.00 when the price judged it,
- * else empty (both empty with no real payment); the code is the payment's,
- * when it names one.
+ * against: its subtotal when it names a code or shows a discount naming
+ * none, 97.00 when the price judged it, else empty (both empty with no real
+ * payment); the code is the payment's, when it names one.
  * A stored row counts only for the membership it was read from
  * (storedRowApplies): a student who moved to another membership since has no
  * stored answer. When the id on file is not a membership's, there is nothing
@@ -225,18 +273,28 @@
  * WHO READS IT. The request routes and the approve route check live, then
  * fall back to the stored row (checkMembershipDiscount). A stored coupon
  * answers whoever wrote it. A stored "no coupon" answers only when this rule
- * wrote it, which its `source` says (every writer of this rule sets it once
- * v113 is pasted), and, since the fourth fix round, only when it names no
- * code or this student's own 30% by the promo id on their own approved or
- * applied request (storedNoCouponAnswers): an older build of T-122 wrote
- * "no coupon" rows with a source for a student holding a used code, and an
- * upsert whose payload leaves `source` out keeps the one already on the row,
- * so a source alone does not say this rule wrote it. A row with no source
- * was written before v113, by the rule production's cron has run since
- * 2026-10-21, which let some coupon holders through; it is no answer, so the
- * request routes give their 503. On a database without v113 no source can
- * be read, so a stored "no coupon" never answers there, and the writers
- * write without it as before. With no answer from Whop or the stored row
+ * wrote it and no other writer wrote over it since (stampedByThisRule, since
+ * T-122's fifth fix round): its `source` carries this rule's version and its
+ * `source_checked_at` is its `checked_at`; and, since the fourth fix round,
+ * only when it names no code or this student's own 30% by the promo id on
+ * their own approved or applied request (storedNoCouponAnswers). The builds
+ * of the rounds before wrote a step's word alone, which v113's check refuses
+ * (it takes this rule's three values and null): their write fails, they log
+ * it and keep their live answer (a cron of theirs stops at its first write
+ * and answers 500), so they store nothing. A build from before T-122 writes no `source`: a row it
+ * adds has none, and its upsert of a row this rule wrote keeps the stamp
+ * (PostgREST's upsert sets the payload's columns alone) with a new
+ * `checked_at`, so the two times differ and the row is no answer. Until the
+ * fifth fix round a step's word answered from any build that wrote one,
+ * among them the world-engine preview, which stores a student who came in on
+ * welcome50 as no coupon. A row with no source was written before v113, by
+ * the rule production's cron has run since 2026-10-21, which let some coupon
+ * holders through; it is no answer, so the request routes give their 503.
+ * On a database without v113 no source can be read, so a stored "no coupon"
+ * never answers there, and the writers write without it as before. When the
+ * student's own row cannot be read (student_unread), so the membership on
+ * file is not known, only a stored coupon answers, since the fifth fix
+ * round, and a line says so. With no answer from Whop or the stored row
  * (source "none"), the request routes, since the owner's review of
  * 2026-10-21, write nothing and ask the student to try again in a minute
  * (membershipUncheckedRefusal in discount-server.ts); the approve route,
@@ -264,16 +322,19 @@ export const WHOP_API_V2 = "https://api.whop.com/api/v2";
 export const WHOP_DISCOUNT_VERSION = "2026-10-15-1";
 export const MEMBERSHIP_DISCOUNTS_TABLE = "student_membership_discounts";
 /**
- * v111's columns. v113's `source` is written, and read only by the request
- * routes' fallback (checkMembershipDiscount), which reads again without it
- * on a database without v113, so every read still answers there.
+ * v111's columns. v113's `source` and `source_checked_at` are written, and
+ * read only by the request routes' fallback (checkMembershipDiscount), which
+ * reads again without them on a database without v113, so every read still
+ * answers there.
  */
 export const MEMBERSHIP_DISCOUNT_COLUMNS =
   "student_id, whop_membership_id, promo_code_id, promo_code, renewal_price, plan_renewal_price, discounted, checked_at";
 /** The course's monthly price: a real payment in dollars under it, naming no code, is most likely on a coupon (the owner's rule, step 3). */
 export const FULL_PRICE = 97;
-/** The billing reason of a charge for a change to the subscription (a plan change's proration): the price does not judge it (step 3). */
+/** The billing reason of a charge for a change to the subscription (a plan change's proration): neither the price (step 3) nor its subtotal (step 2) judges it. */
 export const PLAN_CHANGE_REASON = "subscription_update";
+/** The billing reason of a first purchase: among real payments at the first payment's moment, the price judges this one (firstRealPayment). */
+export const CHECKOUT_REASON = "subscription_create";
 
 /** 4 Whop requests a second, start to start, as the payment reads: the logins share the key. */
 const WHOP_GAP_MS = 250;
@@ -294,9 +355,44 @@ const USER_PAGES_MAX = 4;
 export type DiscountSource = "membership" | "user" | "payment";
 export const DISCOUNT_SOURCES: readonly DiscountSource[] = ["membership", "user", "payment"];
 
-/** Whether a stored `source` names one of the steps: a row this rule wrote (WHO READS IT). */
-export function isDiscountSource(value: unknown): value is DiscountSource {
-  return typeof value === "string" && (DISCOUNT_SOURCES as readonly string[]).includes(value);
+/**
+ * THE RULE STAMP (T-122's fifth fix round): the version of this rule, which
+ * every `source` it stores carries before the step ("r5-membership"). v113's
+ * check takes these three values and null alone, so no build of an older
+ * round can store a `source` (theirs were the steps' words alone). A rule
+ * that changes again takes the next version, in v113's check and here at
+ * once.
+ */
+export const RULE_VERSION = "r5";
+export type StoredSource = "r5-membership" | "r5-user" | "r5-payment";
+export const STORED_SOURCES: readonly StoredSource[] = ["r5-membership", "r5-user", "r5-payment"];
+
+/** The `source` this rule stores for a step. */
+export function storedSourceOf(step: DiscountSource): StoredSource {
+  return `${RULE_VERSION}-${step}` as StoredSource;
+}
+
+/** Whether a stored `source` carries this rule's version (WHO READS IT). */
+export function isCurrentRuleSource(value: unknown): value is StoredSource {
+  return typeof value === "string" && (STORED_SOURCES as readonly string[]).includes(value);
+}
+
+/** An instant as a stored timestamp gives it back, or NaN when it does not read. */
+function instantOf(value: unknown): number {
+  return typeof value === "string" ? Date.parse(value) : NaN;
+}
+
+/**
+ * Whether this rule wrote the stored row and nothing wrote over it since
+ * (WHO READS IT, the header): its `source` carries this rule's version, and
+ * its `source_checked_at`, set by the same write, is its `checked_at`. A
+ * build from before T-122 writes neither, so its upsert over a row this rule
+ * wrote keeps the stamp with a new `checked_at`, and the two differ.
+ */
+export function stampedByThisRule(row: { source?: unknown; source_checked_at?: unknown; checked_at?: unknown }): boolean {
+  if (!isCurrentRuleSource(row.source)) return false;
+  const stamped = instantOf(row.source_checked_at);
+  return Number.isFinite(stamped) && stamped === instantOf(row.checked_at);
 }
 
 /** One row of student_membership_discounts. Prices as Whop gives them. */
@@ -310,8 +406,15 @@ export interface MembershipDiscountRow {
   plan_renewal_price: number | null;
   discounted: boolean;
   checked_at: string;
-  /** v113: the step that answered. Left out of a write to a database without v113. */
-  source?: DiscountSource;
+  /**
+   * v113: THE RULE STAMP, the step that answered with this rule's version
+   * (storedSourceOf); null on a no coupon judged without the user's list,
+   * which the fallback must never answer with (THE V2 SHUTDOWN). Left out of
+   * a write to a database without v113.
+   */
+  source?: StoredSource | null;
+  /** v113: the `checked_at` of the write that set `source` (stampedByThisRule); null with no source. Left out with it. */
+  source_checked_at?: string | null;
 }
 
 /** Why a membership read gave no answer. */
@@ -336,7 +439,8 @@ export type MembershipReadFail =
  * and, since T-122's fourth fix round, of the user's list of memberships:
  * filter_ignored (a row of another user), bad_page (a page in another
  * shape), too_many_pages (more than one user has). bad_shape: a membership
- * read answered with a body this code cannot read (the fourth fix round).
+ * read answered with a body this code cannot read (the fourth fix round),
+ * or with an object of another id or naming no code field (the fifth).
  */
 export type NoAnswer =
   | "no_api_key"
@@ -512,10 +616,45 @@ export function paymentCoupon(
   p: Pick<CoursePayment, "total" | "subtotal" | "taxOnTop" | "promoCodeId"> & Partial<Pick<CoursePayment, "real" | "currency" | "billingReason">>,
   opts: { ownCode?: boolean } = {},
 ): PaymentCoupon {
-  const price = p.total === null ? null : (cents(p.total) - cents(p.taxOnTop ?? 0)) / 100;
+  const price = paidPrice(p);
   if (p.promoCodeId !== null) return { price, heldAgainst: p.subtotal, discounted: opts.ownCode !== true };
   const judged = p.real !== false && price !== null && inDollars(p.currency) && p.billingReason !== PLAN_CHANGE_REASON;
   return { price, heldAgainst: judged ? FULL_PRICE : null, discounted: judged && price !== null && paidUnderFullPrice(price) };
+}
+
+/** What a payment came to after discounts (PaymentCoupon's `price`): its total less a tax added on top; null when its total does not read. */
+function paidPrice(p: Pick<CoursePayment, "total" | "taxOnTop">): number | null {
+  return p.total === null ? null : (cents(p.total) - cents(p.taxOnTop ?? 0)) / 100;
+}
+
+/** A discount a payment shows with no code named (discountWithoutCode): its price and the subtotal it is below. */
+export interface DiscountShown {
+  price: number;
+  subtotal: number;
+}
+
+/**
+ * Step 2's second half (T-122's fifth fix round): a course payment naming no
+ * promo code whose price (its total less a tax added on top, as step 3
+ * computes it) is below its subtotal, Whop's "price before discounts, tax
+ * and fees", came in on a discount all the same: a 100% first month's 0.00
+ * of 97.00, a first-year 873.00 of 970.00, welcome50's EUR 44.95 of 89.90.
+ * Whatever its currency (both figures are in it), real or not, refunded or
+ * not. A charge for a change to the subscription (`billing_reason`
+ * "subscription_update") is not judged: a plan change's proration takes
+ * money off by itself. null when it shows no discount, when it names a code
+ * (the first half judges it, and this student's own 30% stays no coupon), or
+ * when its total or subtotal does not read. Compared in cents. Until the
+ * fifth fix round such a payment was judged by the price alone, so only a
+ * real first payment in dollars under 97.00 refused.
+ */
+export function discountWithoutCode(
+  p: Pick<CoursePayment, "total" | "subtotal" | "taxOnTop" | "promoCodeId"> & Partial<Pick<CoursePayment, "billingReason">>,
+): DiscountShown | null {
+  if (p.promoCodeId !== null || p.billingReason === PLAN_CHANGE_REASON) return null;
+  const price = paidPrice(p);
+  if (price === null || p.subtotal === null) return null;
+  return cents(price) < cents(p.subtotal) ? { price, subtotal: p.subtotal } : null;
 }
 
 /**
@@ -685,21 +824,31 @@ async function promoCodeName(promoCodeId: string, ctx: WhopReadContext): Promise
 }
 
 type MembershipFields =
-  | { ok: true; promoCodeId: string | null; planId: string | null; renewalPrice: number | null }
+  | { ok: true; promoCodeId: string | null; planId: string | null; renewalPrice: number | null; productId: string | null }
   | { ok: false; fail: MembershipReadFail };
 
-/** One GET of a membership: the code, the plan and the renewal price it names, each in either shape. */
+/**
+ * One GET of a membership: the code, the plan, the renewal price and the
+ * product it names, each in either shape. Whop answers the membership asked
+ * for, naming its code on every membership (null when none applies): an
+ * object whose `id` is not the one asked for (a wrapped body, `{}`), or that
+ * names neither `promo_code_id` nor the key's older `promo_code`, is a shape
+ * this code does not read (bad_shape, since T-122's fifth fix round; each
+ * read as a membership naming no code until then).
+ */
 async function membershipFields(membershipId: string, ctx: WhopReadContext): Promise<MembershipFields> {
   if (!ctx.apiKey) return { ok: false, fail: "no_api_key" };
   if (!isMembershipId(membershipId)) return { ok: false, fail: "not_a_membership" };
   const m = await whopGet(`/memberships/${encodeURIComponent(membershipId)}`, ctx);
   if (!m.ok) return m;
-  // The pinned shape names the code promo_code_id; the key's own older shape, promo_code: { id }.
+  if (idOf(m.body.id) !== membershipId || !("promo_code_id" in m.body || "promo_code" in m.body)) return { ok: false, fail: "bad_shape" };
+  // The pinned shape names the code promo_code_id and the product product_id; the key's own older shape, promo_code: { id }.
   return {
     ok: true,
     promoCodeId: idOf(m.body.promo_code_id) ?? idOf(m.body.promo_code),
     planId: idOf(m.body.plan_id) ?? idOf(m.body.plan),
     renewalPrice: priceOf(m.body.renewal_price),
+    productId: idOf(m.body.product_id) ?? idOf(m.body.product),
   };
 }
 
@@ -732,26 +881,31 @@ export async function readMembershipDiscount(membershipId: string, ctx: WhopRead
  * with its prices when they read); else its prices (`priced`, settled on
  * when nothing is a coupon), or that its renewal price does not read, or,
  * for a membership naming this student's own code, its plan
- * (`unpriced`); or that Whop does not know the id (`unknown`), or gave no
- * answer (`no_answer`), a 200 whose body cannot be read among them
+ * (`unpriced`); or that Whop does not know the id (`unknown`), that it is a
+ * membership of another product (`other_product`, since T-122's fifth fix
+ * round: its `product_id` names one, and not one of the course's), or gave
+ * no answer (`no_answer`), a 200 whose body cannot be read among them
  * (bad_shape, since T-122's fourth fix round: it read as `unpriced`, no code
  * seen). The reads: the membership; for a membership naming a code its plan
  * (once per run) and the code's name (once per run). A membership naming no
  * code has its plan read no more since the fourth fix round: under the
  * owner's rule it decides nothing, and the renewal price alone says paid or
- * free.
+ * free. A membership naming no product is read as the course's, as the v2
+ * list's rows naming none are.
  */
 type MembershipLook =
   | { kind: "coupon"; promoCodeId: string; promoCode: string | null; renewalPrice: number | null; planRenewalPrice: number | null }
   | { kind: "priced"; membership: MembershipDiscount }
   | { kind: "unpriced" }
   | { kind: "unknown" }
+  | { kind: "other_product" }
   | { kind: "no_answer"; fail: MembershipReadFail & NoAnswer };
 
 async function lookAtMembership(
   membershipId: string,
   ctx: WhopReadContext,
   ownCode: (promoCodeId: string, name: string | null) => boolean,
+  course: ReadonlySet<string>,
 ): Promise<MembershipLook> {
   const m = await membershipFields(membershipId, ctx);
   if (!m.ok) {
@@ -761,6 +915,8 @@ async function lookAtMembership(
     // A 404 or another 4xx for this one id: Whop does not know it.
     return { kind: "unknown" };
   }
+  // Another product's membership: its code is that product's, never a course coupon (T-122's fifth fix round).
+  if (m.productId !== null && !course.has(m.productId)) return { kind: "other_product" };
   const { promoCodeId, planId, renewalPrice } = m;
   if (promoCodeId === null) {
     if (renewalPrice === null) return { kind: "unpriced" };
@@ -909,8 +1065,9 @@ export interface StudentForCheck {
 export type StudentDiscountRead =
   | {
       ok: true;
+      /** The step that answered (the cron's by_source, the routes' via). The row's own `source` is its stamp. */
       source: DiscountSource;
-      /** The row to store, `source` and `checked_at` set. */
+      /** The row to store, `checked_at` and THE RULE STAMP set (its `source` null on a no coupon judged without the user's list). */
       row: MembershipDiscountRow;
       /** No membership answered and the check found no real course payment, so no coupon (source "payment"). */
       noRealPayment: boolean;
@@ -928,33 +1085,48 @@ export type StudentDiscountRead =
        * null for every other answer.
        */
       byPrice: { price: number; billingReason: string | null } | null;
+      /**
+       * A payment naming no code showed a discount (step 2's second half,
+       * T-122's fifth fix round): its price, its subtotal, its currency and
+       * billing_reason, which the cron lists (refused_by_subtotal) for the
+       * owner to rule on. null for every other answer.
+       */
+      bySubtotal: { price: number; subtotal: number; currency: string | null; billingReason: string | null } | null;
     }
   | { ok: false; fail: NoAnswer };
 
 /**
  * The student's first real course payment, the one the price judges (step 3,
- * since T-122's fourth fix round: "if they paid less than 97"): the real
- * payment students.first_paid_at names (its paid_at that moment), else the
- * earliest real course payment the list gives (first_paid_at left out,
- * null, or naming a payment of another product or one no longer real), in
- * whatever order the list comes; a tie goes to the one listed last, as
- * fetchCoursePayments lists newest first and a tie in Whop's order. A real
- * payment always has its paid_at. null with no real course payment.
+ * since T-122's fourth fix round: "if they paid less than 97"): among the
+ * real payments naming their buyer, those at the moment
+ * students.first_paid_at names, else those at the earliest moment the list
+ * gives (first_paid_at left out, null, or naming a payment of another
+ * product or one no longer real), in whatever order the list comes. Of
+ * those, since T-122's fifth fix round, the checkout (`billing_reason`
+ * "subscription_create"), else the one with the highest price (its total
+ * less a tax added on top); a full tie goes to the one listed last, as
+ * fetchCoursePayments lists newest first and a tie in Whop's order. Until
+ * then the first listed at first_paid_at's moment was taken, so a 10.00
+ * add-on listed before the 97.00 checkout refused. A row naming no buyer is
+ * never it (the first-paid rule leaves it out too). A real payment always
+ * has its paid_at. null with no real course payment.
  */
 export function firstRealPayment(payments: readonly CoursePayment[], firstPaidAt: string | null | undefined): CoursePayment | null {
   const at = (p: CoursePayment) => (p.paidAt === null ? NaN : Date.parse(p.paidAt));
-  const real = payments.filter((p) => p.real && Number.isFinite(at(p)));
+  const real = payments.filter((p) => p.real && p.buyerNamed !== false && Number.isFinite(at(p)));
+  if (real.length === 0) return null;
   const named = typeof firstPaidAt === "string" ? Date.parse(firstPaidAt) : NaN;
-  if (Number.isFinite(named)) {
-    const hit = real.find((p) => at(p) === named);
-    if (hit) return hit;
-  }
-  let first: CoursePayment | null = null;
-  for (const p of real) if (first === null || at(p) <= at(first)) first = p;
+  const moment = Number.isFinite(named) && real.some((p) => at(p) === named) ? named : Math.min(...real.map(at));
+  const atMoment = real.filter((p) => at(p) === moment);
+  const checkouts = atMoment.filter((p) => p.billingReason === CHECKOUT_REASON);
+  const pool = checkouts.length > 0 ? checkouts : atMoment;
+  const price = (p: CoursePayment) => cents(paidPrice(p) ?? 0);
+  let first = pool[0];
+  for (const p of pool) if (price(p) >= price(first)) first = p;
   return first;
 }
 
-/** The stored row for a student's membership as read now. */
+/** The stored row for a student's membership as read now, with THE RULE STAMP for `source`, the step. */
 export function rowOf(studentId: string, m: MembershipDiscount, checkedAt: string, source: DiscountSource = "membership"): MembershipDiscountRow {
   return {
     student_id: studentId,
@@ -965,25 +1137,47 @@ export function rowOf(studentId: string, m: MembershipDiscount, checkedAt: strin
     plan_renewal_price: m.planRenewalPrice,
     discounted: m.discounted,
     checked_at: checkedAt,
-    source,
+    source: storedSourceOf(source),
+    source_checked_at: checkedAt,
   };
 }
 
 /**
  * One student, yes or no, by the owner's rule in the header's order (a code
- * on a membership, a code on a payment, then the price), or the kind of NO
- * ANSWER. Writes nothing.
+ * on a membership, a code or a discount on a payment, then the price), or
+ * the kind of NO ANSWER. Writes nothing. The row it hands back carries THE
+ * RULE STAMP, or no source on a no coupon judged without the user's list
+ * (THE V2 SHUTDOWN).
  */
 export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopReadContext): Promise<StudentDiscountRead> {
   if (!ctx.apiKey) return { ok: false, fail: "no_api_key" };
+  // The course's products. Since T-122's fifth fix round the membership on file is checked against them too, so with
+  // none named nothing can be judged and nothing is read (the membership on file was read first until then).
+  const course = courseProductIds();
+  if (course.size === 0) return { ok: false, fail: "no_course_product" };
   const now = () => new Date().toISOString();
   // The user's list answered a 4xx: the check goes on without it, and the cron counts it.
   let userListUnusable = false;
+  type Answered = Extract<StudentDiscountRead, { ok: true }>;
   const found = (
     source: DiscountSource,
     row: MembershipDiscountRow,
-    byPrice: { price: number; billingReason: string | null } | null = null,
-  ): StudentDiscountRead => ({ ok: true, source, row, noRealPayment: false, userListUnusable, byPrice });
+    more: Partial<Pick<Answered, "noRealPayment" | "byPrice" | "bySubtotal">> = {},
+  ): StudentDiscountRead => {
+    // THE RULE STAMP, the step with this rule's version and the write's own moment. A no coupon judged without the
+    // user's list may have missed a code on a second, canceled or expired membership (THE V2 SHUTDOWN): the student
+    // gets it live, and its row is stored with no source, so the stored fallback never answers with it.
+    const unstamped = userListUnusable && !row.discounted;
+    return {
+      ok: true,
+      source,
+      row: { ...row, source: unstamped ? null : storedSourceOf(source), source_checked_at: unstamped ? null : row.checked_at },
+      noRealPayment: more.noRealPayment ?? false,
+      userListUnusable,
+      byPrice: more.byPrice ?? null,
+      bySubtotal: more.bySubtotal ?? null,
+    };
+  };
   const own = (promoCodeId: string | null, name: string | null) => isOwnThirtyCode(student, promoCodeId, name);
   const membershipCoupon = (
     membershipId: string,
@@ -999,7 +1193,6 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
       plan_renewal_price: look.planRenewalPrice,
       discounted: true,
       checked_at: now(),
-      source,
     });
   // Each membership read once: the one on file is found again through the Whop user. A read that gave no answer is
   // never kept (the check stops on it).
@@ -1008,7 +1201,7 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
   const look = async (id: string): Promise<MembershipLook> => {
     const had = looked.get(id);
     if (had) return had;
-    const got = await lookAtMembership(id, ctx, own);
+    const got = await lookAtMembership(id, ctx, own, course);
     if (got.kind !== "no_answer") looked.set(id, got);
     return got;
   };
@@ -1026,11 +1219,10 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
     if (seen.kind === "coupon") return membershipCoupon(onFile, seen, "membership");
     if (seen.kind === "priced" && cents(seen.membership.renewalPrice) > 0) settled = { membership: seen.membership, source: "membership" };
     if (seen.kind === "unpriced") unpriced = onFile;
-    // "unknown" (a 404, or another 4xx for the id on file): Whop does not know it, so it is passed over.
+    // "unknown" (a 404, or another 4xx for the id on file) or, since the fifth fix round, "other_product" (a membership
+    // of another product, which the webhook stores as it stores the course's): passed over, its code never read.
   }
 
-  const course = courseProductIds();
-  if (course.size === 0) return { ok: false, fail: "no_course_product" };
   if (!student.whop_user_id) return { ok: false, fail: "no_whop_user" };
 
   // The user's course memberships and every course payment (the $0 ones too), read at the same time (T-122's fourth
@@ -1048,20 +1240,24 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
   if (!list.ok) return list;
   userListUnusable = list.unusable;
 
-  // 1. A code on any course membership found through the Whop user, whatever the one on file said: those that grant
-  // access, then those that no longer do, read for a code alone and never settled on (the fourth fix round).
+  // 1. A code on any course membership found through the Whop user, whatever the one on file said: first those that
+  // grant access, one after the other (a membership of another product passed over, since the fifth fix round).
   const candidates: MembershipDiscount[] = [];
   for (const id of list.membershipIds) {
     const seen = await look(id);
     if (seen.kind === "no_answer") return { ok: false, fail: seen.fail };
     if (seen.kind === "coupon") return membershipCoupon(id, seen, "user");
     if (seen.kind === "priced") candidates.push(seen.membership);
-    else unpriced ??= id;
+    else if (seen.kind !== "other_product") unpriced ??= id;
   }
-  for (const id of list.endedIds) {
-    const seen = await look(id);
+  // Then those that no longer grant access, read for a code alone and never settled on (the fourth fix round), all
+  // at once since the fifth (one after the other, two of them went past the request routes' limits at 2 seconds an
+  // answer), and judged in their order: the first coupon or no answer decides as soon as it is in.
+  const ended = list.endedIds.map((id) => look(id));
+  for (let i = 0; i < ended.length; i++) {
+    const seen = await ended[i];
     if (seen.kind === "no_answer") return { ok: false, fail: seen.fail };
-    if (seen.kind === "coupon") return membershipCoupon(id, seen, "user");
+    if (seen.kind === "coupon") return membershipCoupon(list.endedIds[i], seen, "user");
   }
   // No code on any: the first that renews above 0 is settled on, else the first that renews at 0, unless one gave no price.
   if (settled === null && unpriced === null) {
@@ -1072,16 +1268,15 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
   // A payments read Whop does not answer is no answer.
   if (!paid.ok) return { ok: false, fail: paid.fail };
   const judgedOn = settled?.membership.whopMembershipId ?? unpriced;
-  const paymentCouponRow = (p: CoursePayment, judged: PaymentCoupon, promoCode: string | null): MembershipDiscountRow => ({
+  const paymentRow = (p: CoursePayment, price: number | null, heldAgainst: number | null, promoCode: string | null): MembershipDiscountRow => ({
     student_id: student.id,
     whop_membership_id: p.membershipId ?? judgedOn ?? null,
     promo_code_id: p.promoCodeId,
     promo_code: promoCode,
-    renewal_price: judged.price,
-    plan_renewal_price: judged.heldAgainst,
+    renewal_price: price,
+    plan_renewal_price: heldAgainst,
     discounted: true,
     checked_at: now(),
-    source: "payment",
   });
 
   // 2. A code on any course payment other than this student's own 30%, whatever its totals.
@@ -1089,17 +1284,28 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
     if (p.promoCodeId === null) continue;
     const promoCode = p.promoCode ?? (await promoCodeName(p.promoCodeId, ctx));
     if (own(p.promoCodeId, promoCode)) continue;
-    return found("payment", paymentCouponRow(p, paymentCoupon(p), promoCode));
+    const judged = paymentCoupon(p);
+    return found("payment", paymentRow(p, judged.price, judged.heldAgainst, promoCode));
+  }
+  // And, since the fifth fix round, a discount any course payment naming no code shows: its price below its subtotal.
+  for (const p of paid.payments) {
+    const shown = discountWithoutCode(p);
+    if (shown === null) continue;
+    return found("payment", paymentRow(p, shown.price, shown.subtotal, null), {
+      bySubtotal: { price: shown.price, subtotal: shown.subtotal, currency: p.currency, billingReason: p.billingReason },
+    });
   }
 
-  // 3. No code anywhere: the price of the student's first real course payment alone, naming no code, in dollars and
-  // no plan change, under 97.00 (the fourth fix round: every real payment until then, so a later manual charge or
-  // add-on under 97.00 refused a student who came in at full price).
+  // 3. No code or discount anywhere: the price of the student's first real course payment alone, naming no code, in
+  // dollars and no plan change, under 97.00 (the fourth fix round: every real payment until then, so a later manual
+  // charge or add-on under 97.00 refused a student who came in at full price).
   const first = firstRealPayment(paid.payments, student.first_paid_at);
   if (first !== null && first.promoCodeId === null) {
     const judged = paymentCoupon(first);
     if (judged.discounted && judged.price !== null) {
-      return found("payment", paymentCouponRow(first, judged, null), { price: judged.price, billingReason: first.billingReason });
+      return found("payment", paymentRow(first, judged.price, judged.heldAgainst, null), {
+        byPrice: { price: judged.price, billingReason: first.billingReason },
+      });
     }
   }
 
@@ -1109,13 +1315,9 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
   const judged = first ? paymentCoupon(first, { ownCode: true }) : null;
   const promoCodeId = first?.promoCodeId ?? null;
   const promoCode = first?.promoCode ?? (promoCodeId ? await promoCodeName(promoCodeId, ctx) : null);
-  return {
-    ok: true,
-    source: "payment",
-    noRealPayment: first === null,
-    userListUnusable,
-    byPrice: null,
-    row: {
+  return found(
+    "payment",
+    {
       student_id: student.id,
       whop_membership_id: unpriced ?? first?.membershipId ?? null,
       promo_code_id: promoCodeId,
@@ -1124,28 +1326,33 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
       plan_renewal_price: judged ? judged.heldAgainst : null,
       discounted: false,
       checked_at: now(),
-      source: "payment",
     },
-  };
+    { noRealPayment: first === null },
+  );
 }
 
-/** A row as a database without v113 takes it: everything but `source`. */
+/** A row as a database without v113 takes it: everything but `source` and `source_checked_at`. */
 function withoutSource(row: MembershipDiscountRow): MembershipDiscountRow {
   const copy = { ...row };
   delete copy.source;
+  delete copy.source_checked_at;
   return copy;
 }
 
-/** PostgREST's "Could not find the 'source' column" (PGRST204), or Postgres's undefined column (42703), naming `source`: a database without v113. */
+/**
+ * PostgREST's "Could not find the 'source' column" (PGRST204), or Postgres's
+ * undefined column (42703), naming `source` or `source_checked_at`: a
+ * database without v113.
+ */
 export function lacksSourceColumn(error: { code?: string | null; message?: string | null } | null | undefined): boolean {
-  return !!error && (error.code === "PGRST204" || error.code === "42703") && /\bsource\b/.test(error.message ?? "");
+  return !!error && (error.code === "PGRST204" || error.code === "42703") && /\bsource(?:_checked_at)?\b/.test(error.message ?? "");
 }
 
 /**
  * Writes rows to student_membership_discounts, one per student. A database
- * without v113 refuses a row that carries `source`: the rows go again
- * without it, and `run.withoutSource` remembers, so a run asks once. The
- * error's message, or null.
+ * without v113 refuses a row that carries `source` and `source_checked_at`:
+ * the rows go again without them, and `run.withoutSource` remembers, so a run
+ * asks once. The error's message, or null.
  */
 async function upsertDiscountRows(
   db: SupabaseClient,
@@ -1174,11 +1381,12 @@ export interface CouponCheck {
   code: string | null;
   /**
    * live: Whop answered now. stored: the stored row for this membership, a
-   * coupon, or no coupon written by this rule (its `source` set, v113, and
-   * naming no code or this student's own 30% by their request's promo id,
-   * storedNoCouponAnswers). none: neither; the request routes then refuse
-   * (the owner's review, 2026-10-21), and so does the approve route's normal
-   * Approve since T-122's fourth fix round, Approve anyway going on.
+   * coupon, or no coupon written by this rule and by nothing since (THE RULE
+   * STAMP, v113), naming no code or this student's own 30% by their
+   * request's promo id (storedNoCouponAnswers), the student's row read.
+   * none: neither; the request routes then refuse (the owner's review,
+   * 2026-10-21), and so does the approve route's normal Approve since
+   * T-122's fourth fix round, Approve anyway going on.
    */
   source: "live" | "stored" | "none";
   /** The step that answered a live check (DiscountSource); null when `source` is not live. */
@@ -1230,59 +1438,90 @@ async function ownThirtyOf(db: SupabaseClient, studentId: string): Promise<OwnTh
   }
 }
 
-/** What the request routes' fallback reads of a stored row (with `source` where the database has v113). */
-const STORED_FALLBACK_COLUMNS = "whop_membership_id, promo_code_id, promo_code, discounted";
-type StoredFallbackRow = Pick<MembershipDiscountRow, "whop_membership_id" | "promo_code_id" | "promo_code" | "discounted"> & { source?: unknown };
+/** What the request routes' fallback reads of a stored row (with `source` and `source_checked_at` where the database has v113). */
+const STORED_FALLBACK_COLUMNS = "whop_membership_id, promo_code_id, promo_code, discounted, checked_at";
+type StoredFallbackRow = Pick<MembershipDiscountRow, "whop_membership_id" | "promo_code_id" | "promo_code" | "discounted" | "checked_at"> & {
+  source?: unknown;
+  source_checked_at?: unknown;
+};
+
+/**
+ * What a stored row's stamp says (THE RULE STAMP, WHO READS IT in the
+ * header): this rule wrote it and nothing since; it holds no source (written
+ * before v113, without the user's list, or read from a database without
+ * v113); its source is an older round's word; or this rule's stamp is on it
+ * with another `checked_at`, so a build that writes no source wrote over it.
+ */
+type StoredStamp = "this_rule" | "no_source" | "older_rule" | "written_over";
+
+function stampOf(row: { source?: unknown; source_checked_at?: unknown; checked_at?: unknown }): StoredStamp {
+  if (row.source === null || row.source === undefined) return "no_source";
+  if (!isCurrentRuleSource(row.source)) return "older_rule";
+  return stampedByThisRule(row) ? "this_rule" : "written_over";
+}
 
 /**
  * Whether a stored "no coupon" answers for a Whop that gives none (WHO READS
- * IT, the header): this rule wrote it, its `source` naming a step, and it
- * names no code, or this student's own 30% by the promo id on their own
- * approved or applied request. Since T-122's fourth fix round: a source alone
- * let in a row an older build of T-122 wrote for a student holding a used
- * code (welcome50 renewing at 97.00, "no coupon" by its rule), a source
- * PostgREST keeps when a later upsert leaves the column out.
+ * IT, the header): this rule wrote it and nothing wrote over it since
+ * (stampedByThisRule: its `source` carries this rule's version, and its
+ * `source_checked_at` is its `checked_at`), and it names no code, or this
+ * student's own 30% by the promo id on their own approved or applied
+ * request. Since T-122's fourth fix round the code: a source alone let in a
+ * row an older build of T-122 wrote for a student holding a used code
+ * (welcome50 renewing at 97.00, "no coupon" by its rule). Since its fifth the
+ * stamp: a step's word alone answered from any build that wrote one, and an
+ * upsert leaving the column out keeps the one already on the row.
  */
 export function storedNoCouponAnswers(
-  row: Pick<StoredFallbackRow, "promo_code_id"> & { source?: unknown },
+  row: Pick<StoredFallbackRow, "promo_code_id"> & { source?: unknown; source_checked_at?: unknown; checked_at?: unknown },
   ownThirtyPromoIds: readonly string[],
 ): boolean {
-  if (!isDiscountSource(row.source)) return false;
+  if (!stampedByThisRule(row)) return false;
   return row.promo_code_id === null || row.promo_code_id === undefined || ownThirtyPromoIds.includes(row.promo_code_id);
 }
 
 /**
- * The student's stored row, and whether this rule wrote it (its `source` set,
- * WHO READS IT in the header). On a database without v113 the read naming
- * `source` is refused (lacksSourceColumn) and made again without it: the row
- * is then never known to be this rule's. null when there is no row or it
- * cannot be read.
+ * The student's stored row, and what its stamp says (WHO READS IT in the
+ * header). On a database without v113 the read naming `source` and
+ * `source_checked_at` is refused (lacksSourceColumn) and made again without
+ * them: the row then holds no source, so it is never known to be this
+ * rule's. null when there is no row or it cannot be read.
  */
-async function storedFallback(db: SupabaseClient, studentId: string): Promise<{ row: StoredFallbackRow; byThisRule: boolean } | null> {
+async function storedFallback(db: SupabaseClient, studentId: string): Promise<{ row: StoredFallbackRow; stamp: StoredStamp } | null> {
   const read = (columns: string) => db.from(MEMBERSHIP_DISCOUNTS_TABLE).select(columns).eq("student_id", studentId).maybeSingle();
-  const withSource = await read(`${STORED_FALLBACK_COLUMNS}, source`);
+  const withSource = await read(`${STORED_FALLBACK_COLUMNS}, source, source_checked_at`);
   if (!withSource.error) {
     const row = withSource.data as StoredFallbackRow | null;
-    return row ? { row, byThisRule: isDiscountSource(row.source) } : null;
+    return row ? { row, stamp: stampOf(row) } : null;
   }
   if (!lacksSourceColumn(withSource.error)) return null;
   const bare = await read(STORED_FALLBACK_COLUMNS);
   const row = bare.error ? null : (bare.data as StoredFallbackRow | null);
-  return row ? { row, byThisRule: false } : null;
+  return row ? { row, stamp: "no_source" } : null;
 }
+
+/** Why a stored "no coupon" was no answer, as the log line says it (checkMembershipDiscount). */
+const NOT_THIS_RULE: Record<Exclude<StoredStamp, "this_rule"> | "a_code" | "student_unread", string> = {
+  no_source: "the stored row says no coupon and holds no source, so this rule did not write it",
+  older_rule: "the stored row says no coupon and its source is an older rule's, so this rule did not write it",
+  written_over: "the stored row says no coupon and was written over since this rule wrote it",
+  a_code: "the stored row says no coupon but names a code that is not the student's own 30%, so this rule did not write it",
+  student_unread: "the stored row says no coupon, and with the student's row unread only a stored coupon answers",
+};
 
 /**
  * The request routes, the approve route (D5) and "Check Whop again": Whop
  * now, by the owner's rule (judgeStudentDiscount, told the student's first
  * payment and their own approved or applied requests), then the stored row
  * for this membership (storedRowApplies) when it is a coupon, or a no coupon
- * this rule wrote that names no code but the student's own
- * (storedNoCouponAnswers, WHO READS IT), then nothing (source "none": Whop
- * gave no answer and nothing stored answers; the request routes refuse on
- * it, and since T-122's fourth fix round so does the approve route's normal
- * Approve). A live answer is stored, best effort, so the map and the admin
- * page catch up. Never throws. `apiKey` defaults to WHOP_API_KEY; without
- * one there is no live read.
+ * this rule wrote, and nothing since, that names no code but the student's
+ * own (storedNoCouponAnswers, WHO READS IT), a coupon alone when the
+ * student's row could not be read (since T-122's fifth fix round), then
+ * nothing (source "none": Whop gave no answer and nothing stored answers;
+ * the request routes refuse on it, and since T-122's fourth fix round so
+ * does the approve route's normal Approve). A live answer is stored, best
+ * effort, so the map and the admin page catch up. Never throws. `apiKey`
+ * defaults to WHOP_API_KEY; without one there is no live read.
  */
 export async function checkMembershipDiscount(
   db: SupabaseClient,
@@ -1336,17 +1575,26 @@ export async function checkMembershipDiscount(
   }
 
   // The stored row, when it was read from the membership the student has now (or when that could not be read): a
-  // coupon always; no coupon only when this rule wrote it and it names no code but the student's own.
+  // coupon always; no coupon only when this rule wrote it and nothing since, it names no code but the student's own,
+  // and (since T-122's fifth fix round) the student's row was read, so the membership on file is known.
   let answer: CouponCheck = { discounted: false, code: null, source: "none", via: null, liveFail, saved: false };
-  let notThisRule: "no source" | "a code" | null = null;
+  let notThisRule: keyof typeof NOT_THIS_RULE | null = null;
   try {
     const stored = await storedFallback(db, studentId);
     if (stored && storedRowApplies(stored.row, student?.whop_membership_id)) {
       const discounted = stored.row.discounted === true;
-      const ownIds = !discounted && stored.byThisRule && stored.row.promo_code_id ? (await ownThirtyOnce()).promoIds : [];
-      if (discounted || (stored.byThisRule && storedNoCouponAnswers(stored.row, ownIds))) {
+      if (discounted) {
         answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false };
-      } else notThisRule = stored.byThisRule ? "a code" : "no source";
+      } else if (student === undefined) {
+        notThisRule = "student_unread";
+      } else if (stored.stamp !== "this_rule") {
+        notThisRule = stored.stamp;
+      } else {
+        const ownIds = stored.row.promo_code_id ? (await ownThirtyOnce()).promoIds : [];
+        if (storedNoCouponAnswers(stored.row, ownIds)) {
+          answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false };
+        } else notThisRule = "a_code";
+      }
     }
   } catch {
     // No stored answer: source "none", and the caller decides (the request
@@ -1355,18 +1603,19 @@ export async function checkMembershipDiscount(
   }
   // A check that was tried and gave no answer is worth a line: without it an
   // approval refused, or an application refused, would be unexplained. With no
-  // key or no student row there was nothing to try.
+  // key there was nothing to try; a student row that could not be read says so
+  // since the fifth fix round.
   const outcome =
     answer.source === "stored"
       ? "the stored row decides"
-      : notThisRule === "no source"
-        ? "no answer is on file (the stored row says no coupon and holds no source, so this rule did not write it)"
-        : notThisRule === "a code"
-          ? "no answer is on file (the stored row says no coupon but names a code that is not the student's own 30%, so this rule did not write it)"
-          : "no answer is on file";
+      : notThisRule !== null
+        ? `no answer is on file (${NOT_THIS_RULE[notThisRule]})`
+        : "no answer is on file";
   if (liveFail === "no_course_product" || liveFail === "no_whop_user") {
     console.warn(`[membership discount] student ${studentId}: Whop could not be asked (${liveFail}), so ${outcome}`);
-  } else if (liveFail !== null && liveFail !== "no_api_key" && liveFail !== "student_unread") {
+  } else if (liveFail === "student_unread") {
+    console.warn(`[membership discount] student ${studentId}: the student's row could not be read, so Whop was not asked and ${outcome}`);
+  } else if (liveFail !== null && liveFail !== "no_api_key") {
     console.warn(`[membership discount] student ${studentId}: Whop gave no answer (${liveFail}), so ${outcome}`);
   }
   return answer;
@@ -1405,8 +1654,10 @@ export interface RefreshAnswer {
    * Of `checked`: the students whose Whop user's list of memberships
    * answered a 404 or another 4xx (a 410 once v2 is gone), judged without it
    * by the membership on file and the payments (T-122's fourth fix round). A
-   * count that jumps says the list stopped answering, and a code on a second
-   * membership is then seen on its payments alone.
+   * count that jumps says the list stopped answering, and a code on a second,
+   * canceled or expired membership is then seen on its payments alone; since
+   * the fifth fix round each such no coupon is stored with no source, so no
+   * stored fallback answers with it.
    */
   user_list_unusable: number;
   discounted: number;
@@ -1417,6 +1668,15 @@ export interface RefreshAnswer {
    * fix round; the dry run is where to read it). Student ids only.
    */
   refused_by_price: { student_id: string; price: number; billing_reason: string | null }[];
+  /**
+   * The students a payment naming no code refused by its subtotal (step 2's
+   * second half, T-122's fifth fix round: its price below its subtotal),
+   * each with that price, the subtotal, the currency they are in and the
+   * payment's billing_reason, so the owner can rule on real cases (a free
+   * trial's checkout Whop might state at the plan's price would show here).
+   * Student ids only.
+   */
+  refused_by_subtotal: { student_id: string; price: number; subtotal: number; currency: string | null; billing_reason: string | null }[];
   /** Rows written (0 on a dry run). */
   written: number;
   /** Students Whop gave no answer for (NO ANSWER), by kind. Their stored row stays as it was. */
@@ -1464,6 +1724,7 @@ export async function refreshMembershipDiscounts(
     user_list_unusable: 0,
     discounted: 0,
     refused_by_price: [],
+    refused_by_subtotal: [],
     written: 0,
     failed: {},
     left: 0,
@@ -1579,6 +1840,10 @@ export async function refreshMembershipDiscounts(
     if (r.userListUnusable) answer.user_list_unusable++;
     if (r.row.discounted) answer.discounted++;
     if (r.byPrice) answer.refused_by_price.push({ student_id: r.row.student_id, price: r.byPrice.price, billing_reason: r.byPrice.billingReason });
+    if (r.bySubtotal) {
+      const s = r.bySubtotal;
+      answer.refused_by_subtotal.push({ student_id: r.row.student_id, price: s.price, subtotal: s.subtotal, currency: s.currency, billing_reason: s.billingReason });
+    }
     pending.push(r.row);
     if (pending.length >= WRITE_CHUNK) await flush();
     if (writeError) break;

@@ -57,7 +57,8 @@
  *     sets first_paid_at: the coupon check reads it for the code it names
  *     alone. Since T-122's third fix round (2026-10-22), when it replaced
  *     fetchRealCoursePayments, which kept the real payments alone (and their
- *     total in dollars, which the check no longer reads).
+ *     total in dollars, which the check no longer reads). Since its fifth a
+ *     row naming no buyer is kept too, marked so (it was left out).
  *
  * None of them writes anything. A failure comes back as a kind, never as
  * Whop's message, so no caller can pass a Whop id on by accident.
@@ -462,6 +463,15 @@ export interface CoursePayment {
   subtotal: number | null;
   /** The tax `total` carries on top of the price (taxOnTopOf); null when that is not known. */
   taxOnTop: number | null;
+  /**
+   * The row names its buyer (`user`). The list is read by the user's id, so a
+   * row naming none is still the user's as far as Whop's filter goes; the
+   * first-paid rule counts it apart (no_user), so it never sets
+   * first_paid_at, and the coupon check reads it for a code it names or a
+   * discount it shows, never for its price (T-122's fifth fix round; it was
+   * left out of the list until then). Left out, the row names its buyer.
+   */
+  buyerNamed?: boolean;
 }
 
 /** A money field's amount, in either shape; null when it is missing, null or does not read. */
@@ -507,11 +517,14 @@ export type CoursePaymentsRead =
  * last; a tie in Whop's order): a payment naming another product is left
  * out, one naming none is kept, and so is one that is not a real payment
  * under THE RULE above (a $0 one, a refunded one, one whose total or paid_at
- * does not read), with `real` false. `kept` counts the real ones. The coupon
- * check judges them (membership-discount.ts, T-122): a code on any of them,
- * then the price of the first real one (since its fourth fix round; of every
- * real one until then), and it reads them beside the user's memberships, at
- * the same time. The same pinned read as
+ * does not read), with `real` false, and since T-122's fifth fix round one
+ * naming no buyer, with `buyerNamed` false (it was skipped, with no trace).
+ * `kept` counts the real ones. The coupon check judges them
+ * (membership-discount.ts, T-122): a code on any of them, since its fifth
+ * fix round a discount any of them shows with no code named, then the price
+ * of the first real one naming its buyer (since its fourth fix round; of
+ * every real one until then), and it reads them beside the user's
+ * memberships, at the same time. The same pinned read as
  * fetchFirstPaymentForUser, GET /api/v1/payments?user_id=<id>&status=paid
  * &first=100, every page, every row's user checked; on the caller's key, its
  * pace (shared with its other Whop reads) and its limits: no request starts
@@ -546,8 +559,9 @@ export async function fetchCoursePayments(
     if (hasOtherUser(got.rows, whopUserId)) return { ok: false, fail: "filter_ignored" };
     for (const p of got.rows) {
       seen += 1;
-      // A row naming no buyer is nobody's, as in addFirstPayments.
-      if (!p.user?.id) continue;
+      // A row naming no buyer came back for this user's id, so it is read here, marked: a code it names counts (T-122's
+      // fifth fix round). The first-paid rule counts it apart (addFirstPayments' no_user), so its price never judges.
+      const buyerNamed = !!p.user?.id;
       const productId = refId(p.product_id) ?? refId(p.product);
       if (productId !== null && !opts.productIds.has(productId)) continue;
       const code = p.promo_code !== null && typeof p.promo_code === "object" ? p.promo_code.code : null;
@@ -564,6 +578,7 @@ export async function fetchCoursePayments(
         promoCode: typeof code === "string" && code.trim() !== "" ? code.trim() : null,
         subtotal: amountOrNull(p.subtotal),
         taxOnTop: taxOnTopOf(p),
+        buyerNamed,
       });
     }
     if (!got.next) {

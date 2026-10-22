@@ -35,11 +35,13 @@
  *
  * The coupon check is the one /api/discounts/request makes
  * (checkMembershipDiscount, its comment names the owner's rule). Its stored
- * fallback answers "no coupon" only for a row that rule wrote, its source
- * set (v113), naming no code but the student's own (since T-122's fourth fix
- * round): a row with no source, one naming another code, and every stored
- * "no coupon" on a database without v113, give the 503 when Whop does not
- * answer.
+ * fallback answers "no coupon" only for a row that rule wrote and nothing
+ * since, its source carrying the rule's version (v113, since T-122's fifth
+ * fix round), naming no code but the student's own (since its fourth), the
+ * student's row read (since its fifth): a row with no source, an earlier
+ * round's source, one written over since, one naming another code, and
+ * every stored "no coupon" on a database without v113, give the 503 when
+ * Whop does not answer.
  */
 
 import { NextRequest, NextResponse } from "./stub-server.ts";
@@ -150,8 +152,9 @@ export async function POST(request: NextRequest) {
     // The coupon (admin rebuild 2, D5), as /api/discounts/request checks it:
     // the map's Apply sends here whenever the team has questions. A check
     // that could not run refuses too (the owner's review, 2026-10-21), and
-    // so does one whose stored row says no coupon without a source, or
-    // naming a code that is not the student's own.
+    // so does one whose stored row says no coupon without this rule's stamp,
+    // naming a code that is not the student's own, or for a student whose
+    // row could not be read.
     const coupon = await checkMembershipDiscount(supabase, studentId);
     if (coupon.discounted) {
       const refusal = membershipDiscountRefusal();

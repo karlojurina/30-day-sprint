@@ -21,11 +21,14 @@ import {
  *      gets no 30%, whatever the rule says and with `override` too. Whop is
  *      asked now (checkMembershipDiscount, the owner's rule since T-122's
  *      third fix round: a code other than the student's own 30% on any
- *      course membership or course payment, then with no code anywhere the
- *      price of the first real course payment, under 97.00 since the fourth);
- *      when it does not answer, the stored row decides if it is a coupon, or
- *      no coupon written by that rule (its source set, v113) naming no code
- *      but the student's own. The refusal is a 400 with code "has-discount"
+ *      course membership or course payment, since the fifth a discount a
+ *      payment naming no code shows, then with neither anywhere the price of
+ *      the first real course payment, under 97.00 since the fourth); when it
+ *      does not answer, the stored row decides if it is a coupon, or no
+ *      coupon written by that rule and nothing since (its source carrying
+ *      the rule's version, v113, since the fifth) naming no code but the
+ *      student's own, the student's row read. The refusal is a 400 with code
+ *      "has-discount"
  *      and names the code. `overrideCoupon` skips it (below). With neither
  *      an answer from Whop nor a stored row that answers, the normal Approve
  *      is refused since T-122's fourth fix round, once the rule below has had

@@ -480,6 +480,13 @@ export interface WorldFrame {
   calls: number;
   /** v6: 0..1 through the tail after a8 (the fly through the arch); 0 before it. */
   tail: number;
+  /**
+   * The morning the light shows at the camera (light.ts state.morning: the
+   * clock's morning factor times the stops' morning dials, easing with the
+   * clock): 1 at the opening and the first six places at 07:30, 0 by day, at
+   * night and from Creative Strategy on. -1 until the world is ready.
+   */
+  morning: number;
 }
 
 export interface WorldSceneOptions {
@@ -1765,6 +1772,7 @@ export class WorldScene {
       triangles: 0,
       calls: 0,
       tail: 0,
+      morning: -1,
     };
     this.init();
     // Speed (2026-10-20): the modules' code downloads from now, while the
@@ -4428,6 +4436,9 @@ export class WorldScene {
     this.frame.parkProgress = this.parkProgress;
     this.frame.flight = this.flightNow;
     this.frame.maxDepth = this.depthMax;
+    // The light blended this frame's key in updateModules above.
+    const lit = (this.scene?.userData.light as LightModule | undefined)?.state;
+    this.frame.morning = this.ready && lit ? lit.morning : -1;
     this.frameCb?.(this.frame);
 
     const moving = !converged || this.mode === "flight" || this.parkPending;

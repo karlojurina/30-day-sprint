@@ -98,6 +98,15 @@
   );
 }
 
+/* The morning (2026-10-22): half the bottom shade, so the banks of morning
+   mist low in the frame read lit, not greige. The page writes the value as
+   it runs (WorldV6 apply(), MORNING_SHADE, the morning at the camera); until
+   then the posters' set says it, so the loading picture and the map meet
+   with the same shade. */
+:global(html[data-world-tod="morning"]) .shade::after {
+  opacity: var(--shade-bottom, 0.5);
+}
+
 /* Final pass C: through the telescope (a7's click-in). A soft circular lens
    round the hero constellation, which sits about 17vh right of the frame's
    centre at the park's end (the lens is vertical, so vh keeps it on the

@@ -39,6 +39,7 @@ import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuni
 import { TuningPanel } from "./TuningPanel";
 import { LabelLayout, HIDDEN, LIFT, TEXT } from "./labels";
 import {
+  MORNING_POSTER_IDS,
   POSTER_DIR,
   POSTER_H,
   POSTER_IDS,
@@ -418,6 +419,19 @@ const PLAIN_HOOKS = [
 /** A transparent pixel: the landing poster's src until the page runs (the stylesheet draws the poster behind it, .posterLanding), and on a phone's size (NARROW_QUERY), where the page is a list and needs no poster. */
 const BLANK_GIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 const NP = POSTER_IDS.length;
+/** Each poster slot: 1 where the poster has a morning twin (MORNING_POSTER_IDS), else 0. */
+const POSTER_MORNING = POSTER_IDS.map((id) => ((MORNING_POSTER_IDS as readonly string[]).includes(id) ? 1 : 0));
+
+/**
+ * How much of the bottom shade (world.module.css .shade::after, the HUD's
+ * legibility gradient) the morning takes off: half, at the morning factor 1.
+ * The haze's third round (2026-10-22): at its full strength the plum gradient
+ * turned every bank of morning mist low in the frame (the opening's shore,
+ * the Falls' foot, the gorge) from a lit white into a greige. The dock, the
+ * course bar and the chips carry their own backgrounds; the opening's Scroll
+ * cue keeps its halo. By day and at night it is the shade as it was.
+ */
+const MORNING_SHADE = 0.5;
 
 /** The scene draws nothing while the tab is hidden, or while a lesson page is open over the map (source.paused). */
 const scenePaused = (source: WorldSource | undefined) => document.hidden || !!source?.paused;
@@ -1542,6 +1556,8 @@ function WorldV6View({
     };
     const cache = {
       p: -1,
+      /** The bottom shade's opacity as last written (--shade-bottom). */
+      shade: "",
       markersA: -1,
       markersLive: true,
       panelEl: null as HTMLElement | null,
@@ -1669,7 +1685,7 @@ function WorldV6View({
     // puts a checkpoint's in its slot only while it shows, as for the live frame's markers: the
     // 30%'s only near the cache (CP_SHOW_WITHIN), which keeps it off a1's poster.
     const pMarkers: ProjectedMarker[] = [...STUDY_AREAS.map((a) => a.id), CHECKPOINT.id, BOUNTY.id].map((id) => ({ id, x: 0, y: 0, visible: false, proximity: 0, enterable: true, beyond: false }));
-    const posterFrame = (f: WorldFrame): { markers: ProjectedMarker[]; k: number } => {
+    const posterFrame = (f: WorldFrame): { markers: ProjectedMarker[]; k: number; morning: number } => {
       pDepths[0] = 0;
       for (let k = 0; k < N && k + 1 < NP; k++) pDepths[k + 1] = depths[k];
       const parked = f.parkedId ? slotOf(f.parkedId) : -1;
@@ -1744,7 +1760,9 @@ function WorldV6View({
           pm.rl = pm.rr = pm.rt = pm.rb = NaN;
         }
       }
-      return { markers: pMarkers, k: entry ? k : 0 };
+      // How much of the picture is a morning poster: b fades in over a.
+      const morning = posterTodRef.current === "morning" ? POSTER_MORNING[a] * (1 - wgt) + POSTER_MORNING[b] * wgt : 0;
+      return { markers: pMarkers, k: entry ? k : 0, morning };
     };
 
     const onFrame = (f: WorldFrame) => {
@@ -1780,7 +1798,15 @@ function WorldV6View({
           tl.style.opacity = a;
           tl.style.transform = `translate3d(0, ${(p * 14).toFixed(2)}px, 0)`;
         }
-        shadeRef.current?.style.setProperty("--shade-bottom", a);
+      }
+      // The bottom shade fades with the chrome, and the morning takes MORNING_SHADE of it off: the
+      // morning the light shows here (it eases with the clock), in poster mode the posters' own, and
+      // until the world is ready the posters' set, as the stylesheet has it before the page runs.
+      const morning = pf ? pf.morning : f.morning >= 0 ? f.morning : posterTodRef.current === "morning" ? 1 : 0;
+      const shade = (chrome * (1 - MORNING_SHADE * morning)).toFixed(3);
+      if (shade !== cache.shade) {
+        cache.shade = shade;
+        shadeRef.current?.style.setProperty("--shade-bottom", shade);
       }
       // Final pass C: through the telescope. The lens closes in as the camera
       // passes the tube (a soft circle round the hero constellation) and the

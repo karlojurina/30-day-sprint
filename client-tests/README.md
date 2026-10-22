@@ -655,6 +655,57 @@ its `source`. `discount-double-submit` (33), `discount-september` (65) and
 `admin-owner-review` (58) seed their "no coupon" rows with a `source`, as this
 rule writes them.
 
+T-122's fourth fix round (2026-10-22, `night/admin3`): the third round's
+re-check passed with nothing blocking, and its should-fixes and nits are this
+round's cases. `membership-discount` (536, +80) runs a section of its own, 76
+checks with their own fixtures, each through `judgeStudentDiscount`, both
+request routes and the cron where it applies. Its stand-in Whop gained an
+answer delay on the suite's clock (`whop.delayMs`) and a v2 list that answers
+a status for a user (a number in `whop.byUser`). The cases: the world-engine
+preview's stored "no coupon" (source `membership`, naming welcome50) with Whop
+down is the 503 for both routes and refuses the normal Approve, with Whop at
+2.1 s an answer Whop's own refusal, and the same row naming no code still
+lets the request in; `checkMembershipDiscount` answers a stored no coupon
+naming the student's own 30% by the promo id on their applied or approved
+request, and nothing for welcome50, their code's name with another promo id,
+no request, a rejected one or no source. The v2 list answering 410 or 404 is
+a fall-through (`userListUnusable`, the cron's `user_list_unusable`: the
+second membership's 100% code then seen on its listed 0.00 payment, and not
+without it, the known limit), and answering another shape, another user's
+row, 5 pages (one page read) or rows naming no buyer is no answer, the routes'
+503 and the cron's `failed`. A code on a canceled or expired course membership
+(a 100% first month with its 0.00 checkout listed, left out or naming no code;
+a first-year 10% whose 873.00 was refunded) is a coupon, found on that
+membership. A later 10.00 manual charge and a 47.00 add-on after a 97.00 first
+payment let the student in, by the payment `first_paid_at` names and by the
+earliest real one alike (`firstRealPayment`, also run on its own); the $1 and
+$5 first weeks stay coupons and the cron lists them in `refused_by_price`
+with their price and `billing_reason`. Another student's ECOM30-5A1B2C (their
+ids sharing 6 characters) is a coupon with no request of this student's, and
+this student's own code is none by the promo id on their request or by the
+name beside one (with a request held, another code by that name passes: the
+known limit). A membership read answering an array, a JSON string or no JSON
+is no answer and kept nowhere (asked again, the code shows), a plan or a
+code's name answering one is kept nowhere either, and `{}` reads as no code
+(the known limit). Approve with the check giving no answer is refused, 503
+with code `rule` and a plain sentence, and Approve anyway goes on, the 30%
+page's confirm naming the sentence. A student with no code at 2.5 s an answer
+gets in with 3 reads in 5250 ms (the last started at 2750 ms), and a code on
+file is refused in 7500 ms. Against a89ff1c in a scratch copy 52 of the
+section's 76 checks fail and 24 pass (cases the old code already answered the
+same way, the known limits kept, the unreadable plan and name, the answer
+naming no Whop id, the cron's Whop-down run and the run after it), and 37
+earlier checks fail where the round changed their answer: the reads' order
+(the list beside the payments, no plan read for a membership naming no code,
+none to order the memberships), the list in another shape or holding another
+user's row now no answer and a 404 list the fall-through, an ended
+membership's code found on it, the student's own code by its name only beside
+a request (the third round's two controls are coupons now, and the cron's
+ab12cd student), and the approval with no answer refused. `admin-discounts`
+(29) seeds a stored "no coupon" this rule wrote, since its approvals run with
+no Whop key; `admin-review` (100) follows the reads' order; `admin-owner-review`
+(58) counts the seventh refusal carrying `code: "rule"`.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

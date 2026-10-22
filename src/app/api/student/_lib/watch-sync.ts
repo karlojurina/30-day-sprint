@@ -51,7 +51,9 @@ function earliestWhopTime(
  * An action item finished with Done alone (isDoneOnly in action-items.ts)
  * that Whop lists as finished gets its action half as well (3c), so it is
  * done in the app; a row of one that holds the watch half alone is filled at
- * the next login or visit.
+ * the next login or visit. An action half already there (Done pressed before
+ * the video was watched) is kept, and the watch half of every lesson comes
+ * only from Whop's list, as before.
  *
  * Diagnostic: the list of Whop lesson IDs we FETCHED but couldn't match to
  * any of our lessons is saved onto student_whop_sync.last_sync_unmatched so
@@ -197,12 +199,14 @@ export async function syncWatchProgress({
       }
       for (const r of promoted ?? []) added.add(r.lesson_id);
 
-      // 3c. An action item finished with Done alone (isDoneOnly, the four of
-      //     AI Ads + Content) has nothing to hand in, so finished on Whop it
+      // 3c. An action item finished with Done alone (isDoneOnly, the list in
+      //     action-items.ts) has nothing to hand in, so finished on Whop it
       //     is done in the app (action-items.ts, FINISHED ON WHOP). Its row
       //     gets the action half where it has none: a row this run added or
       //     finished, and a row a Whop writer left with the watch half alone
-      //     before 2026-10-22. Dated at Whop's own time for the lesson
+      //     before the item was on the list. A row whose action half is in
+      //     (Done pressed before the video was watched, then finished by 3b)
+      //     keeps it. Dated at Whop's own time for the lesson
       //     (whopActionTime says why). Nothing here counts in `added`: a row
       //     this run wrote is in it already, and an older row's watch half
       //     was counted when it arrived.

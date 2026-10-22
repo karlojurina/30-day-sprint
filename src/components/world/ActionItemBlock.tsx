@@ -34,12 +34,16 @@ const NO_ANSWER = "Couldn't reach the server. Nothing was saved, so try again.";
  * per lesson, so nothing typed carries over to the next lesson.
  *
  * DONE ONLY (`doneOnly`, the owner, 2026-10-22): an action item with nothing
- * to post (isDoneOnly in action-items.ts, the four of AI Ads + Content) has
- * no field, no link and no word of Discord. The Milestone box above says what
- * to do; this block holds one button, Done, which calls `onComplete` as the
- * complete button does, so the same request makes the same writes. Then it
- * says "Completed on <date>." and nothing else, whatever link the row may
- * hold from before. data-hand-in tells the two kinds apart ("link", "done").
+ * to post (isDoneOnly in action-items.ts: DONE_ONLY_ACTION_ITEMS, seven of the
+ * course's ten) has no field, no link and no word of Discord. The Milestone
+ * box above says what to do; this block holds one button, Done, which calls
+ * `onComplete` as the complete button does, so the same request makes the
+ * same writes. Then it says "Completed on <date>." and nothing else, whatever
+ * link the row may hold from before. On a video lesson whose video is not
+ * watched yet Done completes the action half alone, and the line says "Action
+ * completed on <date>. Watch the video to finish the lesson." until it is, as
+ * the other kind's does. data-hand-in tells the two kinds apart ("link",
+ * "done").
  */
 export function ActionItemBlock({
   doneOnly = false,

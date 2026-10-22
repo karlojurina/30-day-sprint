@@ -698,13 +698,15 @@ export async function POST(request: NextRequest) {
       }
       const lesson = lessonResult.data;
 
-      // An action item finished with Done alone (isDoneOnly, the four of AI
-      // Ads + Content) has nothing to hand in, so finished on Whop it is done
-      // in the app: its action half is written in the same write as its
-      // watch half, at the moment the event arrives (action-items.ts,
-      // FINISHED ON WHOP). Every other lesson's write is as it was.
+      // An action item finished with Done alone (isDoneOnly, the list in
+      // action-items.ts) has nothing to hand in, so finished on Whop it is
+      // done in the app: its action half is written in the same write as its
+      // watch half, at the moment the event arrives, on a row that has none
+      // (action-items.ts, FINISHED ON WHOP). Every other lesson's write is as
+      // it was.
       const arrivedAt = new Date().toISOString();
-      const actionHalf = isDoneOnly(lesson.id) ? { action_completed_at: arrivedAt } : {};
+      const doneOnly = isDoneOnly(lesson.id);
+      const actionHalf = doneOnly ? { action_completed_at: arrivedAt } : {};
 
       // Writes the row when there is none; the database stamps completed_at
       // with the moment it arrives. `.select` returns only a row it added.
@@ -734,17 +736,28 @@ export async function POST(request: NextRequest) {
 
       // A row was there already (a skip, a saved Discord link, an action done
       // before its video): finish its watch half the way the backfill does
-      // (watch-sync.ts, 3b), and a Done-only action item's action half with
-      // it. It used to be dropped. A row already watched keeps its time.
+      // (watch-sync.ts, 3b). It used to be dropped. A row already watched
+      // keeps its time. A Done-only action item's row with no action half
+      // gets it in the same write; one whose action half is in (Done pressed
+      // before the video was watched) is left by that write and gets the
+      // watch half alone from the next, the write every other lesson gets,
+      // so the student's Done keeps its time.
       let finished = (inserted?.length ?? 0) > 0;
-      if (!finished) {
-        const { data: promoted, error: promoteError } = await supabase
+      const finishes: Array<{ fields: Record<string, string | null>; actionHalfEmpty: boolean }> = [
+        ...(doneOnly
+          ? [{ fields: { completed_at: arrivedAt, skipped_at: null, action_completed_at: arrivedAt }, actionHalfEmpty: true }]
+          : []),
+        { fields: { completed_at: arrivedAt, skipped_at: null }, actionHalfEmpty: false },
+      ];
+      for (const f of finished ? [] : finishes) {
+        let finish = supabase
           .from("student_lesson_completions")
-          .update({ completed_at: arrivedAt, skipped_at: null, ...actionHalf })
+          .update(f.fields)
           .eq("student_id", student.id)
           .eq("lesson_id", lesson.id)
-          .is("completed_at", null)
-          .select("id");
+          .is("completed_at", null);
+        if (f.actionHalfEmpty) finish = finish.is("action_completed_at", null);
+        const { data: promoted, error: promoteError } = await finish.select("id");
         if (promoteError) {
           // 500 so Whop retries, as for the insert above.
           console.error(
@@ -755,7 +768,10 @@ export async function POST(request: NextRequest) {
             { status: 500 },
           );
         }
-        finished = (promoted?.length ?? 0) > 0;
+        if ((promoted?.length ?? 0) > 0) {
+          finished = true;
+          break;
+        }
       }
       console.info(
         `[whop-webhook] completion upserted: student=${student.id} lesson=${lesson.id} (whop_user=${whopUserId}, whop_lesson=${whopLessonId}) finished_now=${finished}`

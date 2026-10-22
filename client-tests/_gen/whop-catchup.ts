@@ -36,13 +36,17 @@
  * or visit evaluates the badges against the true days, and the crons read the
  * rows.
  *
- * DONE-ONLY ACTION ITEMS (isDoneOnly in world/action-items.ts, the four of
- * AI Ads + Content, 2026-10-22). Nothing is handed in for them, so finished
- * on Whop they are done in the app: a row the run adds or finishes for one
- * carries the action half at the same time as the watch half, and a row of
- * one that already holds the watch half alone (a Whop writer's, before
- * 2026-10-22) gets the action half at Whop's time for the lesson
- * (whopActionTime). Every such row is in the change log's actions_finished,
+ * DONE-ONLY ACTION ITEMS (isDoneOnly and DONE_ONLY_ACTION_ITEMS in
+ * world/action-items.ts, 2026-10-22). Nothing is handed in for them, so
+ * finished on Whop they are done in the app: a row the run adds or finishes
+ * for one carries the action half at the same time as the watch half, and a
+ * row of one that already holds the watch half alone (a Whop writer's, from
+ * before the item was on the list) gets the action half at Whop's time for
+ * the lesson (whopActionTime). A row it finishes whose action half is in
+ * (Done pressed before the video was watched) keeps that half and gets the
+ * watch half alone, as any action item's row; and a row whose action half
+ * the student filled after the read is left for the next pass. Every row
+ * whose action half the run wrote is in the change log's actions_finished,
  * [row id, action_completed_at], so the undo can clear the half it wrote; an
  * action half written alone adds no row and ticks no streak.
  *
@@ -521,16 +525,18 @@ export async function runWhopCatchup(
 
     // 4. The plan: a row for a lesson with none, a finish for a row without a
     //    time, and the action half for a Done-only action item's row that
-    //    has the watch half alone.
+    //    has the watch half alone. A finish carries the action half only for
+    //    a Done-only action item's row that has none (`withAction`).
     const rowByLesson = new Map(existing.map((r) => [r.lesson_id, r]));
     const toInsert: Array<{ lessonId: string; time: RowTime }> = [];
-    const toPromote: Array<{ row: CompletionRow; time: RowTime }> = [];
+    const toPromote: Array<{ row: CompletionRow; time: RowTime; withAction: boolean }> = [];
     const toFinishAction: Array<{ row: CompletionRow; at: string }> = [];
     for (const [lessonId, time] of matched) {
       const r = rowByLesson.get(lessonId);
       if (!r) toInsert.push({ lessonId, time });
-      else if (r.completed_at == null) toPromote.push({ row: r, time });
-      else if (isDoneOnly(lessonId) && r.action_completed_at == null) {
+      else if (r.completed_at == null) {
+        toPromote.push({ row: r, time, withAction: isDoneOnly(lessonId) && r.action_completed_at == null });
+      } else if (isDoneOnly(lessonId) && r.action_completed_at == null) {
         toFinishAction.push({ row: r, at: whopActionTime(time.source === "whop" ? time.iso : null, r.completed_at, nowMs) });
       }
     }
@@ -544,7 +550,7 @@ export async function runWhopCatchup(
       rows.promoted += toPromote.length;
       rows.actions_finished +=
         toInsert.filter((x) => isDoneOnly(x.lessonId)).length +
-        toPromote.filter((p) => isDoneOnly(p.row.lesson_id)).length +
+        toPromote.filter((p) => p.withAction).length +
         toFinishAction.length;
     } else {
       let writeFailed = false;
@@ -598,13 +604,16 @@ export async function runWhopCatchup(
         }
       }
       for (const p of writeFailed ? [] : toPromote) {
-        const doneOnly = isDoneOnly(p.row.lesson_id);
-        const { data, error } = await supabase
+        // With the action half, only while the row still has none: a Done
+        // the student pressed since the read is never written over (the row
+        // is then left for the next pass, which finishes its watch half alone).
+        let finish = supabase
           .from("student_lesson_completions")
-          .update({ completed_at: p.time.iso, skipped_at: null, ...(doneOnly ? { action_completed_at: p.time.iso } : {}) })
+          .update({ completed_at: p.time.iso, skipped_at: null, ...(p.withAction ? { action_completed_at: p.time.iso } : {}) })
           .eq("id", p.row.id)
-          .is("completed_at", null)
-          .select("id");
+          .is("completed_at", null);
+        if (p.withAction) finish = finish.is("action_completed_at", null);
+        const { data, error } = await finish.select("id");
         if (error) {
           writeFailed = true;
           break;
@@ -613,7 +622,7 @@ export async function runWhopCatchup(
           changes.promoted.push([p.row.id, p.row.skipped_at ?? null, p.time.iso]);
           rows.promoted += 1;
           added.push(p.time);
-          if (doneOnly) {
+          if (p.withAction) {
             changes.actions_finished.push([p.row.id, p.time.iso]);
             rows.actions_finished += 1;
           }

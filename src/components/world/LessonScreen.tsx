@@ -64,12 +64,13 @@ import u from "@/components/world/world-ui.module.css";
  *
  * AN ACTION ITEM (requires_action) gets its hand-in last, under the text (or
  * under the Milestone box when there is no text): the Discord link, Save, and
- * the complete button (ActionItemBlock.tsx); for one of the four with nothing
- * to post (isDoneOnly, AI Ads + Content, 2026-10-22) a Done button alone,
- * which completes it the same way. On a lesson with no video the
- * button completes the lesson, and "Next lesson" lights the moment the context
- * says it is done. On a video lesson it completes the action half, and the
- * lesson is done once the video is watched too; "Next lesson" lights as soon
+ * the complete button (ActionItemBlock.tsx); for one with nothing to post
+ * (isDoneOnly, 2026-10-22: the four of AI Ads + Content and three of Static
+ * Ads) a Done button alone, which completes it the same way. On a lesson with
+ * no video the button completes the lesson, and "Next lesson" lights the
+ * moment the context says it is done. On a video lesson it completes the
+ * action half, Done as well, and the lesson is done once the video is
+ * watched too; "Next lesson" lights as soon
  * as the video is watched (its watch half in, from the app or from Whop),
  * while the hand-in stays open in the block (isPassed in map-model.ts,
  * 2026-10-19). A lesson that can't be finished here at all (a watch

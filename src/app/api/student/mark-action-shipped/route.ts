@@ -36,8 +36,10 @@ import {
  * decision is actionWrite() in src/lib/world/action-items.ts.
  *
  * On the new course it completes an action item only once its Discord link
- * is saved, except a Done-only one (isDoneOnly, the four of AI Ads + Content
- * since 2026-10-22), whose page has a Done button and no link field.
+ * is saved, except a Done-only one (isDoneOnly, the list in action-items.ts
+ * since 2026-10-22), whose page has a Done button and no link field. On one
+ * with a video Done writes the action half alone, as the button of any watch
+ * lesson does: the video's half comes only from watching it.
  *
  * A write that fails is answered as a failure, never as a success. Before
  * the cutover the completions table references `lessons(id)` only, so a
@@ -125,11 +127,11 @@ export async function POST(request: NextRequest) {
   // without the page cannot complete one. The old course is left exactly as
   // it was, and there undoing needs no link.
   //
-  // Except the Done-only action items (the four of AI Ads + Content, the
-  // owner, 2026-10-22: isDoneOnly in action-items.ts): nothing is posted for
-  // them, so they complete with no link saved. A link on their row, or one
-  // sent in the body, is never read here: the write below is the same either
-  // way, and the row keeps whatever link it had.
+  // Except the Done-only action items (the owner, 2026-10-22: isDoneOnly and
+  // DONE_ONLY_ACTION_ITEMS in action-items.ts): nothing is posted for them,
+  // so they complete with no link saved. A link on their row, or one sent in
+  // the body, is never read here: the write below is the same either way, and
+  // the row keeps whatever link it had.
   if (shipped && CATALOG_IS_V2) {
     // .single() answers "no row" with PGRST116, which is not a failure.
     if (existingError && existingError.code !== "PGRST116") {

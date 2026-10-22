@@ -200,8 +200,10 @@ export interface StudentDetail {
   /**
    * Every action item of the course with what the drawer says of it
    * (actionItemStatus): "Handed in" with its Discord link, or "Done" for one
-   * with nothing to post (isDoneOnly, the four of AI Ads + Content), whose
-   * link is always null; "Not yet" until the action is done.
+   * with nothing to post (isDoneOnly, DONE_ONLY_ACTION_ITEMS in
+   * action-items.ts), whose link is always null; "Not yet" until the action is
+   * done. On a lesson with a video the word is the action's, whether or not
+   * the video is watched, for both kinds.
    */
   actionItems: Read<Array<{ id: string; title: string; shipped: boolean; status: ActionItemStatus; link: string | null }>>;
   discount: Read<{ status: string; text: string; tone: DiscountTone; code: string | null; askedAt: string } | null>;
@@ -296,7 +298,7 @@ export function buildStudentDetail(
       .map((l) => {
         const c = completions.find((x) => x.lesson_id === l.id);
         const shipped = Boolean(c?.action_completed_at) || Boolean(c?.completed_at && l.type === "action");
-        // A Done-only action item has nothing posted: no link is shown, even one saved before 2026-10-22.
+        // A Done-only action item has nothing posted: no link is shown, even one saved before it was on the list.
         const doneOnly = isDoneOnly(l.id);
         return {
           id: l.id,

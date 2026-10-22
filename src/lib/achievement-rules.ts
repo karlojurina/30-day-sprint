@@ -50,7 +50,8 @@ export interface FinishRow {
  *
  * One action half is not a press: the Whop writers give an action item
  * finished with Done alone (isDoneOnly in world/action-items.ts) that Whop
- * lists as finished its action half: the webhook at its watch half's moment,
+ * lists as finished its action half when the row has none (a press already
+ * there is kept): the webhook at its watch half's moment,
  * the backfill and the catch-up at Whop's own time for the lesson
  * (whopActionTime there). Such a row counts on the day of its watch half when
  * that half is a real finish or carries the same time, and on no day when a

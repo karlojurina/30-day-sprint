@@ -1021,6 +1021,16 @@ export const MORNING_BASE = {
  * top that rises and falls; a rose lilac haze at Base Camp for first light
  * on the peaks; the lake's band thinning and thickening along the water; the
  * Glowing Forest's first mist, at the far trunks' feet.
+ *
+ * The third round's numbers in the rows were read at the page's full bottom
+ * shade. Since the same day the morning halves it (WorldV6.tsx
+ * MORNING_SHADE), so a bank low in the frame keeps more of its light; each
+ * row's last lines give it as the page shows it (renders of the page with its
+ * interface, 1691 x 1278, 07:30 against 15:00, the real GPU, on the code the
+ * morning posters were rendered from), with how far the view sits from its
+ * day at the size the owner saw the sheet on a phone (mean CIELAB dE76 at 420
+ * px wide, the top bar and the dock left out), against the tuned morning
+ * before the haze, which he found too close to the day.
  */
 export const MORNING_LOOK = {
   // Haze pass: the lobe 0.3 -> 0.6, the haze and the mist warmer toward the sun.
@@ -1056,6 +1066,10 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // reaches 100 over the water), so the bank lies in drifts along the shore;
   // the side turned from the sun cools only 0.15 of the way to the haze, so
   // the whole bank reads as lit cream.
+  // At the half shade: the bank on the shore 184 luma (sat 0.12; 64 by day),
+  // its brightest fifth 203, its top a 66 to 101 luma step inside 40 px; the
+  // tree tops above it 129 and the forest band 144 at sat 0.03 (95 and 120 by
+  // day). From the day dE 14.7 (10.0 before the haze).
   "opening-gold": {
     dial: 1,
     look: {
@@ -1081,6 +1095,10 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // luma step where it was 26 to 52. The haze a step bluer and stronger
   // (0xc6d0ee), so the air that is left reads as blue distance (the far
   // forest hue 232, it was 261).
+  // At the half shade: the bank's top 192 luma (68 by day), a 42 to 77 luma
+  // step under the tree tops (146); the far forest 157 at sat 0.05 (147 at
+  // 0.29 by day); the peak 189 at hue 15, the meadow's gold kept (sat 0.51).
+  // From the day dE 17.4 (10.0 before the haze).
   "afternoon-gold": {
     dial: 1,
     light: { haze: 0xc6d0ee },
@@ -1108,6 +1126,10 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // cools only 0.3 of the way to it). A rosier one (0xe2cad6, about a third
   // of the Gorge's rose) lit the peaks a step pinker, but the frame came out
   // 7.0 bluer than red over the day's, under the morning stop gate's 8.
+  // At the half shade: the left valley's bank, its brightest fifth 205 luma
+  // (137 by day); the left hill 130, an olive (hue 49, sat 0.17; 0.50 by
+  // day); the peaks as above (they sit over the shade). From the day dE 15.6
+  // (8.6 before the haze).
   afternoon: {
     dial: 1,
     light: { haze: 0xdecce0 },
@@ -1136,6 +1158,10 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // (it was 68), so the bank rises out of the page's bottom shade and the
   // valley's trees stand deeper in it (its brightest fifth 189); it still
   // starts at 420, so the near rocks, the red pine and the log stay crisp.
+  // At the half shade: the bank's brightest fifth 206 luma (97 by day), its
+  // lower part 168, its top a step of up to 99 luma in 40 px; the near rocks,
+  // the red pine and the log 95 at sat 0.36. From the day dE 14.7 (9.7
+  // before the haze).
   "late-afternoon": {
     dial: 1,
     light: { hemiGround: 0x5c4c40 },
@@ -1176,6 +1202,10 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // warm white (0xfff2e6) whose side turned from the sun stays white (cool
   // 0.1), a touch denser (0.95): the body 151 luma at sat 0.09, the top a
   // 52 to 82 luma step inside 30 px across the gorge (it was 21 to 45).
+  // At the half shade: the body 191 luma at sat 0.10 (72 by day), its top's
+  // brightest fifth 219, the top a 64 to 97 luma step inside 30 px; the range
+  // 122 at hue 2, sat 0.20 (rose); the hut and the trail 61, crisp. From the
+  // day dE 21.4 (20.8 before the haze: this view's day is a coral evening).
   "gorge-sunset": {
     dial: 1,
     light: { sunColor: 0xffcf96, skyHorizon: 0xf6cac4, haze: 0xe8aca4, sunGlow: 0xffc49a, cloudTop: 0xffe2cc, hemiGround: 0x5c4c40 },
@@ -1220,6 +1250,10 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
   // glow toward the sun stronger (sunLobe 0.45), keeping the haze at hue
   // 325. A cream gold (0xffdcb4) was tried and read as sandbanks on the
   // water. The band 198 luma at sat 0.10, its brightest fifth 221.
+  // At the half shade the same (the band sits over the shade): the band 198
+  // (106 by day), its top an 85 to 135 luma step inside 30 px, the far forest
+  // 84 at sat 0.13, the nearer mirror 136. From the day dE 26.1 (22.9 before
+  // the haze).
   sunset: {
     dial: 1,
     light: { skyMid: 0xd0c8ec, skyHorizon: 0xf6c8c0, skyGlow: 0xffd8b0, haze: 0xd1abc1, water: 0x4c6684 },
@@ -1248,6 +1282,10 @@ export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
     // the right-hand trees (their brightest fifth 192 and 162 luma, they were
     // 142 and 137), the trunks dark above it, the near floor (23 luma) and
     // the glow path as they were.
+    // At the half shade: the layer's brightest fifth 202 left of the clearing
+    // and 171 behind the right-hand trees (109 and 100 by day), the far
+    // trunks' feet across the frame 125; the near floor 22. From the day dE
+    // 17.1 (13.6 before the haze).
     look: {
       mist: 0.85, mistDepth: 85, mistSoft: 14, mistWave: 25, mistNear: 600, mistFar: 1100, mistColor: 0xf6f0f2,
       mistCool: 0.4, mistGlow: 0.6, air: 0.6, airLift: 80, airFall: 250,

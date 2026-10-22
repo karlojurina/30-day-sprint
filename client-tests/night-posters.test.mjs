@@ -139,12 +139,13 @@ for (const [href, name] of PAGES) {
 const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 // The dawn's line (0.36 since the morning's tune pass; 0.38 before) puts the switch at 05:35:41.
 ok(crossing.dusk === 20 * 60 + 24 && crossing.dawn === 5 * 60 + 35, `on /world the night posters from the minute ${hm(crossing.dusk)} to ${hm(crossing.dawn)}`)
-ok(crossing.mornFrom === 5 * 60 + 36 && crossing.mornTo === 9 * 60 + 31, `and the morning posters from the minute ${hm(crossing.mornFrom)} to ${hm(crossing.mornTo)}`)
+// The morning's line (0.54 since the morning haze; 0.47 before) puts the day's posters back at 09:28:24 (09:31:13 before).
+ok(crossing.mornFrom === 5 * 60 + 36 && crossing.mornTo === 9 * 60 + 28, `and the morning posters from the minute ${hm(crossing.mornFrom)} to ${hm(crossing.mornTo)}`)
 {
   // Around each crossing, second by second (the clock reads seconds too).
   let off = []
   let seen = 0
-  for (const [h0, m0] of [[20, 22], [5, 33], [9, 29]]) {
+  for (const [h0, m0] of [[20, 22], [5, 33], [9, 27]]) {
     let last = null
     for (let s = 0; s < 180; s++) {
       const ms = at(h0, m0, s)

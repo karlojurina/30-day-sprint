@@ -247,14 +247,24 @@ export type PosterTod = "day" | "morning" | "night";
  *            0.02, twice, and of 0.01), the Landing 0.32, Base Camp to Video
  *            Ads II 0.26 to 0.28, the Mirror Lake 0.36, the forest 0.34. On
  *            the clock: the morning posters from 05:35:41 (05:34:51 before).
+ *            Measured again with the morning haze (2026-10-22): the opening
+ *            0.36 again (steps of 0.02, twice, and of 0.01), the Landing
+ *            0.32, Base Camp 0.26, the Falls 0.30, the Gorge Trail 0.24, the
+ *            Mirror Lake 0.44, the forest 0.34, so the line stays.
  *   morning  the morning over the day (09:00 to 10:00): the opening 0.48
  *            and 0.46 (two runs; the line sits between); after the tune pass
  *            0.48 twice at steps of 0.02 and 0.47 at steps of 0.01, so the
- *            line stays. The Landing 0.46, Base Camp to Video Ads II 0.44 to
- *            0.48, the Mirror Lake 0.36, the forest 0.38. On the clock: the
- *            day posters from 09:31:13.
+ *            line stayed. The Landing 0.46, Base Camp to Video Ads II 0.44 to
+ *            0.48, the Mirror Lake 0.36, the forest 0.38. With the morning
+ *            haze (2026-10-22) the morning frame lies further from the day
+ *            (the opening's mean distance 28.6 levels; the Landing's was 14.9
+ *            and is 29.6) and the line moved: the opening 0.54 (steps of
+ *            0.02, twice, and of 0.01; it was 0.47), the Landing 0.50, Base
+ *            Camp 0.56, the Falls 0.46, the Gorge Trail 0.64, the Mirror Lake
+ *            0.30, the forest 0.38. On the clock: the day posters from
+ *            09:28:24 (09:31:13 before the haze).
  */
-export const POSTER_FROM = { night: 0.34, dawn: 0.36, morning: 0.47 } as const;
+export const POSTER_FROM = { night: 0.34, dawn: 0.36, morning: 0.54 } as const;
 export type PosterFrom = { readonly night: number; readonly dawn: number; readonly morning: number };
 /** The night's line over the day (POSTER_FROM.night), as the night posters have used it since 2026-10-21. */
 export const POSTER_NIGHT_FROM = POSTER_FROM.night;

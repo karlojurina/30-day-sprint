@@ -852,7 +852,9 @@ When adding a new table, append it here. When deleting a field, scan
   `watch-sync.ts` upsert a row for a lesson matched by
   `whop_lesson_id`, and both finish a row that is already there
   (`completed_at` set, `skipped_at` cleared, `discord_message_link` and
-  `action_completed_at` kept; the webhook since 2026-10-16). v104
+  `action_completed_at` kept; the webhook since 2026-10-16; for the four
+  action items finished with Done alone, below, they write
+  `action_completed_at` too). v104
   archives every row into `archive_v1` and
   empties the table; its undo moves the rows made since into
   `archive_v2` and puts the archived ones back.
@@ -867,7 +869,10 @@ When adding a new table, append it here. When deleting a field, scan
   (`completed_at` set, `skipped_at` cleared, `.is("completed_at", null)`
   on the update). Every row it adds or finishes is in its write answer's
   change log (`changes.inserted`, `changes.promoted`), for an undo. It
-  never writes `discord_message_link` or `action_completed_at`.
+  never writes `discord_message_link`, and since 2026-10-22 it writes
+  `action_completed_at` only for the four action items finished with
+  Done alone (below), each such row listed in
+  `changes.actions_finished` as `[row id, action_completed_at]`.
 - **`completed_at_real` (v112, built 2026-10-21, not on production):**
   true when `completed_at` is the moment the lesson was really finished.
   Written after the row's own write, best-effort (a failure is logged and
@@ -912,6 +917,23 @@ When adding a new table, append it here. When deleting a field, scan
   (`buildStudentDetail` in `src/lib/admin/student-detail.ts`) gives
   their `link` as null and their word as "Done" (`actionItemStatus`).
   Every other reader of the column is unchanged.
+  Finished on Whop, one of the four is done in the app too (the owner's
+  rule: a lesson finished on Whop counts): the three Whop writers above
+  write its `action_completed_at` where the row has none. The webhook
+  writes it in the same write as `completed_at`, at the event's moment,
+  on a row it adds or finishes. `watch-sync.ts` (a login or a visit)
+  writes it after its upsert and its finish, on every matched row of the
+  four with `completed_at` set and no action half, older rows a Whop
+  writer left with the watch half alone included; the catch-up writes it
+  with `completed_at` on a row it adds or finishes and alone on a row
+  with the watch half only. The last two date it at Whop's own time for
+  the lesson (`whopActionTime` in `action-items.ts`), never their own,
+  so Triple Threat (`finishedAt` in `src/lib/achievement-rules.ts`)
+  counts no pull's row on the pull's day. No writer clears it.
+  `isLessonComplete`, `lesson_is_complete` and the views that read it
+  are unchanged: the row has both halves. The other six action items
+  are untouched: a Whop writer gives them `completed_at` alone, as
+  before.
 
 ### `student_lesson_watch` (v93)
 - **Owner:** the lesson video player under `/world` (branch

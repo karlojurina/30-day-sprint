@@ -130,7 +130,17 @@ from the planned ones instead of the rows written, and no pace after a failed
 read. The sections added in its fix round fail on each of those 6, and on 8
 breaks of the two rules that round added (the read limit, and no tick for a
 streak that already counts today). `streak.test.mjs` runs the catch-up's one
-streak rule too.
+streak rule too. Since 2026-10-22 a section holds the four action items
+finished with Done alone (`isDoneOnly`) beside `a5l22`, which keeps its link:
+dry counts, then a write that adds one of the four with both halves at Whop's
+time, finishes one with a link saved before (the link kept), gives one that
+holds a login's watch half the action half alone at Whop's time, leaves one
+done in the app and `a5l22`'s action half alone, and dates both halves at the
+run's clock when Whop gives no time; Triple Threat's `finishedAt` on the rows,
+the change log's `actions_finished`, a second pass that writes nothing, the
+undo from the change log putting every row back as the snapshot holds it, and
+a failed write of the action half (that member failed, the next pass writes
+it, and no member counted as getting rows for it).
 
 `achievements-v112.test.mjs` (2026-10-21, the badges for the new course,
 migration v112) runs every rule v112 changed on the real files:
@@ -199,6 +209,25 @@ four, Done never offered, the block ignoring the kind, showing a field or
 another word on the button, the lesson page never passing the kind, the
 drawer showing the link, saying Handed in or keeping its own words), and the
 suite failed every time.
+
+Its section 6 (the same day, the adversarial check's should-fix: a lesson
+finished on Whop counts in the app) runs the Whop webhook and the backfill
+(`watch-sync.ts`, what a login and a visit run), both copied by `build.mjs`,
+on the same stand-in with made-up Whop ids. The webhook gives `a6l03` both
+halves at the moment it arrives (the steps after a lesson once, a retry
+nothing) and `a6l10`, with a link saved before, both halves with the link
+kept; `a5l22` gets the watch half alone as before, and a row of the four that
+already holds the watch half alone is left to the backfill. The backfill adds
+`a6l03` with the action half at Whop's time, and the real map then opens
+`a6l04`; in one visit with three of the four, `a5l22` and an older row of
+`a6l17`, it counts 4 rows as new (not the older row), dates each action half
+at Whop's time, fills the older row's, leaves `a5l22` waiting, and the real
+badge engine gives Took the Shot and no Triple Threat, where the same rows with
+the sync's own time would make 3 on one day. Also `whopActionTime` itself, a
+lesson Whop lists twice, and a failed read or write of the four's rows (an
+error on the sync row, then filled at the next visit). Each of 21 rules of the
+three writers and `whopActionTime` was broken once, and `done-only`,
+`whop-catchup`, `whop-webhook` or `whop-backfill` failed every time.
 
 The crons (bug hunt of 19 October) run with less stood in than the routes
 above: `engagement-alerts.test.mjs` copies the real route, `discord.ts`,

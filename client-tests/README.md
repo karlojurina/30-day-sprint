@@ -165,6 +165,41 @@ run's clock or nothing), and the suite failed every time. Since then
 them (with no switch it is the old rule); Triple Threat and the eight taken
 out are left out of it.
 
+`done-only.test.mjs` (2026-10-22, the owner's ask: the four action items of
+AI Ads + Content need no Discord link, only Done) holds the change on the
+real files. The list (`DONE_ONLY_ACTION_ITEMS` and `isDoneOnly` in
+`action-items.ts`) against `course_catalog.json`: the four are exactly the
+action items of AI Ads + Content, every one a setup lesson, and the other
+six are the course's other action items; no other file in `src/` writes the
+four ids in a string (the admin dev page's made-up student who did `a6l03`
+aside). The lesson page's block, `ActionItemBlock.tsx`, compiled here as
+Next compiles it into `_gen/done-only-block.mjs` (the CSS module stood in by
+a proxy that names each class by its own name) and rendered by React's
+server renderer: the Done kind before, with a link saved before the change
+and after Done (one button, Done, then "Completed on <date>." and nothing
+else, never a field, a link or a word of Discord), and the Discord kind as
+it was. `mark-action-shipped` through its own `POST` on the new course: each
+of the four completes with no link and the same steps after it; each of the
+other six without a link is refused with `PASTE_LINK_FIRST`, its video
+watched or not, and with a link goes through; a link already on a row of
+the four is kept, one sent in the body is never written, an undo is refused
+and a failed read is a 500. `save-action-link`, copied by `build.mjs` for
+this suite, still stores a link sent for one of the four. After Done, the
+row is complete by `isLessonComplete`, the real `update-streak.ts` counts the
+day (and only once), the real `evaluateAchievements` gives what a hand-in
+with a link gives, and the real map (`catalog.ts`, `map-model.ts`, on the
+whole course) moves the next lesson from `a6l03` to `a6l04`. The journey's
+drawer (`buildStudentDetail`, `actionItemStatus`) says "Done" with no link
+for the four, a link saved before the change included, and "Handed in" with
+it for the others. Each of 16 rules was broken once (the list ignored, one
+of the four left out, a link item put in, the route asking every action item
+or none for a link, the route skipping its failed read for the four or
+storing a link sent in the body, the view reading the link of one of the
+four, Done never offered, the block ignoring the kind, showing a field or
+another word on the button, the lesson page never passing the kind, the
+drawer showing the link, saying Handed in or keeping its own words), and the
+suite failed every time.
+
 The crons (bug hunt of 19 October) run with less stood in than the routes
 above: `engagement-alerts.test.mjs` copies the real route, `discord.ts`,
 `cron-auth.ts`, `dm-toggles.ts` and `supabase-server.ts`, so the database is

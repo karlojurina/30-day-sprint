@@ -894,6 +894,24 @@ When adding a new table, append it here. When deleting a field, scan
   catalog `mark-action-shipped` never clears an action item:
   `shipped: false` is refused (T-079), and `toggle-lesson` writes no
   new-course action item.
+- **The action items with nothing to post (2026-10-22, branch
+  `night/action-done`, not on production):** the four of AI Ads +
+  Content, `a6l03`, `a6l10`, `a6l17` and `a6l19`, are the one exception
+  to the link rule above. The list is `DONE_ONLY_ACTION_ITEMS` in
+  `src/lib/world/action-items.ts`, by lesson id, and nothing in the
+  database says it: no column, no migration. `mark-action-shipped`
+  completes them with no `discord_message_link` on the row, with the same
+  write (`completed_at` and `action_completed_at` both set, a setup
+  lesson), the same streak day, last active, CSM hooks, badges and task
+  re-evaluation as any action item. It never writes
+  `discord_message_link`: a link already on such a row (saved before
+  2026-10-22) is kept, and a link in the request body is never read.
+  `save-action-link` still stores a link sent for one of them, though the
+  lesson page sends none. Readers: the lesson page never shows a link for
+  them (`actionItemView` reads none), and the journey's drawer
+  (`buildStudentDetail` in `src/lib/admin/student-detail.ts`) gives
+  their `link` as null and their word as "Done" (`actionItemStatus`).
+  Every other reader of the column is unchanged.
 
 ### `student_lesson_watch` (v93)
 - **Owner:** the lesson video player under `/world` (branch

@@ -26,7 +26,86 @@
  * is a watch lesson since migration v74), and the routes only take the second
  * reading on the new course's catalog, so the live app writes exactly what it
  * wrote before.
+ *
+ * DONE WITH NO LINK (the owner, 2026-10-22). Some action items have nothing
+ * to post: the student does them and sends nothing to a coach. The four of
+ * AI Ads + Content (study the winning AI ads, choose a visual style, step
+ * away and think, take a piece of content apart) and three of Static Ads (The
+ * Backbone, Imitation, the Brand Deck). Their block is a Done button and no
+ * link field, and the button writes what the complete button writes: on a
+ * lesson with no video both halves, so Done finishes it; on one with a video
+ * (The Backbone, Imitation) the action half alone, and the lesson is done
+ * once its video is watched too, in either order, as an action item with a
+ * link is. Done never writes the video's half. mark-action-shipped completes
+ * them with no link saved, and the admin drawer says Done and shows no link.
+ * Every other action item still needs its link: Static Ads' Static Ad Brief,
+ * which the coaches review, and Video Ads I's two. DONE_ONLY_ACTION_ITEMS
+ * below is the one list.
+ *
+ * FINISHED ON WHOP. A lesson finished on Whop counts in the app as one
+ * finished in the app (the owner's standing rule). A Done-only action item has
+ * nothing to hand in, so finishing it on Whop finishes it: the three writers
+ * that bring Whop's finished lessons in (the webhook, the backfill a login or
+ * a visit runs, the team's catch-up) give its row the action half with the
+ * watch half where the row has none, and the backfill and the catch-up also
+ * fill the action half of a row a Whop writer left with the watch half alone
+ * before the item was on the list. An action half already on the row (Done
+ * pressed before the video was watched) is kept. The watch half still comes
+ * only from what Whop reports for that lesson, as for every lesson.
+ * isLessonComplete and the database's progress view are unchanged: the row
+ * has both halves. The other three still need their link and their button.
  */
+
+/**
+ * The action items finished with Done alone, by lesson id, in
+ * supabase/catalog/course_catalog.json: three of Static Ads (a5l08 The
+ * Backbone and a5l12 Imitation, each with a video, and a5l22 the Brand Deck,
+ * a setup lesson) and the four of AI Ads + Content (a6l03, a6l10, a6l17,
+ * a6l19, setup lessons). The list lives here, beside the rules that read it,
+ * so it ships with the code: a column in the catalog would need a migration
+ * pasted by hand and code that works before and after the paste. The ids are
+ * the course's own (the old course's run from l001 to l078, so none of them
+ * is one of these), and client-tests/done-only.test.mjs fails when the
+ * catalog no longer has these seven as those action items, or when a5l23
+ * (the Static Ad Brief), a3l17 and a3l25 stop being the course's other three.
+ */
+export const DONE_ONLY_ACTION_ITEMS: ReadonlySet<string> = new Set([
+  "a5l08",
+  "a5l12",
+  "a5l22",
+  "a6l03",
+  "a6l10",
+  "a6l17",
+  "a6l19",
+]);
+
+/** Is this action item finished with Done alone, with no Discord link? */
+export function isDoneOnly(lessonId: string | null | undefined): boolean {
+  return typeof lessonId === "string" && DONE_ONLY_ACTION_ITEMS.has(lessonId);
+}
+
+/**
+ * The time the backfill and the catch-up give the action half of a Done-only
+ * action item they find finished on Whop: Whop's own time for the lesson (the
+ * interaction's created_at, when the student opened it there, the time the
+ * catch-up already writes as the lesson's finish), or the row's completed_at
+ * when Whop gives none that reads as a time, or one later than `nowMs`.
+ *
+ * Never the moment of the write. Triple Threat reads action_completed_at as
+ * the moment an action item was finished (finishedAt in achievement-rules.ts).
+ * A login or visit sync stamps completed_at with its own time and marks it as
+ * no real finish, so its rows count on no day; an action half at the sync's
+ * time would count every Done-only action item that sync brings in on the
+ * sync's day. At Whop's time, which is before the sync's completed_at, the
+ * row counts on no day, as every other row of that sync. On a row whose
+ * completed_at is a real finish (the webhook's, the catch-up's with Whop's
+ * time) it counts on that day. When Whop gives no usable time the action half
+ * is the row's own completed_at, and the row then counts on that day.
+ */
+export function whopActionTime(whopTime: string | null | undefined, completedAt: string, nowMs: number): string {
+  const t = typeof whopTime === "string" ? Date.parse(whopTime) : NaN;
+  return Number.isFinite(t) && t <= nowMs ? new Date(t).toISOString() : completedAt;
+}
 
 /** The old route's pattern, unchanged. Also the database's CHECK constraint (v28). */
 export const DISCORD_MESSAGE_LINK_RE =
@@ -39,7 +118,8 @@ export const DISCORD_LINK_ERROR =
 /**
  * Said when there is no link yet: by the lesson page when Save is pressed with
  * nothing in the field, and by mark-action-shipped when the new course's
- * complete button arrives with no link saved. One sentence for both.
+ * complete button arrives with no link saved (never for a Done-only action
+ * item). One sentence for both.
  */
 export const PASTE_LINK_FIRST = "Paste the link to your Discord message first.";
 
@@ -181,12 +261,13 @@ export type ActionItemState = "empty" | "saved" | "completed";
 
 export interface ActionItemView {
   state: ActionItemState;
-  /** The saved link, or null. */
+  /** The saved link, or null. Always null on a Done-only action item. */
   link: string | null;
   /**
    * The complete button can be pressed: a link is saved and the action is not
    * done. The old app's rule (LessonSheet, canShip): the link first, and the
-   * video does not have to be watched first.
+   * video does not have to be watched first. A Done-only action item needs no
+   * link: its Done button can be pressed until the action is done.
    */
   canComplete: boolean;
   /** When the action was done, or null. */
@@ -198,18 +279,23 @@ export interface ActionItemView {
 /**
  * The block's state from the student's row for the lesson (null when there is
  * none). `separateWatchHalf`: whether the lesson's other half comes from
- * watching (watchHalfIsSeparate).
+ * watching (watchHalfIsSeparate). `doneOnly`: the action item is finished with
+ * Done alone (isDoneOnly), so a link on its row (one saved before the item was
+ * on the list) is never read: it is "empty" until Done, then "completed",
+ * never "saved". On one with a video, Done pressed before the video is watched
+ * leaves it waiting on the video, as the other kind's button does.
  */
 export function actionItemView(
   row: (CompletionHalves & { discord_message_link?: string | null }) | null | undefined,
   separateWatchHalf: boolean,
+  doneOnly = false,
 ): ActionItemView {
-  const link = row?.discord_message_link && row.discord_message_link.length > 0 ? row.discord_message_link : null;
+  const link = !doneOnly && row?.discord_message_link && row.discord_message_link.length > 0 ? row.discord_message_link : null;
   const completedAt = row?.action_completed_at ?? null;
   return {
     state: completedAt ? "completed" : link ? "saved" : "empty",
     link,
-    canComplete: !completedAt && link !== null,
+    canComplete: !completedAt && (doneOnly || link !== null),
     completedAt,
     waitingOnVideo: completedAt !== null && separateWatchHalf && !row?.completed_at,
   };

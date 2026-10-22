@@ -852,7 +852,9 @@ When adding a new table, append it here. When deleting a field, scan
   `watch-sync.ts` upsert a row for a lesson matched by
   `whop_lesson_id`, and both finish a row that is already there
   (`completed_at` set, `skipped_at` cleared, `discord_message_link` and
-  `action_completed_at` kept; the webhook since 2026-10-16). v104
+  `action_completed_at` kept; the webhook since 2026-10-16; for the seven
+  action items finished with Done alone, below, they write
+  `action_completed_at` too where the row has none). v104
   archives every row into `archive_v1` and
   empties the table; its undo moves the rows made since into
   `archive_v2` and puts the archived ones back.
@@ -867,7 +869,10 @@ When adding a new table, append it here. When deleting a field, scan
   (`completed_at` set, `skipped_at` cleared, `.is("completed_at", null)`
   on the update). Every row it adds or finishes is in its write answer's
   change log (`changes.inserted`, `changes.promoted`), for an undo. It
-  never writes `discord_message_link` or `action_completed_at`.
+  never writes `discord_message_link`, and since 2026-10-22 it writes
+  `action_completed_at` only for the seven action items finished with
+  Done alone (below), only where the row has none, each such row listed
+  in `changes.actions_finished` as `[row id, action_completed_at]`.
 - **`completed_at_real` (v112, built 2026-10-21, not on production):**
   true when `completed_at` is the moment the lesson was really finished.
   Written after the row's own write, best-effort (a failure is logged and
@@ -894,6 +899,53 @@ When adding a new table, append it here. When deleting a field, scan
   catalog `mark-action-shipped` never clears an action item:
   `shipped: false` is refused (T-079), and `toggle-lesson` writes no
   new-course action item.
+- **The action items with nothing to post (2026-10-22, branch
+  `night/action-done`, not on production):** seven of the ten, the four
+  of AI Ads + Content, `a6l03`, `a6l10`, `a6l17` and `a6l19`, and three
+  of Static Ads, `a5l08`, `a5l12` and `a5l22`, are the one exception to
+  the link rule above; `a3l17`, `a3l25` and `a5l23` keep it. The list is
+  `DONE_ONLY_ACTION_ITEMS` in `src/lib/world/action-items.ts`, by lesson
+  id, and nothing in the database says it: no column, no migration.
+  `mark-action-shipped` completes them with no `discord_message_link` on
+  the row, with the same write as any action item of their type
+  (`actionWrite`: on a setup lesson `completed_at` and
+  `action_completed_at` both set; on `a5l08` and `a5l12`, `watch`
+  lessons with a video, `action_completed_at` alone, `completed_at` left
+  to lesson-watched or a Whop writer), the same streak day, last
+  active, CSM hooks, badges and task re-evaluation. It never writes
+  `discord_message_link`: a link already on such a row (saved before the
+  item was on the list) is kept, and a link in the request body is never
+  read.
+  `save-action-link` still stores a link sent for one of them, though the
+  lesson page sends none. Readers: the lesson page never shows a link for
+  them (`actionItemView` reads none), and the journey's drawer
+  (`buildStudentDetail` in `src/lib/admin/student-detail.ts`) gives
+  their `link` as null and their word as "Done" (`actionItemStatus`).
+  Every other reader of the column is unchanged.
+  Finished on Whop, one of the seven is done in the app too (the owner's
+  rule: a lesson finished on Whop counts): the three Whop writers above
+  write its `action_completed_at` where the row has none. The webhook
+  writes it in the same write as `completed_at`, at the event's moment,
+  on a row it adds or finishes. `watch-sync.ts` (a login or a visit)
+  writes it after its upsert and its finish, on every matched row of the
+  seven with `completed_at` set and no action half, older rows a Whop
+  writer left with the watch half alone included; the catch-up writes it
+  with `completed_at` on a row it adds or finishes and alone on a row
+  with the watch half only. The last two date it at Whop's own time for
+  the lesson (`whopActionTime` in `action-items.ts`), never their own,
+  so Triple Threat (`finishedAt` in `src/lib/achievement-rules.ts`)
+  counts no pull's row on the pull's day. A row whose
+  `action_completed_at` is already set (Done pressed on `a5l08` or
+  `a5l12` before the video) keeps it: there the webhook and the
+  catch-up finish `completed_at` alone, and every write of the action
+  half on a row that is already there, by any of the three, carries
+  `.is("action_completed_at", null)`. Each writer writes `completed_at`
+  only for a lesson Whop lists as finished, as for every lesson. No
+  writer clears it.
+  `isLessonComplete`, `lesson_is_complete` and the views that read it
+  are unchanged: the row has both halves. The other three action items
+  are untouched: a Whop writer gives them `completed_at` alone, as
+  before.
 
 ### `student_lesson_watch` (v93)
 - **Owner:** the lesson video player under `/world` (branch

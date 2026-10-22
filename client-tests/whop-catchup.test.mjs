@@ -24,6 +24,8 @@
 // Every Whop id, email, name, key, secret and course id here is made up.
 import { POST as catchup, maxDuration } from './_gen/whop-catchup-route.ts'
 import { syncWatchProgress } from './_gen/watch-sync.ts'
+import { finishedAt } from './_gen/achievement-rules.ts'
+import { isLessonComplete } from './_gen/progress.ts'
 import { fetchCompletedLessonsAsAdmin as whopRead } from './_gen/whop.ts'
 import { whopNoneFinishedNote } from './_gen/constants.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
@@ -139,10 +141,10 @@ const member = (n, extra = {}) => ({
   last_active_at: '2026-10-15T00:00:00.000Z',
   ...extra,
 })
-function freshDb({ members = [], completions = [], sync = [], milestones = [], streaks = [], config = [RESET] } = {}) {
+function freshDb({ members = [], completions = [], sync = [], milestones = [], streaks = [], config = [RESET], lessons = LESSONS } = {}) {
   const db = new FakeDb({
     students: members,
-    lessons: LESSONS,
+    lessons,
     student_lesson_completions: completions,
     student_whop_sync: sync,
     student_milestones: milestones,
@@ -331,8 +333,8 @@ let dry
      'Whop: 9 requests, nothing retried or failed', show(dry.whop))
   ok(same(dry.students, { finished_on_whop: 5, opened_none_finished: 1, nothing_on_whop: 3, already_all_in_app: 0, failed: 0, would_get_rows: 5 }),
      'students: 5 finished on Whop, 1 opened and finished none, 3 with nothing, 5 would get rows', show(dry.students))
-  ok(same(dry.rows, { would_insert: 6, would_promote: 1, not_in_course: 1, time_missing: 1, time_later_than_run: 1, earliest_day: '2026-10-10', latest_day: '2026-10-20' }),
-     'rows: 6 new, 1 skip finished, 1 old-course lesson, 1 time missing and 1 later than the run, from 10 to 20 October', show(dry.rows))
+  ok(same(dry.rows, { would_insert: 6, would_promote: 1, would_finish_actions: 0, not_in_course: 1, time_missing: 1, time_later_than_run: 1, earliest_day: '2026-10-10', latest_day: '2026-10-20' }),
+     'rows: 6 new, 1 skip finished, no Done-only action item, 1 old-course lesson, 1 time missing and 1 later than the run, from 10 to 20 October', show(dry.rows))
   ok(same(dry.pool, { zero_lessons_now: 4, of_them_filled: 3, logged_in_still_zero: 1, last_lesson_3_to_6_days: 1, last_lesson_7_plus_days: 1 }),
      'pool: 4 at zero now, 3 of them filled, 1 logged in and still zero, 1 last lesson 6 days ago, 1 eight days ago', show(dry.pool))
   ok(dry.streak_today === 1 && !('changes' in dry) && !('streak_ticked' in dry), 'one member would get today\'s streak day; a dry answer has no change log', show({ streak_today: dry.streak_today }))
@@ -415,7 +417,7 @@ console.log('\n=== Write: Whop\'s times on the rows, the sync rows as the backfi
   const before = show(db.rows('student_lesson_completions'))
   const again = await call({ mode: 'write' })
   ok(again.body.ok === true && again.body.rows.inserted === 0 && again.body.rows.promoted === 0 && again.body.streak_ticked === 0 &&
-     again.body.students.already_all_in_app === 5 && same(again.body.changes, { inserted: [], promoted: [], streak_ticked: [] }),
+     again.body.students.already_all_in_app === 5 && same(again.body.changes, { inserted: [], promoted: [], actions_finished: [], streak_ticked: [] }),
      'a second full pass adds 0, finishes 0, ticks 0: all 5 members now have everything in the app', show({ rows: again.body.rows, students: again.body.students }))
   ok(show(db.rows('student_lesson_completions')) === before && steps.length === 0, 'and every row and time is as the first pass left it, with no step')
 }
@@ -708,6 +710,205 @@ console.log('\n=== A Whop read still unanswered 285 s into a call: the call answ
   ok(timers.length === 0, 'and once the call has answered, none of its timers is left running', String(timers.length))
 }
 
+console.log('\n=== The action items finished with Done alone: both halves from Whop, the action half alone, the undo ===')
+{
+  // The four of AI Ads + Content (isDoneOnly, 2026-10-22) and a5l23, the
+  // Static Ad Brief, an action item that keeps its Discord link, beside the
+  // course's lessons. Every Whop id and link here is made up.
+  const lessons = [...LESSONS,
+    ...[['a6l03', '03'], ['a6l10', '10'], ['a6l17', '17'], ['a6l19', '19']].map(([id, n]) => ({ id, whop_lesson_id: `lesn_TESTa6${n}`, requires_action: true })),
+    { id: 'a5l23', whop_lesson_id: 'lesn_TESTa523', requires_action: true }]
+  const [K, L] = [11, 12]
+  const LINK = 'https://discord.com/channels/1100000000000000001/1200000000000000002/1300000000000000003'
+  const setup = () => {
+    onWhop = {
+      [W(K)]: [opened(W(K), 'lesn_TESTa603', '2026-10-18T09:00:00.000Z'), opened(W(K), 'lesn_TESTa610', '2026-10-17T09:00:00.000Z'),
+        opened(W(K), 'lesn_TESTa617', '2026-10-16T09:00:00.000Z'), opened(W(K), 'lesn_TESTa619', '2026-10-15T09:00:00.000Z'),
+        opened(W(K), 'lesn_TESTa523', '2026-10-14T09:00:00.000Z')],
+      // Whop gives no time: the run's clock.
+      [W(L)]: [opened(W(L), 'lesn_TESTa603', null)],
+    }
+    return freshDb({
+      lessons,
+      members: [member(K), member(L)],
+      completions: [
+        // A link saved before 2026-10-22, the lesson not finished.
+        { id: 'row-k10', student_id: sid(K), lesson_id: 'a6l10', completed_at: null, action_completed_at: null, discord_message_link: LINK },
+        // A login brought the watch half in before 2026-10-22, at its own time.
+        { id: 'row-k17', student_id: sid(K), lesson_id: 'a6l17', completed_at: '2026-10-19T18:00:00.000Z', action_completed_at: null },
+        // Done in the app.
+        { id: 'row-k19', student_id: sid(K), lesson_id: 'a6l19', completed_at: '2026-10-19T18:30:00.000Z', action_completed_at: '2026-10-19T18:30:00.000Z' },
+      ],
+    })
+  }
+  let db = setup()
+  let r = await call({ mode: 'dry' })
+  ok(r.status === 200 && r.body.ok === true && writes(db).length === 0 &&
+     same(r.body.rows, { would_insert: 3, would_promote: 1, would_finish_actions: 4, not_in_course: 0, time_missing: 1, time_later_than_run: 0, earliest_day: '2026-10-14', latest_day: '2026-10-20' }),
+     'dry: 3 rows to add, 1 to finish, 4 action halves (a6l03 for both members, a6l10 finished, a6l17 alone), nothing written', show(r.body.rows))
+
+  const before = (await call({ mode: 'snapshot' })).body.student_lesson_completions
+  r = await call({ mode: 'write' })
+  const w = r.body
+  const k = (lesson) => rowOf(db, K, lesson)
+  ok(w.ok === true && w.rows.inserted === 3 && w.rows.promoted === 1 && w.rows.actions_finished === 4 && w.streak_ticked === 0 && steps.length === 0,
+     'write: the same counts; no streak day (none was opened today) and no step', show({ rows: w.rows, steps }))
+  ok(k('a6l03')?.completed_at === '2026-10-18T09:00:00.000Z' && k('a6l03').action_completed_at === '2026-10-18T09:00:00.000Z' && k('a6l03').completed_at_real === true,
+     'a6l03 with no row: added with both halves at Whop\'s time, marked as its real finish', show(k('a6l03')))
+  ok(k('a6l10').completed_at === '2026-10-17T09:00:00.000Z' && k('a6l10').action_completed_at === '2026-10-17T09:00:00.000Z' && k('a6l10').discord_message_link === LINK,
+     'a6l10 with a link saved before: finished with both halves at Whop\'s time, the link kept', show(k('a6l10')))
+  ok(k('a6l17').completed_at === '2026-10-19T18:00:00.000Z' && k('a6l17').action_completed_at === '2026-10-16T09:00:00.000Z',
+     'a6l17 with the watch half alone: the action half at Whop\'s time, the watch half keeps the login\'s', show(k('a6l17')))
+  ok(k('a6l19').completed_at === '2026-10-19T18:30:00.000Z' && k('a6l19').action_completed_at === '2026-10-19T18:30:00.000Z',
+     'a6l19, done in the app: untouched', show(k('a6l19')))
+  ok(k('a5l23')?.completed_at === '2026-10-14T09:00:00.000Z' && k('a5l23').action_completed_at === null,
+     'a5l23, an action item that keeps its link: the watch half only, as before', show(k('a5l23')))
+  const l03 = rowOf(db, L, 'a6l03')
+  ok(l03?.completed_at === l03?.action_completed_at && l03.completed_at > NOW && l03.completed_at_real !== true,
+     'Whop gave no time: both halves at the run\'s clock, not marked as a real finish', show(l03))
+  const lesson = (id) => ({ id, requires_action: true })
+  ok(['a6l03', 'a6l10', 'a6l17', 'a6l19'].every((id) => isLessonComplete({ lesson_id: id, skipped_at: null, ...k(id) }, lesson(id))) &&
+     !isLessonComplete({ lesson_id: 'a5l23', skipped_at: null, ...k('a5l23') }, lesson('a5l23')),
+     'each of the four is done by isLessonComplete; a5l23 still waits for its link and its button')
+  const real = (row) => ({ ...row, completed_at_real: row.completed_at_real === true })
+  ok(finishedAt(real(k('a6l03')), true) === Date.parse('2026-10-18T09:00:00.000Z') && finishedAt(real(k('a6l17')), true) === null,
+     'Triple Threat: a6l03 counts on the day Whop gives, a6l17 (the login\'s time on its watch half) on no day', show([finishedAt(real(k('a6l03')), true), finishedAt(real(k('a6l17')), true)]))
+  ok(same(w.changes.actions_finished, [[k('a6l03').id, '2026-10-18T09:00:00.000Z'], ['row-k10', '2026-10-17T09:00:00.000Z'], ['row-k17', '2026-10-16T09:00:00.000Z'], [l03.id, l03.action_completed_at]]),
+     'the change log lists every action half it wrote: [row id, action_completed_at]', show(w.changes.actions_finished))
+
+  steps.length = 0
+  const kept = show(db.rows('student_lesson_completions'))
+  r = await call({ mode: 'write' })
+  ok(r.body.ok === true && same(r.body.changes, { inserted: [], promoted: [], actions_finished: [], streak_ticked: [] }) && r.body.rows.actions_finished === 0 &&
+     show(db.rows('student_lesson_completions')) === kept && steps.length === 0,
+     'a second pass writes nothing', show(r.body.rows))
+
+  // The undo (whop_catchup.md 7.9, with the action halves): delete the rows
+  // added, put the finished rows back, and clear each action half the run
+  // wrote where it still holds the run's value. The rows are then the snapshot.
+  const table = db.rows('student_lesson_completions')
+  for (const [id, at] of w.changes.actions_finished) {
+    const x = table.find((y) => y.id === id)
+    if (x && x.action_completed_at === at) x.action_completed_at = null
+  }
+  for (const [id, skippedAt, at] of w.changes.promoted) {
+    const x = table.find((y) => y.id === id)
+    if (x && x.completed_at === at) Object.assign(x, { completed_at: null, skipped_at: skippedAt })
+  }
+  const addedIds = new Set(w.changes.inserted.map(([id]) => id))
+  db.tables.student_lesson_completions = table.filter((x) => !addedIds.has(x.id))
+  const asSnapshot = db.rows('student_lesson_completions').map((x) => show(before.columns.map((c) => x[c] ?? null))).sort()
+  ok(same(asSnapshot, before.rows.map(show).sort()), 'the change log is enough to undo it: after the undo every row is as the snapshot holds it', show(asSnapshot))
+
+  // The action half alone fails to write: the member is failed (its sync row
+  // left), and the next pass writes it.
+  db = setup()
+  db.failWhen = (q) => (q.table === 'student_lesson_completions' && q.op === 'update' && q.values &&
+    'action_completed_at' in q.values && !('completed_at' in q.values) ? { message: 'connection reset' } : null)
+  r = await call({ mode: 'write' })
+  ok(r.body.ok === true && r.body.database.failed.write_failed === 1 && !syncOf(db, K) && rowOf(db, K, 'a6l17').action_completed_at === null && syncOf(db, L),
+     'that write failing: write_failed for that member, no sync row for them, the half not written; the other member is written', show(r.body.database))
+  db.failWhen = null
+  r = await call({ mode: 'write' })
+  ok(r.body.ok === true && r.body.rows.actions_finished === 1 && rowOf(db, K, 'a6l17').action_completed_at === '2026-10-16T09:00:00.000Z' && syncOf(db, K),
+     'and the next pass writes it, with the member\'s sync row', show(r.body.rows))
+  ok(r.body.rows.inserted === 0 && r.body.students.got_rows === 0 && r.body.students.already_all_in_app === 2 && r.body.streak_ticked === 0,
+     'an action half written alone adds no row: no member got rows, both already had every lesson, no streak day', show(r.body.students))
+}
+
+console.log('\n=== The two with a video (The Backbone, Imitation): a Done pressed first is kept, the video\'s half only from Whop ===')
+{
+  // a5l08 and a5l12, Done-only since the owner's answer of 2026-10-22, have a
+  // video: in the app Done is their action half alone, so a row can hold the
+  // action half and no watch half. a5l23 beside them keeps its link. Every
+  // Whop id and link here is made up.
+  const lessons = [...LESSONS,
+    { id: 'a5l08', whop_lesson_id: 'lesn_TESTa508', requires_action: true },
+    { id: 'a5l12', whop_lesson_id: 'lesn_TESTa512', requires_action: true },
+    { id: 'a5l23', whop_lesson_id: 'lesn_TESTa523', requires_action: true }]
+  const [M, N] = [13, 14]
+  const LINK = 'https://discord.com/channels/1100000000000000001/1200000000000000002/1300000000000000003'
+  const PRESSED = '2026-10-19T20:00:00.000Z'
+  const setup = () => {
+    onWhop = {
+      // M finished all three on Whop.
+      [W(M)]: [opened(W(M), 'lesn_TESTa508', '2026-10-13T09:00:00.000Z'), opened(W(M), 'lesn_TESTa512', '2026-10-12T09:00:00.000Z'),
+        opened(W(M), 'lesn_TESTa523', '2026-10-11T09:00:00.000Z')],
+      // N finished lesson 1 there, and not a5l08.
+      [W(N)]: [opened(W(N), 'lesn_TEST01', '2026-10-13T09:00:00.000Z')],
+    }
+    return freshDb({
+      lessons,
+      members: [member(M), member(N)],
+      completions: [
+        // Done pressed in the app before the video was watched.
+        { id: 'row-m08', student_id: sid(M), lesson_id: 'a5l08', completed_at: null, action_completed_at: PRESSED },
+        // The Discord kind, handed in before its video.
+        { id: 'row-m23', student_id: sid(M), lesson_id: 'a5l23', completed_at: null, action_completed_at: PRESSED, discord_message_link: LINK },
+        { id: 'row-n08', student_id: sid(N), lesson_id: 'a5l08', completed_at: null, action_completed_at: PRESSED },
+      ],
+    })
+  }
+  let db = setup()
+  let r = await call({ mode: 'dry' })
+  ok(r.body.ok === true && writes(db).length === 0 && r.body.rows.would_insert === 2 && r.body.rows.would_promote === 2 && r.body.rows.would_finish_actions === 1,
+     'dry: 2 rows to add (M\'s a5l12, N\'s lesson 1), 2 to finish (M\'s a5l08 and a5l23), 1 action half (a5l12\'s): none where the student pressed Done', show(r.body.rows))
+  const before = (await call({ mode: 'snapshot' })).body.student_lesson_completions
+  r = await call({ mode: 'write' })
+  const w = r.body
+  const m = (lesson) => rowOf(db, M, lesson)
+  ok(w.ok === true && w.rows.inserted === 2 && w.rows.promoted === 2 && w.rows.actions_finished === 1, 'write: the same counts', show(w.rows))
+  ok(m('a5l08').completed_at === '2026-10-13T09:00:00.000Z' && m('a5l08').action_completed_at === PRESSED &&
+     isLessonComplete({ lesson_id: 'a5l08', skipped_at: null, ...m('a5l08') }, { id: 'a5l08', requires_action: true }),
+     'a5l08 with Done pressed: its watch half at Whop\'s time, the student\'s Done kept at its own, so it is done', show(m('a5l08')))
+  ok(m('a5l12')?.completed_at === '2026-10-12T09:00:00.000Z' && m('a5l12').action_completed_at === '2026-10-12T09:00:00.000Z',
+     'a5l12 with no row: added with both halves at Whop\'s time, as the four of AI Ads + Content are', show(m('a5l12')))
+  ok(m('a5l23').completed_at === '2026-10-11T09:00:00.000Z' && m('a5l23').action_completed_at === PRESSED && m('a5l23').discord_message_link === LINK,
+     'a5l23, the Discord kind handed in first: its watch half, its action half kept, as before', show(m('a5l23')))
+  ok(rowOf(db, N, 'a5l08').completed_at === null && rowOf(db, N, 'a5l08').action_completed_at === PRESSED && !!rowOf(db, N, 'a1l01'),
+     'N, whom Whop lists with lesson 1 and not a5l08: a5l08 keeps its Done and gets no watch half (the video\'s half comes only from what Whop reports for that lesson)', show(rowOf(db, N, 'a5l08')))
+  ok(same(w.changes.actions_finished, [[m('a5l12').id, '2026-10-12T09:00:00.000Z']]) && w.changes.promoted.some(([id]) => id === 'row-m08'),
+     'the change log: a5l08 among the rows finished, and in actions_finished only the half the run wrote (a5l12\'s), never the student\'s Done', show(w.changes))
+  // The undo, as in the section above: the rows are then the snapshot, the student's Done included.
+  const table = db.rows('student_lesson_completions')
+  for (const [id, at] of w.changes.actions_finished) {
+    const x = table.find((y) => y.id === id)
+    if (x && x.action_completed_at === at) x.action_completed_at = null
+  }
+  for (const [id, skippedAt, at] of w.changes.promoted) {
+    const x = table.find((y) => y.id === id)
+    if (x && x.completed_at === at) Object.assign(x, { completed_at: null, skipped_at: skippedAt })
+  }
+  const addedIds = new Set(w.changes.inserted.map(([id]) => id))
+  db.tables.student_lesson_completions = table.filter((x) => !addedIds.has(x.id))
+  const asSnapshot = db.rows('student_lesson_completions').map((x) => show(before.columns.map((c) => x[c] ?? null))).sort()
+  ok(same(asSnapshot, before.rows.map(show).sort()) && rowOf(db, M, 'a5l08').action_completed_at === PRESSED,
+     'the undo from the change log puts every row back as the snapshot holds it, the student\'s Done on a5l08 still there', show(asSnapshot))
+
+  // The student presses Done on a5l12 between the run's read and its write
+  // (a row with a link saved and no halves): the finish, which would carry the
+  // action half, matches nothing, and the next pass finishes the watch half alone.
+  db = setup()
+  db.rows('student_lesson_completions').push({ id: 'row-m12', student_id: sid(M), lesson_id: 'a5l12', completed_at: null, action_completed_at: null, skipped_at: null, discord_message_link: LINK })
+  const LATE_PRESS = '2026-10-20T06:59:00.000Z'
+  db.failWhen = (q) => {
+    if (q.table === 'student_lesson_completions' && q.op === 'update' && q.filters.includes('id=row-m12')) {
+      const x = db.rows('student_lesson_completions').find((y) => y.id === 'row-m12')
+      if (x.action_completed_at === null) x.action_completed_at = LATE_PRESS
+    }
+    return null
+  }
+  r = await call({ mode: 'write' })
+  ok(r.body.ok === true && rowOf(db, M, 'a5l12').action_completed_at === LATE_PRESS && rowOf(db, M, 'a5l12').completed_at === null &&
+     !r.body.changes.promoted.some(([id]) => id === 'row-m12') && !r.body.changes.actions_finished.some(([id]) => id === 'row-m12'),
+     'a Done pressed between the run\'s read and its write: nothing is written over it, and the row is left out of the change log', show(rowOf(db, M, 'a5l12')))
+  db.failWhen = null
+  r = await call({ mode: 'write' })
+  ok(r.body.ok === true && rowOf(db, M, 'a5l12').completed_at === '2026-10-12T09:00:00.000Z' && rowOf(db, M, 'a5l12').action_completed_at === LATE_PRESS &&
+     same(r.body.changes.actions_finished, []) && same(r.body.changes.promoted.map(([id]) => id), ['row-m12']),
+     'the next pass finishes its watch half alone at Whop\'s time, the Done kept', show(rowOf(db, M, 'a5l12')))
+}
+
 console.log('\n=== The snapshot: the rows the write can change, no token column, no Whop request ===')
 {
   const db = mainDb()
@@ -717,9 +918,9 @@ console.log('\n=== The snapshot: the rows the write can change, no token column,
   ok(asked.length === 0 && writes(db).length === 0, 'no Whop request, nothing written')
   ok(same(s.counts, { members: 9, student_lesson_completions: 2, student_whop_sync: 1, student_streaks: 1 }),
      'counts for the members only: the canceled member\'s row is not in it', show(s.counts))
-  ok(same(s.student_lesson_completions.columns, ['id', 'student_id', 'lesson_id', 'completed_at', 'skipped_at']) &&
-     s.student_lesson_completions.rows.some((x) => same(x, ['row-b4', sid(B), 'a1l04', null, '2026-10-19T20:00:00.000Z'])),
-     'completions: the columns the run writes, as compact arrays (never the Discord link)', show(s.student_lesson_completions.rows))
+  ok(same(s.student_lesson_completions.columns, ['id', 'student_id', 'lesson_id', 'completed_at', 'skipped_at', 'action_completed_at']) &&
+     s.student_lesson_completions.rows.some((x) => same(x, ['row-b4', sid(B), 'a1l04', null, '2026-10-19T20:00:00.000Z', null])),
+     'completions: the columns the run writes, the action half included, as compact arrays (never the Discord link)', show(s.student_lesson_completions.rows))
   ok(same(s.student_whop_sync.columns, ['student_id', 'last_sync_at', 'last_sync_error', 'last_sync_error_at', 'last_sync_fetched', 'last_sync_matched', 'last_sync_unmatched', 'updated_at']),
      'sync rows: the diagnostics columns', show(s.student_whop_sync.columns))
   ok(!r.text.includes('access_token') && !r.text.includes('refresh_token') && !r.text.includes('whop-access-made-up') && !r.text.includes('whop-refresh-made-up'),

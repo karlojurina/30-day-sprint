@@ -2,6 +2,26 @@ import { createClient } from "@supabase/supabase-js";
 import { fetchCompletedLessonsAsAdmin } from "@/lib/whop";
 import { onLessonCompleted } from "@/lib/csm-events";
 import { whopNoneFinishedNote } from "@/lib/constants";
+import { isDoneOnly, whopActionTime } from "@/lib/world/action-items";
+
+/**
+ * The earliest time Whop gives for one of its lessons among these
+ * interactions (created_at, when the student opened it there), or null when
+ * none reads as a time. Whop lists a lesson once; should it list one twice,
+ * the earlier time is taken, as the catch-up takes it.
+ */
+function earliestWhopTime(
+  interactions: ReadonlyArray<{ lesson?: { id?: string } | null; created_at?: string | null }>,
+  whopLessonId: string | null | undefined,
+): string | null {
+  let earliest: number | null = null;
+  for (const i of interactions) {
+    if (!whopLessonId || i.lesson?.id !== whopLessonId) continue;
+    const t = typeof i.created_at === "string" ? Date.parse(i.created_at) : NaN;
+    if (Number.isFinite(t) && (earliest === null || t < earliest)) earliest = t;
+  }
+  return earliest === null ? null : new Date(earliest).toISOString();
+}
 
 /**
  * Pull the student's completed Whop course lessons and upsert matching
@@ -27,6 +47,13 @@ import { whopNoneFinishedNote } from "@/lib/constants";
  * turned into watches), so the streak, "last active" and the "came back"
  * check move only on new work; a failed read of the lessons is an error;
  * Whop returning nothing is a plain zero.
+ *
+ * An action item finished with Done alone (isDoneOnly in action-items.ts)
+ * that Whop lists as finished gets its action half as well (3c), so it is
+ * done in the app; a row of one that holds the watch half alone is filled at
+ * the next login or visit. An action half already there (Done pressed before
+ * the video was watched) is kept, and the watch half of every lesson comes
+ * only from Whop's list, as before.
  *
  * Diagnostic: the list of Whop lesson IDs we FETCHED but couldn't match to
  * any of our lessons is saved onto student_whop_sync.last_sync_unmatched so
@@ -171,6 +198,48 @@ export async function syncWatchProgress({
         throw new Error(`Skip→watch promotion failed: ${promoteError.message}`);
       }
       for (const r of promoted ?? []) added.add(r.lesson_id);
+
+      // 3c. An action item finished with Done alone (isDoneOnly, the list in
+      //     action-items.ts) has nothing to hand in, so finished on Whop it
+      //     is done in the app (action-items.ts, FINISHED ON WHOP). Its row
+      //     gets the action half where it has none: a row this run added or
+      //     finished, and a row a Whop writer left with the watch half alone
+      //     before the item was on the list. A row whose action half is in
+      //     (Done pressed before the video was watched, then finished by 3b)
+      //     keeps it. Dated at Whop's own time for the lesson
+      //     (whopActionTime says why). Nothing here counts in `added`: a row
+      //     this run wrote is in it already, and an older row's watch half
+      //     was counted when it arrived.
+      const doneOnlyIds = lessonIds.filter(isDoneOnly);
+      if (doneOnlyIds.length > 0) {
+        const whopIdOf = new Map(matched.map((l) => [l.id, l.whop_lesson_id]));
+        const { data: halves, error: halvesError } = await supabase
+          .from("student_lesson_completions")
+          .select("lesson_id, completed_at, action_completed_at")
+          .eq("student_id", studentId)
+          .in("lesson_id", doneOnlyIds);
+        if (halvesError) {
+          throw new Error(`Done-only rows read failed: ${halvesError.message}`);
+        }
+        const nowMs = Date.now();
+        for (const h of halves ?? []) {
+          if (!h.completed_at || h.action_completed_at) continue;
+          const actionAt = whopActionTime(
+            earliestWhopTime(interactions, whopIdOf.get(h.lesson_id)),
+            h.completed_at,
+            nowMs,
+          );
+          const { error: actionError } = await supabase
+            .from("student_lesson_completions")
+            .update({ action_completed_at: actionAt })
+            .eq("student_id", studentId)
+            .eq("lesson_id", h.lesson_id)
+            .is("action_completed_at", null);
+          if (actionError) {
+            throw new Error(`Done-only action half failed: ${actionError.message}`);
+          }
+        }
+      }
     }
 
     const nowIso = new Date().toISOString();

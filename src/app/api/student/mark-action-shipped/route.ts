@@ -10,6 +10,7 @@ import {
   PASTE_LINK_FIRST,
   actionWrite,
   hasActionHalf,
+  isDoneOnly,
   plainWriteError,
   watchHalfIsSeparate,
 } from "@/lib/world/action-items";
@@ -33,6 +34,12 @@ import {
  * halves and the lesson is done (src/lib/progress.ts isLessonComplete). The
  * live app's catalog is not v2, so there it writes what it always wrote. The
  * decision is actionWrite() in src/lib/world/action-items.ts.
+ *
+ * On the new course it completes an action item only once its Discord link
+ * is saved, except a Done-only one (isDoneOnly, the list in action-items.ts
+ * since 2026-10-22), whose page has a Done button and no link field. On one
+ * with a video Done writes the action half alone, as the button of any watch
+ * lesson does: the video's half comes only from watching it.
  *
  * A write that fails is answered as a failure, never as a success. Before
  * the cutover the completions table references `lessons(id)` only, so a
@@ -119,12 +126,18 @@ export async function POST(request: NextRequest) {
   // for the link first; this holds the same rule here, so a request made
   // without the page cannot complete one. The old course is left exactly as
   // it was, and there undoing needs no link.
+  //
+  // Except the Done-only action items (the owner, 2026-10-22: isDoneOnly and
+  // DONE_ONLY_ACTION_ITEMS in action-items.ts): nothing is posted for them,
+  // so they complete with no link saved. A link on their row, or one sent in
+  // the body, is never read here: the write below is the same either way, and
+  // the row keeps whatever link it had.
   if (shipped && CATALOG_IS_V2) {
     // .single() answers "no row" with PGRST116, which is not a failure.
     if (existingError && existingError.code !== "PGRST116") {
       return NextResponse.json({ error: existingError.message }, { status: 500 });
     }
-    if (!existing?.discord_message_link) {
+    if (!isDoneOnly(lesson.id) && !existing?.discord_message_link) {
       return NextResponse.json({ error: PASTE_LINK_FIRST }, { status: 400 });
     }
   }

@@ -43,10 +43,19 @@ export interface FinishRow {
  * when completed_at_real says it is the real moment. A lesson with an action
  * item is finished when its second half is done: the later of the two halves
  * when the video half's time is real; the action's own time
- * (action_completed_at, always the student's own press) when the video half
- * was already in by then, whatever stamped it; unknown when the video half
+ * (action_completed_at, the student's own press) when the video half was
+ * already in by then, whatever stamped it; unknown when the video half
  * arrived after the action from a sync. A skip, a half done or a time that
  * does not read as a time is no finish.
+ *
+ * One action half is not a press: the Whop writers give an action item
+ * finished with Done alone (isDoneOnly in world/action-items.ts) that Whop
+ * lists as finished its action half when the row has none (a press already
+ * there is kept): the webhook at its watch half's moment,
+ * the backfill and the catch-up at Whop's own time for the lesson
+ * (whopActionTime there). Such a row counts on the day of its watch half when
+ * that half is a real finish or carries the same time, and on no day when a
+ * login or visit sync stamped its watch half, as every row a sync brings in.
  */
 export function finishedAt(row: FinishRow, requiresAction: boolean): number | null {
   if (row.completed_at == null) return null;

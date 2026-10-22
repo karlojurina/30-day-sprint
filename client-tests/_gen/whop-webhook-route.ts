@@ -14,6 +14,7 @@ import type {
 } from "./types-erased.ts";
 import { createHmac } from "crypto";
 import { afterCompletionWrite, markCompletedAtReal } from "./complete-lesson.ts";
+import { isDoneOnly } from "./action-items.ts";
 
 /**
  * Verify a Whop webhook using the Standard Webhooks / Svix signature
@@ -697,12 +698,20 @@ export async function POST(request: NextRequest) {
       }
       const lesson = lessonResult.data;
 
+      // An action item finished with Done alone (isDoneOnly, the four of AI
+      // Ads + Content) has nothing to hand in, so finished on Whop it is done
+      // in the app: its action half is written in the same write as its
+      // watch half, at the moment the event arrives (action-items.ts,
+      // FINISHED ON WHOP). Every other lesson's write is as it was.
+      const arrivedAt = new Date().toISOString();
+      const actionHalf = isDoneOnly(lesson.id) ? { action_completed_at: arrivedAt } : {};
+
       // Writes the row when there is none; the database stamps completed_at
       // with the moment it arrives. `.select` returns only a row it added.
       const { data: inserted, error } = await supabase
         .from("student_lesson_completions")
         .upsert(
-          { student_id: student.id, lesson_id: lesson.id },
+          { student_id: student.id, lesson_id: lesson.id, ...actionHalf },
           {
             onConflict: "student_id,lesson_id",
             ignoreDuplicates: true,
@@ -725,13 +734,13 @@ export async function POST(request: NextRequest) {
 
       // A row was there already (a skip, a saved Discord link, an action done
       // before its video): finish its watch half the way the backfill does
-      // (watch-sync.ts, 3b). It used to be dropped. A row already watched
-      // keeps its time.
+      // (watch-sync.ts, 3b), and a Done-only action item's action half with
+      // it. It used to be dropped. A row already watched keeps its time.
       let finished = (inserted?.length ?? 0) > 0;
       if (!finished) {
         const { data: promoted, error: promoteError } = await supabase
           .from("student_lesson_completions")
-          .update({ completed_at: new Date().toISOString(), skipped_at: null })
+          .update({ completed_at: arrivedAt, skipped_at: null, ...actionHalf })
           .eq("student_id", student.id)
           .eq("lesson_id", lesson.id)
           .is("completed_at", null)

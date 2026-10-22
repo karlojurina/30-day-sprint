@@ -172,6 +172,8 @@ const GATE = ['from "@/lib/student-app-gate"', 'from "./student-app-gate.ts"']
 gen('../src/app/api/student/_lib/watch-sync.ts', './_gen/watch-sync.ts', [
   // The note's words come from constants.ts (above), as the admin page reads them.
   ['from "@/lib/constants"', 'from "./constants.ts"'],
+  // Which action items Done alone finishes, and the action half's time (2026-10-22): the real copy above.
+  ['from "@/lib/world/action-items"', 'from "./action-items.ts"'],
   ...toStub('@supabase/supabase-js', '@/lib/whop', '@/lib/csm-events'),
 ])
 gen('../src/app/api/student/refresh-watch-sync/route.ts', './_gen/refresh-watch-sync-route.ts', [
@@ -195,6 +197,7 @@ gen('../src/lib/whop-members.ts', './_gen/whop-members.ts', [], { dropComments: 
 gen('../src/app/api/webhooks/whop/route.ts', './_gen/whop-webhook-route.ts', [
   ['from "@/lib/complete-lesson"', 'from "./complete-lesson.ts"'],
   ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+  ['from "@/lib/world/action-items"', 'from "./action-items.ts"'],
   ...toStub('next/server', '@/lib/supabase-server'),
   ['from "@/types/whop"', 'from "./types-erased.ts"'],
 ])
@@ -397,6 +400,7 @@ gen('../src/lib/whop-catchup.ts', './_gen/whop-catchup.ts', [
   ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
   ['from "@/lib/constants"', 'from "./constants.ts"'],
   ['from "@/lib/streak"', 'from "./streak.ts"'],
+  ['from "@/lib/world/action-items"', 'from "./action-items.ts"'],
   ...toStub('@/app/api/student/_lib/update-streak'),
 ])
 gen('../src/app/api/admin/whop-catchup/route.ts', './_gen/whop-catchup-route.ts', [

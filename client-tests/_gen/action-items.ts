@@ -34,6 +34,16 @@
  * complete button writes. mark-action-shipped completes them with no link
  * saved, and the admin drawer says Done and shows no link. Every other action
  * item still needs its link. DONE_ONLY_ACTION_ITEMS below is the one list.
+ *
+ * FINISHED ON WHOP. A lesson finished on Whop counts in the app as one
+ * finished in the app (the owner's standing rule). A Done-only action item has
+ * nothing to hand in, so finishing it on Whop finishes it: the three writers
+ * that bring Whop's finished lessons in (the webhook, the backfill a login or
+ * a visit runs, the team's catch-up) give its row the action half with the
+ * watch half, and the backfill and the catch-up also fill the action half of
+ * a row a Whop writer left with the watch half alone before 2026-10-22.
+ * isLessonComplete and the database's progress view are unchanged: the row
+ * has both halves. The other six still need their link and their button.
  */
 
 /**
@@ -51,6 +61,29 @@ export const DONE_ONLY_ACTION_ITEMS: ReadonlySet<string> = new Set(["a6l03", "a6
 /** Is this action item finished with Done alone, with no Discord link? */
 export function isDoneOnly(lessonId: string | null | undefined): boolean {
   return typeof lessonId === "string" && DONE_ONLY_ACTION_ITEMS.has(lessonId);
+}
+
+/**
+ * The time the backfill and the catch-up give the action half of a Done-only
+ * action item they find finished on Whop: Whop's own time for the lesson (the
+ * interaction's created_at, when the student opened it there, the time the
+ * catch-up already writes as the lesson's finish), or the row's completed_at
+ * when Whop gives none that reads as a time, or one later than `nowMs`.
+ *
+ * Never the moment of the write. Triple Threat reads action_completed_at as
+ * the moment an action item was finished (finishedAt in achievement-rules.ts).
+ * A login or visit sync stamps completed_at with its own time and marks it as
+ * no real finish, so its rows count on no day; an action half at the sync's
+ * time would count every one of the four that sync brings in on the sync's
+ * day. At Whop's time, which is before the sync's completed_at, the row counts
+ * on no day, as every other row of that sync. On a row whose completed_at is a
+ * real finish (the webhook's, the catch-up's with Whop's time) it counts on
+ * that day. When Whop gives no usable time the action half is the row's own
+ * completed_at, and the row then counts on that day.
+ */
+export function whopActionTime(whopTime: string | null | undefined, completedAt: string, nowMs: number): string {
+  const t = typeof whopTime === "string" ? Date.parse(whopTime) : NaN;
+  return Number.isFinite(t) && t <= nowMs ? new Date(t).toISOString() : completedAt;
 }
 
 /** The old route's pattern, unchanged. Also the database's CHECK constraint (v28). */

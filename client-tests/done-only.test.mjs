@@ -25,12 +25,19 @@
 //   5. the drawer     buildStudentDetail's action items: "Done" and no link
 //                     for the four, even a link saved before 2026-10-22;
 //                     "Handed in" with it for the others; "Not yet"
+//   6. from Whop      a lesson finished on Whop counts in the app (the
+//                     owner's rule): the Whop webhook and the backfill a
+//                     login or a visit runs give each of the four its action
+//                     half too, dated so Triple Threat never counts a sync's
+//                     rows on the sync's day; the map opens the next lesson
+//                     with no Done pressed; the other six as before
 //
-// build.mjs copies the modules and the two routes (run it first; `npm run
+// build.mjs copies the modules and the routes (run it first; `npm run
 // test:client` does); the block is compiled here as Next compiles it, into
 // _gen/done-only-block.mjs. The database is stub-server.ts's stand-in, whose
 // streak steps run the real update-streak.ts. Every student, id and link
 // here is made up.
+import { createHmac, randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -60,13 +67,16 @@ const fromSrc = (rel) => fs.readFileSync(here(`../${rel}`), 'utf8')
 }
 
 const { ActionItemBlock } = await import('./_gen/done-only-block.mjs')
-const { DONE_ONLY_ACTION_ITEMS, PASTE_LINK_FIRST, actionItemView, isDoneOnly } = await import('./_gen/action-items.ts')
+const { DONE_ONLY_ACTION_ITEMS, PASTE_LINK_FIRST, actionItemView, isDoneOnly, whopActionTime } = await import('./_gen/action-items.ts')
 const { completedLessonIdsFor, isLessonComplete } = await import('./_gen/progress.ts')
 const { POST: markShipped } = await import('./_gen/mark-action-shipped-route.ts')
 const { POST: saveLink } = await import('./_gen/save-action-link-route.ts')
+const { POST: whopWebhook } = await import('./_gen/whop-webhook-route.ts')
+const { syncWatchProgress } = await import('./_gen/watch-sync.ts')
 // useDb under another name: ESLint's React rules take a "use..." call for a hook.
-const { FakeDb, fakeClient, useDb: openDb, setCatalog, steps } = await import('./_gen/stub-server.ts')
+const { FakeDb, fakeClient, useDb: openDb, setCatalog, setWhop, steps } = await import('./_gen/stub-server.ts')
 const { evaluateAchievements } = await import('./_gen/achievements.ts')
+const { mostFinishedInOneDay } = await import('./_gen/achievement-rules.ts')
 const { getTodayUtc } = await import('./_gen/streak.ts')
 const { buildWorldCatalog } = await import('./_gen/catalog.ts')
 const { buildMapModel } = await import('./_gen/map-model.ts')
@@ -350,25 +360,25 @@ console.log('\n=== 4. After Done: the same as a hand-in ===')
   ok(Array.isArray(fromDone) && same([...fromDone].sort(), [...fromLink].sort()) && fromDone.includes('first_action_shipped') && fromDone.includes('first_lesson'),
      'the badges: Done earns what a hand-in earns (First Steps and Took the Shot, as for any action item done)', show({ fromLink, fromDone }))
 }
+/** Every lesson of places 1 to 5 done (their action items handed in), and a6l01 and a6l02 watched. */
+const UP_TO_A6L03 = LESSONS
+  .filter((l) => l.counts_toward_progress && (['a1', 'a2', 'a3', 'a4', 'a5'].includes(l.region_id) || ['a6l01', 'a6l02'].includes(l.id)))
+  .map((l) => ({ lesson_id: l.id, completed_at: EARLIER, action_completed_at: l.requires_action ? EARLIER : null, discord_message_link: l.requires_action ? LINK : null }))
+/** The map on these rows, as the student's map reads them: where they stand, the lesson next, and how many are done in AI Ads + Content. */
+function mapOf(db) {
+  const rows = db.rows('student_lesson_completions')
+  const completedLessonIds = completedLessonIdsFor(rows, LESSONS)
+  const watchedLessonIds = new Set(rows.filter((r) => r.completed_at).map((r) => r.lesson_id))
+  const cat = buildWorldCatalog({ lessons: LESSONS, regions: REGIONS, completedLessonIds, watchProgress: new Map() })
+  const m = buildMapModel({ areas: cat.areas, lessonsByArea: cat.lessonsByArea, completedLessonIds, watchedLessonIds })
+  return m.ok ? { place: m.place, next: m.areas[m.place]?.lessons[m.placeNext]?.id ?? null, done: m.areas[5].done } : m
+}
 {
-  // The map: every lesson of places 1 to 5 done (their action items handed in) and a6l01, a6l02 watched.
-  const counting = LESSONS.filter((l) => l.counts_toward_progress)
-  const first = counting.filter((l) => ['a1', 'a2', 'a3', 'a4', 'a5'].includes(l.region_id) || ['a6l01', 'a6l02'].includes(l.id))
-  const db = freshDb(first.map((l) => ({
-    lesson_id: l.id, completed_at: EARLIER, action_completed_at: l.requires_action ? EARLIER : null, discord_message_link: l.requires_action ? LINK : null,
-  })))
-  const mapOf = () => {
-    const rows = db.rows('student_lesson_completions')
-    const completedLessonIds = completedLessonIdsFor(rows, LESSONS)
-    const watchedLessonIds = new Set(rows.filter((r) => r.completed_at).map((r) => r.lesson_id))
-    const cat = buildWorldCatalog({ lessons: LESSONS, regions: REGIONS, completedLessonIds, watchProgress: new Map() })
-    const m = buildMapModel({ areas: cat.areas, lessonsByArea: cat.lessonsByArea, completedLessonIds, watchedLessonIds })
-    return m.ok ? { place: m.place, next: m.areas[m.place]?.lessons[m.placeNext]?.id ?? null, done: m.areas[5].done } : m
-  }
-  const before = mapOf()
+  const db = freshDb(UP_TO_A6L03)
+  const before = mapOf(db)
   ok(before.place === 5 && before.next === 'a6l03' && before.done === 2, 'the map before Done: the student in AI Ads + Content, a6l03 next (it holds them), 2 done there', show(before))
   await done('a6l03')
-  const after = mapOf()
+  const after = mapOf(db)
   ok(after.place === 5 && after.next === 'a6l04' && after.done === 3, 'after Done: a6l04 is next, 3 done there (the next lesson opens)', show(after))
 }
 
@@ -409,6 +419,149 @@ console.log('\n=== 5. The admin drawer ===')
   const view = fromSrc('src/components/admin/journey/JourneyView.tsx')
   ok(view.includes('>{a.status}</span>') && !view.includes('"Handed in"') && view.includes('{a.link && ('),
      'the drawer shows the builder\'s word and a link only when there is one (JourneyView.tsx)')
+}
+
+console.log('\n=== 6. Finished on Whop: done in the app, with no Done to press ===')
+// The owner's standing rule: a lesson finished on Whop counts in the app as one
+// finished there. The webhook and the backfill a login or a visit runs give
+// each of the four its action half too (the Whop catch-up's is in
+// whop-catchup.test.mjs). Every Whop id here is made up: "lesn_" and the
+// lesson's id. Whop's times are some hours before the run, whenever it runs.
+const WHOP_KEY = randomBytes(24)
+process.env.WHOP_WEBHOOK_SECRET = `ws_${WHOP_KEY.toString('base64')}`
+let whopMsg = 0
+/** Whop's event for the lesson finished by user_1, signed as Whop signs it; answers the status. */
+async function whopEvent(lessonId) {
+  const body = JSON.stringify({ type: 'course_lesson_interaction.completed', data: { user: { id: 'user_1' }, lesson: { id: `lesn_${lessonId}` }, completed: true } })
+  const id = `msg_${++whopMsg}`
+  const ts = String(Math.floor(Date.now() / 1000))
+  const sig = createHmac('sha256', WHOP_KEY).update(`${id}.${ts}.${body}`).digest('base64')
+  const [res] = await quietly(() => whopWebhook(new Request('http://app/api/webhooks/whop', {
+    method: 'POST', headers: { 'webhook-id': id, 'webhook-timestamp': ts, 'webhook-signature': `v1,${sig}` }, body,
+  })))
+  return res instanceof Error ? res.message : res.status
+}
+/** freshDb, every lesson holding its made-up Whop id. */
+function whopDb(completions = []) {
+  const db = freshDb(completions)
+  for (const l of db.rows('lessons')) l.whop_lesson_id = `lesn_${l.id}`
+  return db
+}
+/** Whop lists these lessons as finished by user_1: [lesson id, when it was opened there]. */
+const onWhop = (list) => setWhop(async () => ({
+  interactions: list.map(([id, at]) => ({ lesson: { id: `lesn_${id}` }, completed: true, created_at: at })),
+  rawCount: list.length,
+  completedCount: list.length,
+}))
+const backfill = () => quietly(() => syncWatchProgress({ studentId: 's1', whopUserId: 'user_1' }))
+const hoursAgo = (h) => new Date(Date.now() - h * 3_600_000).toISOString()
+/** afterCompletionWrite's four steps, in its order (the webhook runs them once a lesson is finished). */
+const AFTER_LESSON = ['streak', 'came-back', 'achievements', 'tasks']
+const isDone = (row, id) => !!row && isLessonComplete({ lesson_id: id, skipped_at: null, ...row }, lessonOf(id))
+{
+  const db = whopDb(UP_TO_A6L03)
+  const status = await whopEvent('a6l03')
+  const got = rowOf(db, 'a6l03')
+  ok(status === 200 && !!got?.completed_at && !!got.action_completed_at && Math.abs(Date.parse(got.completed_at) - Date.parse(got.action_completed_at)) < 5000 &&
+     got.completed_at_real === true && got.discord_message_link === null,
+     'webhook, a6l03 finished on Whop: both halves at the moment it arrives, marked as its real finish, no link', show(got))
+  ok(isDone(got, 'a6l03') && same(stepNames(), AFTER_LESSON) && same(mapOf(db), { place: 5, next: 'a6l04', done: 3 }),
+     'so it is done: the steps after a lesson run once, and the map opens a6l04 with no Done pressed', show({ steps: stepNames(), map: mapOf(db) }))
+  steps.length = 0
+  const again = await whopEvent('a6l03')
+  ok(again === 200 && steps.length === 0 && rowOf(db, 'a6l03').action_completed_at === got.action_completed_at,
+     'the same event again: nothing written, no step', show(stepNames()))
+}
+{
+  const db = whopDb([{ lesson_id: 'a6l10', completed_at: null, action_completed_at: null, discord_message_link: LINK }])
+  await whopEvent('a6l10')
+  const got = rowOf(db, 'a6l10')
+  ok(isDone(got, 'a6l10') && got.action_completed_at === got.completed_at && got.discord_message_link === LINK && same(stepNames(), AFTER_LESSON),
+     'webhook, a6l10 with a link saved before: finished with both halves at one moment, the link kept, the steps once', show(got))
+}
+{
+  const db = whopDb()
+  await whopEvent('a5l22')
+  const got = rowOf(db, 'a5l22')
+  ok(!!got?.completed_at && got.action_completed_at === null && !isDone(got, 'a5l22'),
+     'webhook, a5l22 (it keeps its link): the watch half only, as before, so it waits for the link and the button', show(got))
+}
+{
+  const db = whopDb([{ lesson_id: 'a6l17', completed_at: '2026-10-19T18:00:00.000Z', action_completed_at: null }])
+  await whopEvent('a6l17')
+  ok(rowOf(db, 'a6l17').action_completed_at === null && steps.length === 0,
+     'webhook, a6l17 already holding the watch half alone: left as it is, no step (the backfill fills it, below)', show(rowOf(db, 'a6l17')))
+}
+{
+  const db = whopDb(UP_TO_A6L03)
+  const opened = hoursAgo(3)
+  onWhop([['a6l03', opened]])
+  const [r] = await backfill()
+  const got = rowOf(db, 'a6l03')
+  ok(r.syncedCount === 1 && isDone(got, 'a6l03') && got.action_completed_at === opened && got.completed_at > opened,
+     'backfill (a login or a visit), a6l03 finished on Whop: added with both halves, the action half at Whop\'s time, before the sync\'s own', show(got))
+  ok(same(mapOf(db), { place: 5, next: 'a6l04', done: 3 }), 'and the map opens a6l04: the student is no longer held at a6l03', show(mapOf(db)))
+}
+{
+  // Three of the four and a5l22 arrive in one visit; a6l17's watch half came
+  // in at a login before 2026-10-22, with no action half.
+  const LOGIN = '2026-10-19T18:00:00.000Z'
+  const db = whopDb([{ lesson_id: 'a6l17', completed_at: LOGIN, action_completed_at: null }])
+  const times = { a6l03: hoursAgo(5), a6l10: hoursAgo(4), a6l17: '2026-10-16T09:00:00.000Z', a6l19: hoursAgo(3), a5l22: hoursAgo(2) }
+  onWhop(Object.entries(times))
+  const [r] = await backfill()
+  const by = Object.fromEntries(db.rows('student_lesson_completions').map((x) => [x.lesson_id, x]))
+  ok(r.syncedCount === 4, 'backfill: 4 rows added; the action half written on a6l17\'s older row is not counted as new (its watch half was)', show(r.syncedCount))
+  ok(['a6l03', 'a6l10', 'a6l19'].every((id) => by[id].action_completed_at === times[id]) && FOUR.every((id) => isDone(by[id], id)),
+     'each of the four is done, its action half at the time Whop gives for it', show(FOUR.map((id) => by[id].action_completed_at)))
+  ok(by.a6l17.completed_at === LOGIN && by.a6l17.action_completed_at === times.a6l17,
+     'a6l17\'s older row: the action half at Whop\'s time, the watch half keeps the login\'s', show(by.a6l17))
+  ok(by.a5l22.action_completed_at === null && !isDone(by.a5l22, 'a5l22'), 'a5l22 still waits for its link and its button', show(by.a5l22))
+  const [badges] = await quietly(() => evaluateAchievements(fakeClient(db), 's1'))
+  ok(Array.isArray(badges) && badges.includes('first_action_shipped') && !badges.includes('triple_play'),
+     'the badges: the four count as action items done (Took the Shot), and the lessons one sync brings in make no Triple Threat', show(badges))
+  const requiresAction = new Map(LESSONS.map((l) => [l.id, l.requires_action]))
+  const rows = db.rows('student_lesson_completions').map((x) => ({ ...x, completed_at_real: x.completed_at_real === true }))
+  const atSyncTime = rows.map((x) => (isDoneOnly(x.lesson_id) ? { ...x, action_completed_at: x.completed_at } : x))
+  ok(mostFinishedInOneDay(rows, requiresAction) === 0 && mostFinishedInOneDay(atSyncTime, requiresAction) === 3,
+     'why Whop\'s time: with it no row of the sync counts toward a day, as for every lesson a sync brings in; with the sync\'s own time three would count on one day, a Triple Threat for nothing',
+     show([mostFinishedInOneDay(rows, requiresAction), mostFinishedInOneDay(atSyncTime, requiresAction)]))
+}
+{
+  // Whop lists a6l10 twice, an unreadable time between: the earlier time is taken.
+  const db = whopDb()
+  const [later, earlier] = [hoursAgo(2), hoursAgo(6)]
+  onWhop([['a6l10', later], ['a6l10', 'not a time'], ['a6l10', earlier]])
+  await backfill()
+  ok(rowOf(db, 'a6l10')?.action_completed_at === earlier, 'backfill: a lesson Whop lists twice takes the earlier of its times', show(rowOf(db, 'a6l10')))
+}
+{
+  // whopActionTime: Whop's time when it reads as one and is not later than now, else the row's.
+  const now = Date.parse('2026-10-22T10:00:00.000Z')
+  const row = '2026-10-22T09:00:00.000Z'
+  ok(whopActionTime('2026-10-20T08:00:00Z', row, now) === '2026-10-20T08:00:00.000Z' && whopActionTime('2026-10-23T08:00:00Z', row, now) === row &&
+     whopActionTime(null, row, now) === row && whopActionTime('not a time', row, now) === row && whopActionTime(undefined, row, now) === row,
+     'whopActionTime: Whop\'s time, else the row\'s own when Whop gives none, an unreadable one or one later than now')
+}
+{
+  const db = whopDb()
+  const opened = hoursAgo(1)
+  onWhop([['a6l03', opened]])
+  db.failWhen = (q) => (q.table === 'student_lesson_completions' && q.op === 'select' && q.columns === 'lesson_id, completed_at, action_completed_at'
+    ? { message: 'connection reset' } : null)
+  const [r] = await backfill()
+  const syncRow = () => db.rows('student_whop_sync').find((x) => x.student_id === 's1')
+  ok(r instanceof Error && r.message === 'Done-only rows read failed: connection reset' && syncRow()?.last_sync_error === r.message,
+     'backfill: the read of the four\'s rows failing is an error, written on the sync row, never "nothing to fill"', show({ r: String(r), sync: syncRow()?.last_sync_error }))
+  db.failWhen = (q) => (q.table === 'student_lesson_completions' && q.op === 'update' && q.values && 'action_completed_at' in q.values
+    ? { message: 'connection reset' } : null)
+  const [r2] = await backfill()
+  ok(r2 instanceof Error && r2.message === 'Done-only action half failed: connection reset' && rowOf(db, 'a6l03').action_completed_at === null,
+     'the write failing is an error too, and the half is not written', show(String(r2)))
+  db.failWhen = null
+  const [r3] = await backfill()
+  ok(!(r3 instanceof Error) && rowOf(db, 'a6l03').action_completed_at === opened && isDone(rowOf(db, 'a6l03'), 'a6l03') && syncRow().last_sync_error === null,
+     'and the next visit fills it, the sync row clear', show(rowOf(db, 'a6l03')))
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

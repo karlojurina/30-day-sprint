@@ -61,11 +61,23 @@ import { LAKE_PAD, lakeShoreR, terrainHeight } from "./terrain";
  * The night layer (2026-10-20 night; option D of
  * _admin/prds/map-review-2026-10-15/real_time_light.md): the light still
  * follows the place, and on top of it the student's own clock (clock.ts,
- * through the scene's setNight) blends each key from the opening to the
+ * through the scene's setClock) blends each key from the opening to the
  * forest toward a night of its own (NIGHT_ROWS). From Creative Strategy on
  * nothing changes. By day the light is the old light value for value
  * (client-tests/night-clock.test.mjs). state.night is the night's weight
  * where the camera is; the modules that darken for the night read it.
+ *
+ * The morning layer (2026-10-21, after the owner saw the night and a
+ * throwaway morning probe): the same keys blend toward a morning of their
+ * own (MORNING_ROWS) by the clock's morning factor, under the night (the
+ * dawn is the night going off the morning). state.morning is the morning's
+ * weight where the camera is: the lamps' halos go out by it, the lamp
+ * materials turn to unlit glass (MORNING_LAMP_TINT), the grade's dew comes
+ * in (MORNING_DEW), and the fog ramp lays the morning's mist and air
+ * (LookKey.mist and LookKey.air: a bank of lit mist in the low ground and
+ * more of the ramp's haze there, the haze pass of 2026-10-21).
+ * With the morning at 0 the day and the night are what they were, value for
+ * value (client-tests/morning-clock.test.mjs).
  *
  * Draw calls: the reflection pass redraws whatever the mirrored camera sees.
  * Objects that should not appear in the lake (markers, tiny props) can go on
@@ -136,6 +148,8 @@ export interface LightKeyframe {
   band?: number;
   /** 0..1: how much of this key is the night layer (NIGHT below). 0 on every authored key; 1 on a night key. Blended, it is LightState.night. */
   night?: number;
+  /** 0..1: how much of this key is the morning layer (MORNING below). 0 on every authored key and every night key; 1 on a morning key. Blended, it is LightState.morning. */
+  morning?: number;
 }
 
 /**
@@ -458,6 +472,35 @@ export interface LookKey {
    *  and take the ramp's hue (Firewatch's stylistic fog); the far end still
    *  meets the sky. Omitted = 0. */
   fogAdd?: number;
+  /** The morning's mist (MORNING_LOOK): a bank of `mistColor` lying in the
+   *  low ground, its top mistDepth over the key's hazeBase, coming in from
+   *  mistNear to mistFar away, at most `mist` of a pixel. Omitted = 0: no
+   *  mist (every authored key, every night key). */
+  mist?: number;
+  mistDepth?: number;
+  mistNear?: number;
+  mistFar?: number;
+  mistColor?: number;
+  /** The bank's shape (2026-10-21, the morning haze): its top edge fades over
+   *  mistSoft each way (world units), and rises and falls by up to mistWave
+   *  over the ground, so it lies in drifts with a soft top and the tree tops
+   *  and ridges stand out of it. Omitted: mistDepth / 2 and 0. */
+  mistSoft?: number;
+  mistWave?: number;
+  /** Lit mist: 0..1, how far its side turned from the sun cools toward the
+   *  haze (the side toward the sun keeps `mistColor`), and how much of the
+   *  sun's glow (sunGlow x sunLobe) the side toward the sun carries. Omitted:
+   *  0. */
+  mistCool?: number;
+  mistGlow?: number;
+  /** The morning air: more of the fog ramp's own haze on the low ground,
+   *  `air` times the ramp's alpha up to airLift over the key's hazeBase,
+   *  falling off over airFall above that, so the mountains' feet are lost in
+   *  the haze while their upper slopes and peaks keep the day's clearer air
+   *  and their light. Omitted: 0 (none), the key's hazeFall and 0. */
+  air?: number;
+  airFall?: number;
+  airLift?: number;
 }
 
 const DAY_HALO = { halo: null, haloAmt: 0.55, haloDeg: 1.6, haloHalf: 3.2 } as const;
@@ -836,48 +879,6 @@ export const NIGHT_ROWS: Partial<Record<LightWaypointKey, NightRow>> = {
   dusk: { dial: 1, moonAz: MOON_AZ, moonEl: MOON_EL, moonLightAz: MOONLIGHT_AZ, moonLightEl: MOONLIGHT_EL, light: { aurora: 1, band: 1 } },
 };
 
-// ── The morning probe (dev only, NOT SHIPPED) ───────────────────────────────
-
-/**
- * NOT SHIPPED. A throwaway probe of option B's morning (real_time_light.md),
- * so Lovro can see whether a morning reads differently from the route's
- * sunset: /dev/world-app?mood=morning&hour=8 (scene.ts passes ?mood on only in
- * development). Over the blended light, k of the way, a cooler, pinker,
- * brighter morning: a clear blue top, a pink and peach horizon, a pale lilac
- * haze (morning mist), a pink-white sun, cooler shade, a touch more exposure
- * and less saturation. Each place keeps its own sun and view. It fades out
- * from the forest to the island (night) and never reaches the arch. Remove
- * with its commit.
- */
-export const MORNING_PROBE = {
-  k: 0.6,
-  colors: {
-    skyTop: 0x6c9ad6, skyMid: 0xd2c8de, skyHorizon: 0xf6d0c6, skyGlow: 0xffcab2,
-    sunColor: 0xffd8cc, sunGlow: 0xffbaa8, haze: 0xcfcce2,
-    hemiSky: 0xaabfe4, ambient: 0xa6b0cc, cloudTop: 0xfff2f0, cloudBase: 0xbcb8ce,
-    water: 0x4a6278, nearShade: 0x3a4862, halo: 0xffd4cc,
-  },
-  exposure: 1.1,
-  sat: 0.9,
-  fogAdd: 0.15,
-} as const;
-let _morning: Record<keyof typeof MORNING_PROBE.colors, THREE.Color> | null = null;
-/** MORNING_PROBE over a blended light, w of the way (in place). */
-function applyMorningProbe(s: LightState, w: number): void {
-  if (!(w > 0)) return;
-  if (!_morning) {
-    const m = {} as Record<keyof typeof MORNING_PROBE.colors, THREE.Color>;
-    for (const [k, hex] of Object.entries(MORNING_PROBE.colors)) m[k as keyof typeof MORNING_PROBE.colors] = new THREE.Color().setHex(hex);
-    _morning = m;
-  }
-  for (const k of Object.keys(_morning) as Array<keyof typeof MORNING_PROBE.colors>) (s[k] as THREE.Color).lerp(_morning[k], w);
-  s.exposure *= 1 + (MORNING_PROBE.exposure - 1) * w;
-  s.sat *= 1 + (MORNING_PROBE.sat - 1) * w;
-  s.fogAdd += MORNING_PROBE.fogAdd * w;
-  s.gainB += 0.05 * w;
-  s.liftB += 0.012 * w;
-}
-
 /** A day key's night (NIGHT_ROWS' header). */
 export function nightKeyframe(day: LightKeyframe, row: NightRow): LightKeyframe {
   return {
@@ -905,6 +906,438 @@ export function nightLook(day: LookKey, row: NightRow): LookKey {
   return {
     ...day,
     ...NIGHT_LOOK,
+    rampStart: day.rampStart,
+    rampEnd: day.rampEnd,
+    hazeBase: day.hazeBase,
+    hazeFall: day.hazeFall,
+    hazeOn: day.hazeOn,
+    fogCap: day.fogCap,
+    ...row.look,
+  };
+}
+
+// ── Tuning: the morning layer (2026-10-21; option B's morning over option D) ──
+
+/**
+ * The morning on the student's clock (clock.ts MORNING_HOURS: full from 06:00
+ * to 09:00, the night going out onto it from 05:00, fading into the day by
+ * 10:00). As with the night, the light still follows the PLACE: each key from
+ * the opening to the Glowing Forest has a morning of its own (morningKeyframe,
+ * morningLook, MORNING_ROWS) and blends toward it by the morning factor times
+ * its dial. From Creative Strategy on nothing changes: the island keeps its
+ * night and the arch its sunrise, as after dark.
+ *
+ * A morning key is its day key with:
+ *   - the place's own sun, where it stands by day (every view was lit for
+ *     it), paler and a touch weaker (MORNING_LIGHT), under a cooler fill and
+ *     a grade that lifts the shade toward lavender (MORNING_LOOK's lift and
+ *     near shade), so the shadows are softer and lighter;
+ *   - a clear sky: a cool blue top, a pale mid, a pink and peach band on the
+ *     horizon, pale gold toward the sun; no stars, no moon, no aurora and no
+ *     Milky Way;
+ *   - a pale blue lilac haze that lies thicker on the low ground (the air:
+ *     each ridge further back paler, the mountains' feet lost in it, the
+ *     peaks clear above), and a bank of lit mist lying in the low ground,
+ *     the tree tops and ridges standing out of its drifting top, warm toward
+ *     the sun and cool on the side turned from it (MORNING_LOOK's mist and
+ *     air, laid per row by the heights in each view, coming in with
+ *     distance, so the foreground stays crisp);
+ *   - the lamps out: lampGlow low, and the lamp materials turned toward unlit
+ *     glass by state.morning (MORNING_LAMP_TINT); the halos off (dress-shore,
+ *     dress-lakeforest); the forest's glow softer;
+ *   - lighter water, and a grade that keeps the colour (the day's saturation
+ *     and a little more, warm highlights over the cool lifted shade, a
+ *     dew-bright green: never a faded sunset);
+ *   - the day's fog ramp distances and haze shape (the ramp's end is the
+ *     camera's far plane, so the morning draws what the day draws).
+ * By day (factor 0) every key is its authored one, value for value, and with
+ * the morning at 0 the night is what it was, value for value
+ * (client-tests/night-clock.test.mjs and morning-clock.test.mjs).
+ */
+export interface MorningRow {
+  /** How far toward its morning this key goes at a morning factor of 1. */
+  dial: number;
+  /** Row overrides on the morning keyframe and look. */
+  light?: Partial<LightKeyframe>;
+  look?: Partial<LookKey>;
+}
+
+/** The morning's light against the day key's: the sun's intensity and the hemisphere fill times these, the ambient plus, the exposure and the grade's saturation times. */
+export const MORNING_LIGHT = { sun: 0.95, fill: 1.0, ambient: 0.03, exposure: 1.06, sat: 1.15 } as const;
+
+/** The morning every row starts from (display sRGB hex). */
+export const MORNING_BASE = {
+  sunColor: 0xffd49c, sunGlow: 0xffdcb4, sunHero: 0,
+  moonColor: 0xc8d4ff, moonIntensity: 0, moonVis: 0,
+  rimColor: 0xffe8d8, rimIntensity: 0,
+  skyTop: 0x5a94dc, skyMid: 0xc8cfee, skyHorizon: 0xf4cfc8, skyGlow: 0xffe0b8,
+  // The haze pass (2026-10-21): a bluer lilac (0xd6d0e6), so each ridge
+  // further back steps paler and cooler where the day's steps go gold.
+  haze: 0xd2d6ee,
+  hemiSky: 0xb0c0e8, hemiGround: 0x4e5c48,
+  ambient: 0xa2a8cc,
+  stars: 0, aurora: 0, band: 0,
+  cloudTop: 0xffefe6, cloudBase: 0xc4bed8, water: 0x6a88a8,
+  lampGlow: 0.12, magicGlow: 0.15,
+} satisfies Partial<LightKeyframe>;
+
+/**
+ * The morning's look: warm highlights over a cool, lifted shade (the day's
+ * saturation times MORNING_LIGHT.sat), a pink halo, the mist and the air. The
+ * ramp's distances and the haze's shape stay the day's.
+ *
+ * The haze pass (2026-10-21, the owner on the 07:30 sheet: "these don't really
+ * have any difference. Adding some haze would probably be more realistic of a
+ * morning"): the mist is a bank lying in the low ground with a soft, drifting
+ * top (mistDepth, mistSoft, mistWave), lit warm white toward the sun with the
+ * sun's glow in it and cooler on the side turned from it (mistColor,
+ * mistCool, mistGlow), and the air puts more of the ramp's own haze on the
+ * low ground (air, airLift, airFall), so the mountains' feet are lost in it
+ * and the peaks stand clear above. Each row lays its bank by the heights in
+ * its own view: mistDepth over the row's hazeBase, starting past what must
+ * stay crisp (mistNear).
+ *
+ * The haze's second round (2026-10-21, from two critiques of the first): the
+ * banks read as a grey veil. Where a bank lay over dark ground at 0.6 of a
+ * pixel, a pale lilac over warm dark green cancelled to mid grey (luma 118 to
+ * 145 at sat 0.02 to 0.06), and a soft top with a wide drift spanned the
+ * trees' whole height, so no top edge read. So the banks are denser (0.8 to
+ * 0.95), lower and crisper on top, reach full strength sooner past what must
+ * stay crisp, and are warmer: the side turned from the sun cools only 0.3 of
+ * the way to the haze (a warm white, about #f3e2d8, where it was a lilac
+ * grey, #e5dce1), and the side toward the sun carries twice the sun's glow.
+ * The air stays as it was from the opening to the Falls (it pales the ridges
+ * behind, which is the layering); the Gorge Trail takes more of it and the
+ * Mirror Lake less. Measured on the renders at 1691 x 1278, the page's own
+ * bottom scrim (the HUD's gradient over the canvas) takes the lower 40% of
+ * the frame down to 0.46 of its value at the bottom edge, so a bank low in
+ * the frame shows at most about 165 luma whatever its strength; the gorge's
+ * bank is deeper for that, so its bright top sits higher in the frame.
+ *
+ * The haze's third round (2026-10-22, from two critiques of the second): the
+ * haze stays and the grey is fixed with light and colour, row by row. Less
+ * air at the opening and the Landing, so each bank is the one bright layer
+ * with a top edge over the trees; the Gorge's bank a warm white with a crisp
+ * top that rises and falls; a rose lilac haze at Base Camp for first light
+ * on the peaks; the lake's band thinning and thickening along the water; the
+ * Glowing Forest's first mist, at the far trunks' feet.
+ *
+ * The third round's numbers in the rows were read at the page's full bottom
+ * shade. Since the same day the morning halves it (WorldV6.tsx
+ * MORNING_SHADE), so a bank low in the frame keeps more of its light; each
+ * row's last lines give it as the page shows it (renders of the page with its
+ * interface, 1691 x 1278, 07:30 against 15:00, the real GPU, on the code the
+ * morning posters were rendered from), with how far the view sits from its
+ * day at the size the owner saw the sheet on a phone (mean CIELAB dE76 at 420
+ * px wide, the top bar and the dock left out), against the tuned morning
+ * before the haze, which he found too close to the day.
+ */
+export const MORNING_LOOK = {
+  // Haze pass: the lobe 0.3 -> 0.6, the haze and the mist warmer toward the sun.
+  nearShade: 0x5a6088, sunLobe: 0.6,
+  lift: [0.02, 0.03, 0.07], gain: [1.02, 1.0, 0.98], gamma: 0.97,
+  halo: 0xf8cfc4, haloAmt: 0.6, haloDeg: 1.2, haloHalf: 5, haloFog: 0,
+  mist: 0.5, mistDepth: 60, mistSoft: 25, mistWave: 18, mistNear: 400, mistFar: 1200, mistColor: 0xffe6cc,
+  // Second round: mistCool 0.6 -> 0.3 and mistGlow 0.2 -> 0.4 (the lake and the forest set their own).
+  mistCool: 0.3, mistGlow: 0.4, air: 0.6, airLift: 40, airFall: 300,
+} satisfies Partial<LookKey>;
+
+/** One row per light key the opening and the first six places use (the keys between them included), as NIGHT_ROWS. */
+export const MORNING_ROWS: Partial<Record<LightWaypointKey, MorningRow>> = {
+  // The opening (tune pass): the near shade halfway back toward the day's
+  // dark one. Haze pass: the bank lies on the shore and in the forest band
+  // across the water (the ground there 0 to 60 over the sea), its top 72 up
+  // and drifting by 22, so the trees' feet are in it and their tops stand out.
+  // It comes in from 850 units out, just past the signpost (945 out, its arms
+  // 19 to 42 over its foot), which stands dark against it.
+  // Second round: the bank read as a grey veil over the whole tree band (its
+  // brightest fifth 153 luma, the shore bank only 30 over the trees above
+  // it). Denser (0.9), lower and crisper (top 58, soft 14, drift 22 kept), and
+  // at full strength by 1100 (the forest's feet are 1000 to 2000 out): a lit
+  // bank on the shore, its brightest fifth 177, with the tree tops just above
+  // it at 108 to 111 (a 65 luma step) and the band above y 860 as it was. It
+  // starts at 900, so the signpost keeps its dark against it.
+  // Third round: the air had brought back part of the milky middle (the tree
+  // tops above the bank 132 luma, the forest band behind them 148 at sat
+  // 0.04), and the bank read as a greige stripe of one height. Less air (0.5),
+  // so the bank is the one bright layer (the tree tops above it 121, the
+  // forest band 140, its top a 55 to 83 luma step where it was 51 to 74);
+  // the top rises and falls more and stays crisp (drift 32, soft 10: it
+  // reaches 100 over the water), so the bank lies in drifts along the shore;
+  // the side turned from the sun cools only 0.15 of the way to the haze, so
+  // the whole bank reads as lit cream.
+  // At the half shade: the bank on the shore 184 luma (sat 0.12; 64 by day),
+  // its brightest fifth 203, its top a 66 to 101 luma step inside 40 px; the
+  // tree tops above it 129 and the forest band 144 at sat 0.03 (95 and 120 by
+  // day). From the day dE 14.7 (10.0 before the haze).
+  "opening-gold": {
+    dial: 1,
+    look: {
+      nearShade: 0x404a6c, mist: 0.9, mistDepth: 58, mistSoft: 10, mistWave: 32, mistNear: 900, mistFar: 1100, mistCool: 0.15,
+      air: 0.5, airLift: 60, airFall: 300,
+    },
+  },
+  // The Landing (tune pass): less of the day's additive fog (0.3, set for a
+  // gold haze, it added pale lilac on the massif under the morning's). Haze
+  // pass: the bank in the meadow and the forest's feet (the ground 0 to 70
+  // here), from 300 units out; the signpost is 276 out.
+  // Second round: the band was a veil by distance (luma climbing smoothly
+  // from the near trees to the far slope, no edge). The forest's feet are 500
+  // to 1300 out on ground 27 to 70, so the bank is at full strength by 600,
+  // denser (0.85) and crisper on top (soft 16, drift 20, top 72): its
+  // brightest fifth 191 to 193 (it was 180 to 187), the trees' lower halves in
+  // it. The air stays 1.1, so the tree tops above the bank keep a pale veil
+  // (about 145) and the far slopes their paleness.
+  // Third round: from the massif's foot to the meadow the frame was one pale
+  // wash (the tree tops above the bank 157 luma at sat 0.07, the far forest
+  // 168 at 0.03), so no top edge read. Less air (0.6, lifted to 60) and a
+  // crisper top (soft 12): the tree tops 142, the bank's top 179, a 35 to 68
+  // luma step where it was 26 to 52. The haze a step bluer and stronger
+  // (0xc6d0ee), so the air that is left reads as blue distance (the far
+  // forest hue 232, it was 261).
+  // At the half shade: the bank's top 192 luma (68 by day), a 42 to 77 luma
+  // step under the tree tops (146); the far forest 157 at sat 0.05 (147 at
+  // 0.29 by day); the peak 189 at hue 15, the meadow's gold kept (sat 0.51).
+  // From the day dE 17.4 (10.0 before the haze).
+  "afternoon-gold": {
+    dial: 1,
+    light: { haze: 0xc6d0ee },
+    look: { fogAdd: 0.2, mist: 0.85, mistDepth: 72, mistSoft: 12, mistWave: 20, mistNear: 300, mistFar: 600, air: 0.6, airLift: 60, airFall: 300 },
+  },
+  // Base Camp (haze pass): the camera stands on the crest (hazeBase 120); the
+  // ground behind it rises from 150 to 300 before the mountains' feet (500 and
+  // more). The bank fills that hollow, top 230 over the base and drifting by
+  // 45, from 240 units out (the cabin and the tower's foot nearer), and the
+  // air lies thick up to 380 over the base and twice the ramp's own there, so
+  // the mountains' feet are lost in it and their tops catch the light.
+  // Second round: the left hill had gone khaki grey (its slope sat 0.08 by
+  // the cabin, 0.53 by day) and the trees behind the cabin were ghosts. The
+  // bank lies lower in the hollow with a crisper top (160, soft 25, drift
+  // 35) and starts at 300, denser (0.8), so the hollow is a white bank (its
+  // brightest fifth 199, it was 189), the trees behind the cabin stand dark in
+  // it (138 luma, they were 159) and the hill's slope above comes back toward
+  // its green (sat 0.15 to 0.29). The air is kept: the right valley's bright
+  // bank comes from it.
+  // Third round: the peaks read as chalk under a cold light (the left
+  // mountain a lilac grey, hue 257 at sat 0.09; the right peak's top hue 3
+  // at 0.09), where a real morning has first light on them. A rose lilac
+  // haze (0xdecce0): the left mountain hue 318 at sat 0.10, the right peak's
+  // top hue 6 at 0.15, the valley banks still warm white (their shaded side
+  // cools only 0.3 of the way to it). A rosier one (0xe2cad6, about a third
+  // of the Gorge's rose) lit the peaks a step pinker, but the frame came out
+  // 7.0 bluer than red over the day's, under the morning stop gate's 8.
+  // At the half shade: the left valley's bank, its brightest fifth 205 luma
+  // (137 by day); the left hill 130, an olive (hue 49, sat 0.17; 0.50 by
+  // day); the peaks as above (they sit over the shade). From the day dE 15.6
+  // (8.6 before the haze).
+  afternoon: {
+    dial: 1,
+    light: { haze: 0xdecce0 },
+    look: { mist: 0.8, mistDepth: 160, mistSoft: 25, mistWave: 35, mistNear: 300, mistFar: 600, air: 2.0, airLift: 380, airFall: 300 },
+  },
+  // The Falls (tune pass): the cliff in shade right of the falls read as a
+  // moonlit navy (the base's mossy bounce is half the fill on a vertical face,
+  // then the blue lift). A warm bounce as by day (the meadows face up and keep
+  // the sky's half, so the dew greens stay), less blue in the lift and the
+  // gain, and half the day's additive fog, which veiled the lit cliff in mauve.
+  // The shade's core now a dark violet (hue 268, sat 0.30, luma 38; it was
+  // 238 / 0.39 / 43); a lift of 0.045 blue left it indigo (258 / 0.34).
+  // Haze pass: the bank on the pool and along the river's valley (the ground
+  // there 41 to 61, the base 60), top 60 over it, from 160 units out, so the
+  // falls' foot and the valley's trees stand in it to half their height.
+  // Second round: the bank was grey inside (its brightest fifth 152, by the
+  // cliff's foot 130, where the dark trees and the orange rock showed through)
+  // and it reached the near rocks, the red pine and the log (sat 0.20, 0.34
+  // before the haze), which are 360 to 460 out, not nearer. Denser (0.95),
+  // from 420 to full by 560, so the foreground is crisp again (sat 0.31); a
+  // crisper top that drifts more (soft 20, drift 28, top 68), since a crisp
+  // top with little drift read as a flat stripe along the cliff. The whole
+  // view faces away from the sun, so the bank is the base's warm white side:
+  // its brightest fifth 186, by the cliff's foot 172.
+  // Third round: of the rows the owner flagged it changed least. The top 80
+  // (it was 68), so the bank rises out of the page's bottom shade and the
+  // valley's trees stand deeper in it (its brightest fifth 189); it still
+  // starts at 420, so the near rocks, the red pine and the log stay crisp.
+  // At the half shade: the bank's brightest fifth 206 luma (97 by day), its
+  // lower part 168, its top a step of up to 99 luma in 40 px; the near rocks,
+  // the red pine and the log 95 at sat 0.36. From the day dE 14.7 (9.7
+  // before the haze).
+  "late-afternoon": {
+    dial: 1,
+    light: { hemiGround: 0x5c4c40 },
+    look: {
+      lift: [0.025, 0.02, 0.035], gain: [1.04, 1.0, 0.95], fogAdd: 0.2,
+      mist: 0.95, mistDepth: 80, mistSoft: 20, mistWave: 28, mistNear: 420, mistFar: 560, air: 0.8, airLift: 40, airFall: 200,
+    },
+  },
+  // The gorge: a warmer sun and a pink haze, so the far range keeps the
+  // morning's first light (with the base's lilac haze it went grey).
+  // Tune pass: the far range was still a grey-white sheet (170 luma, sat
+  // 0.08), under the day's additive fog of 0.5 (set for a coral haze); half
+  // of it, a haze a step darker in the same rose, and the warm bounce, so the
+  // right wall's shade turns mauve brown: the range 143 luma. The blue sky and
+  // white clouds stay: they are what make this view a morning.
+  // Haze pass: the bank in the gorge, on the pool (61) and up the walls to 110
+  // over the base, from 600 units out (the bench and the hut are nearer); the
+  // air thick up to 200 over it, so the range's feet behind the rim are lost.
+  // Second round: the view read as noon beside the day's coral evening (a
+  // grey violet range, sat 0.08 to 0.10 at hue 294 to 307, and the gorge's
+  // mist a faint veil at the falls' foot with no top). The range takes no
+  // direct sun here (its colour is the fog ramp's over a dark base: the sun's
+  // colour and strength move it by nothing), so its first light comes from the
+  // ramp's sun side: a warmer sun glow and a rose haze (hue 7, sat 0.29), the
+  // Falls' grade (less blue in the lift and the gain) and less additive fog,
+  // so the range reads rose (sat 0.18 to 0.19 at hue 353 to 360) under the
+  // blue sky, with cloud tops a step peach. The bank fills the gorge, denser
+  // (0.9), lit on the side toward the low sun (mistGlow 0.5), up the walls to
+  // 185 over the base with a top that shows (soft 20), from 450 to full by
+  // 650: the trail and the hut (300, 240 over the base) stay above its
+  // highest drift (225). More air (1.5, falling over 200), so the range's
+  // feet behind the rim are lost in a pale band.
+  // Third round: the bank was a flat greige (139 luma at sat 0.19 over the
+  // gorge's body) with no top over its left two thirds: its soft top spread
+  // over 90 px on the near wall, and a peach mist under the page's plum
+  // bottom shade came out dusty. A crisp top that rises and falls (soft 8,
+  // drift 24, top 192: the highest drift 224, still under the hut's 240), a
+  // warm white (0xfff2e6) whose side turned from the sun stays white (cool
+  // 0.1), a touch denser (0.95): the body 151 luma at sat 0.09, the top a
+  // 52 to 82 luma step inside 30 px across the gorge (it was 21 to 45).
+  // At the half shade: the body 191 luma at sat 0.10 (72 by day), its top's
+  // brightest fifth 219, the top a 64 to 97 luma step inside 30 px; the range
+  // 122 at hue 2, sat 0.20 (rose); the hut and the trail 61, crisp. From the
+  // day dE 21.4 (20.8 before the haze: this view's day is a coral evening).
+  "gorge-sunset": {
+    dial: 1,
+    light: { sunColor: 0xffcf96, skyHorizon: 0xf6cac4, haze: 0xe8aca4, sunGlow: 0xffc49a, cloudTop: 0xffe2cc, hemiGround: 0x5c4c40 },
+    look: {
+      lift: [0.025, 0.02, 0.035], gain: [1.04, 1.0, 0.95], fogAdd: 0.15,
+      mist: 0.95, mistDepth: 192, mistSoft: 8, mistWave: 24, mistNear: 450, mistFar: 650, mistColor: 0xfff2e6, mistCool: 0.1, mistGlow: 0.5,
+      air: 1.5, airLift: 200, airFall: 200,
+    },
+  },
+  "sunset-cliff": { dial: 1 },
+  // The lake: its low sun kept, cooler; a pink horizon over the water; the
+  // mist a thin pink white layer on the water (the day's additive haze, 0.55,
+  // greyed the far shore out under the morning's pale haze).
+  // Tune pass: the Mirror Lake had lost its mirror (a pale lilac sheet, 157
+  // luma at sat 0.08, under a white band on the far shore). The mist only
+  // from 400 units out and thinner, a thin band over the far shore and a
+  // clear mirror nearer; the lake's own colour darker in the same blue (the
+  // base's is 132 luma, the day's 57); and a rose violet haze (keep it
+  // between hue 320 and 340: toward coral it is the day's sunset again). The
+  // lake 135 luma with the forest and the hill clear in it, the far shore's
+  // band 140 (164).
+  // Haze pass: the same thin band on the water (from the lake up 10, as it was:
+  // depth 5, soft 5), a little brighter and lit, and a light air on the far
+  // slopes; the mirror nearer stays clear.
+  // Second round: the frame was a grey violet sheet (the far forest sat 0.11
+  // at 99 luma) and the band on the water read as a grey line (its brightest
+  // fifth 158). A bank of mist on the far water and up the far shore's foot
+  // (0.6, top 16, soft 6, drifting by 12 on the slopes), in a warm white
+  // with the low sun's glow ahead in it, from 620 to full by 1000, so the
+  // nearer mirror keeps the forest, the hill and the boathouse: the band 187
+  // to 191 luma (its brightest fifth 198). Less air and additive fog on the
+  // far slopes (0.2 and 0.03), and the haze a step more saturated in the same
+  // hue (325, sat 0.18; it was 0.12), so the far forest comes back as a
+  // darker silhouette with its own colour (80 to 83 luma, sat 0.14 to 0.15).
+  // Third round: the band read as an off-white stripe ruled across the lake
+  // (183 to 199 luma at sat 0.06 to 0.07, the same from end to end), and with
+  // the sun just past the left edge no light came from the left. The top
+  // rises and falls more than the band is deep (drift 18 on a top of 14) and
+  // stays soft (9), so the band thins and thickens along the water, with the
+  // mirror showing through where it thins; denser where it lies (0.75); a
+  // warm white (0xffe6d2, less of the sun's glow in it: 0.45); the fog's
+  // glow toward the sun stronger (sunLobe 0.45), keeping the haze at hue
+  // 325. A cream gold (0xffdcb4) was tried and read as sandbanks on the
+  // water. The band 198 luma at sat 0.10, its brightest fifth 221.
+  // At the half shade the same (the band sits over the shade): the band 198
+  // (106 by day), its top an 85 to 135 luma step inside 30 px, the far forest
+  // 84 at sat 0.13, the nearer mirror 136. From the day dE 26.1 (22.9 before
+  // the haze).
+  sunset: {
+    dial: 1,
+    light: { skyMid: 0xd0c8ec, skyHorizon: 0xf6c8c0, skyGlow: 0xffd8b0, haze: 0xd1abc1, water: 0x4c6684 },
+    look: {
+      fogAdd: 0.03, sunLobe: 0.45, mist: 0.75, mistDepth: 14, mistSoft: 9, mistWave: 18, mistNear: 620, mistFar: 1000, mistColor: 0xffe6d2,
+      mistCool: 0.2, mistGlow: 0.45, air: 0.2, airLift: 40, airFall: 220,
+    },
+  },
+  // The forest: its dusk keeps the sun under the horizon and the floor dark
+  // (FOREST_DIM), so its morning is the dawn's pink and blue over the trees,
+  // the glow softer (still the brightest thing on the floor), and the mist
+  // further out (nearer, it hid the trees past the clearing in white).
+  dusk: {
+    dial: 1,
+    light: { magicGlow: 0.55, skyTop: 0x7a92d6, skyMid: 0xc8c2ea, skyHorizon: 0xf6c6c4, skyGlow: 0xffd2b4, haze: 0xcec4de },
+    // Haze pass: the same mist on the floor past the clearing, in drifts, and
+    // a little air between the far trunks. Second round: mist 0.6 was tried
+    // for the drifts past the clearing and moved the picture by at most 5
+    // levels on a few pixels, so the row stays as it is.
+    // Third round: the forest had no haze in it (a pale dawn sky over a dark
+    // forest can pass for dusk). The floor past the clearing (the trunks 600
+    // to 1500 out) was under a third of the mist at 1000 out and the bank's
+    // top lay below much of it, so the mist is full by 1100 (it was 2000),
+    // denser (0.85), deeper (85) and with a visible top (soft 14): a pale
+    // layer at the far trunks' feet left of the clearing, in it and behind
+    // the right-hand trees (their brightest fifth 192 and 162 luma, they were
+    // 142 and 137), the trunks dark above it, the near floor (23 luma) and
+    // the glow path as they were.
+    // At the half shade: the layer's brightest fifth 202 left of the clearing
+    // and 171 behind the right-hand trees (109 and 100 by day), the far
+    // trunks' feet across the frame 125; the near floor 22. From the day dE
+    // 17.1 (13.6 before the haze).
+    look: {
+      mist: 0.85, mistDepth: 85, mistSoft: 14, mistWave: 25, mistNear: 600, mistFar: 1100, mistColor: 0xf6f0f2,
+      mistCool: 0.4, mistGlow: 0.6, air: 0.6, airLift: 80, airFall: 250,
+    },
+  },
+};
+
+/**
+ * The morning's dew, in the grade (display space, after the saturation): a
+ * pixel whose green leads its red and blue is multiplied toward `mul`, `k` of
+ * the way at morning 1, so meadows and conifers come out fresher and a touch
+ * brighter, where the warm golds and the pink sky are left alone. 0 by day.
+ */
+export const MORNING_DEW = { k: 1, mul: [0.94, 1.1, 1.02] } as const;
+
+/**
+ * What a lamp material's colour is multiplied by at morning 1 (linear): the
+ * windows, the lanterns' glass and the fire read as unlit glass and metal in
+ * the morning light, cool and dark, where by day a lamp at the day's level
+ * reads as warm paint. Off by day (1, 1, 1).
+ */
+export const MORNING_LAMP_TINT: readonly [number, number, number] = [0.42, 0.56, 0.9];
+const _morningLampTint = new THREE.Color(...MORNING_LAMP_TINT);
+
+/** A day key's morning (MORNING_ROWS' header). */
+export function morningKeyframe(day: LightKeyframe, row: MorningRow): LightKeyframe {
+  return {
+    ...day,
+    ...MORNING_BASE,
+    sunAz: day.sunAz,
+    sunEl: day.sunEl,
+    sunIntensity: day.sunIntensity * MORNING_LIGHT.sun,
+    // No moon in the morning: the disc and its light stay where the day has them, at 0.
+    moonAz: day.moonAz,
+    moonEl: day.moonEl,
+    moonLightAz: day.moonLightAz,
+    moonLightEl: day.moonLightEl,
+    hemiIntensity: day.hemiIntensity * MORNING_LIGHT.fill,
+    ambientIntensity: day.ambientIntensity + MORNING_LIGHT.ambient,
+    exposure: day.exposure * MORNING_LIGHT.exposure,
+    ...row.light,
+    night: 0,
+    morning: 1,
+  };
+}
+
+/** A day look's morning: MORNING_LOOK over it, the ramp's distances and the haze's shape kept. */
+export function morningLook(day: LookKey, row: MorningRow): LookKey {
+  return {
+    ...day,
+    ...MORNING_LOOK,
+    sat: day.sat * MORNING_LIGHT.sat,
     rampStart: day.rampStart,
     rampEnd: day.rampEnd,
     hazeBase: day.hazeBase,
@@ -1103,6 +1536,27 @@ export interface LightState {
    * island and the arch nothing it draws changes.
    */
   night: number;
+  /**
+   * How much of the morning layer is in this light, 0..1: the morning factor
+   * times the place's dial, less what the night covers. 0 by day and at night
+   * everywhere, and always 0 from Creative Strategy on. What a module changes
+   * for the morning (the lamps' halos, the lamp glass) it changes by this.
+   */
+  morning: number;
+  /** The morning's mist (LookKey.mist..mistColor): its strength, depth over hazeBase, near and far distances, and colour (linear). */
+  mist: number;
+  mistDepth: number;
+  mistNear: number;
+  mistFar: number;
+  mistColor: THREE.Color;
+  /** The mist bank's shape and light, and the morning air (LookKey.mistSoft..airFall). 0 or harmless by day and at night. */
+  mistSoft: number;
+  mistWave: number;
+  mistCool: number;
+  mistGlow: number;
+  air: number;
+  airFall: number;
+  airLift: number;
   /** The moon disc's radius here, degrees (LightKeyframe.moonRadius). */
   moonRadius: number;
   /** Counts every time the module applies a new light (a scroll or a night change), for modules that cache what they read from it. */
@@ -1158,16 +1612,17 @@ export interface LightModule {
   /** C1: once every module is in, tag what the lake may reflect (REFLECT_NAMES). */
   afterAll?(): void;
   /**
-   * The night factor from the student's clock (clock.ts), 0 day .. 1 night.
-   * With easeMs it eases in over that long (the scene passes 0 while it
-   * sleeps, so the one frame it wakes shows the new light). The light is
-   * re-applied on the next update.
+   * The student's clock (clock.ts ClockLook): the night factor, 0 day .. 1
+   * night, and the morning factor under it, 0 .. 1. With easeMs both ease in
+   * together over that long (the scene passes 0 while it sleeps, so the one
+   * frame it wakes shows the new light). The light is re-applied on the next
+   * update.
    */
-  setNight(f: number, easeMs?: number): void;
+  setClock(night: number, morning: number, easeMs?: number): void;
   /** The night factor being shown (mid ease: between the old and the new). */
   readonly nightFactor: number;
-  /** NOT SHIPPED, dev only: the morning probe (MORNING_PROBE) on or off. */
-  setMood?(mood: "morning" | null): void;
+  /** The morning factor being shown (mid ease: between the old and the new). */
+  readonly morningFactor: number;
 }
 
 /**
@@ -1205,13 +1660,15 @@ const COLOR_FIELDS = [
 const NUMBER_FIELDS = [
   "sunHero", "sunIntensity", "moonIntensity", "moonVis", "rimIntensity",
   "hemiIntensity", "ambientIntensity", "exposure", "stars", "lampGlow", "magicGlow",
-  "aurora", "band", "night", "moonRadius",
+  "aurora", "band", "night", "moonRadius", "morning",
 ] as const;
 type ColorField = (typeof COLOR_FIELDS)[number];
-const LOOK_COLORS = ["nearShade", "halo"] as const;
+const LOOK_COLORS = ["nearShade", "halo", "mistColor"] as const;
 const LOOK_NUMBERS = [
   "fogNear", "fogFar", "hazeBase", "hazeFall", "hazeOn", "sunLobe", "fogCap",
   "liftR", "liftG", "liftB", "gainR", "gainG", "gainB", "gamma", "sat", "haloAmt", "haloDeg", "haloHalf", "haloFog", "fogAdd",
+  "mist", "mistDepth", "mistNear", "mistFar",
+  "mistSoft", "mistWave", "mistCool", "mistGlow", "air", "airFall", "airLift",
 ] as const;
 export interface LinearLook {
   colors: Record<(typeof LOOK_COLORS)[number], THREE.Color>;
@@ -1224,12 +1681,17 @@ function linearLook(k: LookKey, skyHorizon: number | null): LinearLook {
   if (k.halo !== null) halo.setHex(k.halo);
   else halo.setHex(skyHorizon ?? 0xffffff).lerp(new THREE.Color(1, 1, 1), 0.25);
   return {
-    colors: { nearShade: new THREE.Color().setHex(k.nearShade), halo },
+    // No mist (mist 0, a key without one): its colour is white, its shape a harmless 1.
+    colors: { nearShade: new THREE.Color().setHex(k.nearShade), halo, mistColor: new THREE.Color().setHex(k.mistColor ?? 0xffffff) },
     numbers: {
       fogNear: k.rampStart, fogFar: k.rampEnd, hazeBase: k.hazeBase, hazeFall: k.hazeFall, hazeOn: k.hazeOn,
       sunLobe: k.sunLobe, fogCap: k.fogCap, liftR: k.lift[0], liftG: k.lift[1], liftB: k.lift[2],
       gainR: k.gain[0], gainG: k.gain[1], gainB: k.gain[2], gamma: k.gamma, sat: k.sat,
       haloAmt: k.haloAmt, haloDeg: k.haloDeg, haloHalf: k.haloHalf, haloFog: k.haloFog ?? 0, fogAdd: k.fogAdd ?? 0,
+      mist: k.mist ?? 0, mistDepth: k.mistDepth ?? 1, mistNear: k.mistNear ?? 0, mistFar: k.mistFar ?? 1,
+      // The bank's shape and light, and the air (none on a key without a morning).
+      mistSoft: k.mistSoft ?? (k.mistDepth ?? 1) / 2, mistWave: k.mistWave ?? 0, mistCool: k.mistCool ?? 0, mistGlow: k.mistGlow ?? 0,
+      air: k.air ?? 0, airFall: k.airFall ?? k.hazeFall, airLift: k.airLift ?? 0,
     },
   };
 }
@@ -1304,6 +1766,8 @@ function newState(): LightState {
     haze: c(), fogNear: 0, fogFar: 0, hemiSky: c(), hemiGround: c(), hemiIntensity: 0,
     ambient: c(), ambientIntensity: 0, exposure: 1, stars: 0, cloudTop: c(), cloudBase: c(), water: c(),
     lampGlow: 1, magicGlow: 1, aurora: 0, band: 0, night: 0, moonRadius: MOON_RADIUS_DEG, rev: 0, under: 0,
+    morning: 0, mist: 0, mistDepth: 1, mistNear: 0, mistFar: 1, mistColor: new THREE.Color(1, 1, 1),
+    mistSoft: 0.5, mistWave: 0, mistCool: 0, mistGlow: 0, air: 0, airFall: 1, airLift: 0,
     nearShade: c(), halo: c(), hazeBase: 0, hazeFall: 1, hazeOn: 0, sunLobe: 0, fogCap: 0.92,
     liftR: 0, liftG: 0, liftB: 0, gainR: 1, gainG: 1, gainB: 1, gamma: 1, sat: 1, haloAmt: 0, haloDeg: 0, haloHalf: 1, haloFog: 0, fogAdd: 0,
   };
@@ -1342,7 +1806,7 @@ export function defaultPlaceU(): number[] {
 /** One stop of the light's track: a place, or a LIGHT_WAYPOINTS key. */
 export interface LightTrackStop {
   u: number;
-  /** The key the light blends: `day` at a night factor of 0, toward `night` above it (setTrackNight). */
+  /** The key the light blends: `day` at a night and a morning factor of 0, toward `morning` and `night` above them (setTrackClock). */
   key: LinearKey;
   hold: boolean;
   /** For a pass-through stop: d(blend)/d(railU), the same on both sides. */
@@ -1358,9 +1822,15 @@ export interface LightTrackStop {
    * disc came out of the frame at a dial under 1.
    */
   from: LinearKey;
-  /** The row's dial (0 without a row: the key never changes). */
+  /** The night row's dial (0 without a row: the key never goes to night). */
   dial: number;
-  /** The light rows the stop was built from, so the night can be rebuilt from changed rows (harness). */
+  /** The key's morning (MORNING_ROWS; the authored key itself where the light has no row). */
+  morning: LinearKey;
+  /** The morning side of the night's blend at the dawn: `morning` with the moon's disc and light where the night puts them, as `from` is the day's. */
+  dawn: LinearKey;
+  /** The morning row's dial (0 without a row: the key never goes to morning). */
+  mDial: number;
+  /** The light rows the stop was built from, so the night and the morning can be rebuilt from changed rows (harness). */
   src: { light: string; mix?: { to: string; k: number } };
 }
 
@@ -1397,37 +1867,44 @@ function lookOf(name: string): LookKey {
  * in railU order. A waypoint that falls on a place or outside the route is
  * left out.
  */
-/** A light row's day key, its night key and its dial (NIGHT_ROWS). */
-function keysOf(name: string): { day: LinearKey; night: LinearKey; dial: number } {
+/** A light row's day key, its night key and dial (NIGHT_ROWS), and its morning key and dial (MORNING_ROWS). */
+function keysOf(name: string): { day: LinearKey; night: LinearKey; dial: number; morning: LinearKey; mDial: number } {
   const kf = keyframeOf(name);
   const lk = lookOf(name);
   const day = linearKey(kf, lk);
   const row = (NIGHT_ROWS as Record<string, NightRow | undefined>)[name];
-  if (!row) return { day, night: day, dial: 0 };
-  return { day, night: linearKey(nightKeyframe(kf, row), nightLook(lk, row)), dial: Math.min(1, Math.max(0, row.dial)) };
+  const mrow = (MORNING_ROWS as Record<string, MorningRow | undefined>)[name];
+  const morning = mrow ? linearKey(morningKeyframe(kf, mrow), morningLook(lk, mrow)) : day;
+  const mDial = mrow ? Math.min(1, Math.max(0, mrow.dial)) : 0;
+  if (!row) return { day, night: day, dial: 0, morning, mDial };
+  return { day, night: linearKey(nightKeyframe(kf, row), nightLook(lk, row)), dial: Math.min(1, Math.max(0, row.dial)), morning, mDial };
 }
 
-/** A track stop's day and night keys and dial from its rows (a waypoint's mix blends the two rows' keys and dials). */
-function stopKeys(src: LightTrackStop["src"]): Pick<LightTrackStop, "day" | "night" | "from" | "dial"> {
+/** `key`, with the moon's disc and its light where `night` puts them where `key` shows neither (LightTrackStop.from). */
+function moonAsNight(key: LinearKey, night: LinearKey): LinearKey {
+  const hideDisc = key.numbers.moonVis <= 0;
+  const hideLight = key.numbers.moonIntensity <= 0;
+  if (!hideDisc && !hideLight) return key;
+  return {
+    ...key,
+    ...(hideDisc ? { moonAz: night.moonAz, moonEl: night.moonEl, numbers: { ...key.numbers, moonRadius: night.numbers.moonRadius } } : {}),
+    ...(hideLight ? { moonLightAz: night.moonLightAz, moonLightEl: night.moonLightEl } : {}),
+  };
+}
+
+/** A track stop's keys and dials from its rows (a waypoint's mix blends the two rows' keys and dials). */
+function stopKeys(src: LightTrackStop["src"]): Pick<LightTrackStop, "day" | "night" | "from" | "dial" | "morning" | "dawn" | "mDial"> {
   const a = keysOf(src.light);
   const b = src.mix ? keysOf(src.mix.to) : null;
   const k = src.mix ? src.mix.k : 0;
   const day = b ? mixLinearKey(a.day, b.day, k) : a.day;
   const night = b ? mixLinearKey(a.night, b.night, k) : a.night;
   const dial = b ? a.dial + (b.dial - a.dial) * k : a.dial;
-  let from = day;
-  if (night !== day) {
-    const hideDisc = day.numbers.moonVis <= 0;
-    const hideLight = day.numbers.moonIntensity <= 0;
-    if (hideDisc || hideLight) {
-      from = {
-        ...day,
-        ...(hideDisc ? { moonAz: night.moonAz, moonEl: night.moonEl, numbers: { ...day.numbers, moonRadius: night.numbers.moonRadius } } : {}),
-        ...(hideLight ? { moonLightAz: night.moonLightAz, moonLightEl: night.moonLightEl } : {}),
-      };
-    }
-  }
-  return { day, night, from, dial };
+  const from = night !== day ? moonAsNight(day, night) : day;
+  const morning = b ? mixLinearKey(a.morning, b.morning, k) : a.morning;
+  const mDial = b ? a.mDial + (b.mDial - a.mDial) * k : a.mDial;
+  const dawn = night !== day && morning !== day ? moonAsNight(morning, night) : morning;
+  return { day, night, from, dial, morning, dawn, mDial };
 }
 
 export function buildTrack(placeU: readonly number[]): LightTrackStop[] {
@@ -1455,44 +1932,79 @@ export function buildTrack(placeU: readonly number[]): LightTrackStop[] {
   return track;
 }
 
-/** Each stop's blended key, kept between calls so laying the night allocates nothing. */
+/** Each stop's blended keys, kept between calls so laying the clock allocates nothing: the night's blend, the morning's over the day, the dawn's base. */
 const _nightKeys = new WeakMap<LightTrackStop, LinearKey>();
+const _morningKeys = new WeakMap<LightTrackStop, LinearKey>();
+const _dawnKeys = new WeakMap<LightTrackStop, LinearKey>();
+function scratchKey(map: WeakMap<LightTrackStop, LinearKey>, t: LightTrackStop, a: LinearKey, b: LinearKey): LinearKey {
+  let out = map.get(t);
+  if (!out) {
+    out = mixLinearKey(a, b, 0);
+    map.set(t, out);
+  }
+  return out;
+}
+
+/** The blend weight the morning layer uses for a morning factor m (0..1): m itself (the morning and the day are both lit, so a straight blend in linear light looks even; the clock's fade is already a smoothstep). */
+export function morningWeight(m: number): number {
+  return Math.min(1, Math.max(0, Number.isFinite(m) ? m : 0));
+}
 
 /**
- * Lays the night layer on a track at night factor f (0..1), in place: each
- * stop's key is its day key blended toward its night by f times its dial. At
- * f 0 every key is its day key (the same object). The stops' places, holds
- * and rates never change, so the blend along the route is the day's.
+ * Lays the clock on a track at night factor f and morning factor m (0..1),
+ * in place: each stop's key is its day key blended toward its morning by m
+ * times its morning dial, then toward its night by nightWeight(f) times its
+ * night dial. At m 0 this is the night layer exactly as it was before the
+ * morning (the day under the night: the same keys, the same arithmetic), and
+ * at f 0 and m 0 every key is its day key (the same object). At the dawn the
+ * night goes off the morning (`dawn`, the morning with the night's moon
+ * placement, as `from` is the day's). The stops' places, holds and rates never
+ * change, so the blend along the route is the day's.
  */
-export function setTrackNight(track: readonly LightTrackStop[], f: number): void {
+export function setTrackClock(track: readonly LightTrackStop[], f: number, m: number): void {
   const n = nightWeight(f);
+  const mw = morningWeight(m);
   for (const t of track) {
-    const w = n * t.dial;
-    if (w <= 0) {
-      t.key = t.day;
-      continue;
-    }
-    if (w >= 1) {
+    const wn = n * t.dial;
+    const wm = mw * t.mDial;
+    if (wn >= 1) {
       t.key = t.night;
       continue;
     }
-    let out = _nightKeys.get(t);
-    if (!out) {
-      out = mixLinearKey(t.from, t.night, 0);
-      _nightKeys.set(t, out);
+    if (wm <= 0) {
+      // The day under the night (the dusk and the night): as before the morning.
+      t.key = wn <= 0 ? t.day : mixLinearKeyInto(scratchKey(_nightKeys, t, t.from, t.night), t.from, t.night, wn);
+      continue;
     }
-    t.key = mixLinearKeyInto(out, t.from, t.night, w);
+    if (wn <= 0) {
+      // The morning over the day (06:00 to 10:00).
+      t.key = wm >= 1 ? t.morning : mixLinearKeyInto(scratchKey(_morningKeys, t, t.day, t.morning), t.day, t.morning, wm);
+      continue;
+    }
+    // The night over the morning (the dawn, 05:00 to 06:00).
+    const base = wm >= 1 ? t.dawn : mixLinearKeyInto(scratchKey(_dawnKeys, t, t.from, t.dawn), t.from, t.dawn, wm);
+    t.key = mixLinearKeyInto(scratchKey(_nightKeys, t, t.from, t.night), base, t.night, wn);
   }
 }
 
-/** Rebuilds every stop's night key and dial from the rows as they are now (the harness tries rows in the page). */
-export function rebuildTrackNight(track: readonly LightTrackStop[]): void {
+/** The night layer alone (setTrackClock with no morning): the day under the night. */
+export function setTrackNight(track: readonly LightTrackStop[], f: number): void {
+  setTrackClock(track, f, 0);
+}
+
+/** Rebuilds every stop's night and morning keys and dials from the rows as they are now (the harness tries rows in the page). */
+export function rebuildTrackClock(track: readonly LightTrackStop[]): void {
   for (const t of track) {
     const k = stopKeys(t.src);
     t.night = k.night;
     t.from = k.from;
     t.dial = k.dial;
+    t.morning = k.morning;
+    t.dawn = k.dawn;
+    t.mDial = k.mDial;
     _nightKeys.delete(t);
+    _morningKeys.delete(t);
+    _dawnKeys.delete(t);
   }
 }
 
@@ -1736,6 +2248,17 @@ export interface FwUniforms {
   fwAdd: { value: number };
   /** The night layer's pale rule (NIGHT_PALE x state.night): how much a pale albedo comes down, how much any albedo greys. Read only by the materials nightPale() hooks. */
   fwPale: { value: THREE.Vector2 };
+  /** The morning's mist: its colour toward the sun (display, not linear) and strength (0 but in the morning), and its shape: depth over the haze base, near, 1 / (far - near), 1 / (2 x the top edge's softness). */
+  fwMist: { value: THREE.Vector4 };
+  fwMistShape: { value: THREE.Vector4 };
+  /** The mist's side turned from the sun (display, not linear), and how far its top rises and falls over the ground (world units). */
+  fwMistShade: { value: THREE.Vector4 };
+  /** The morning air: x more of the ramp's haze on the low ground, y -log2(e) / its fall over height, z the height it is full up to. */
+  fwAir: { value: THREE.Vector3 };
+  /** The mist's drift: a small tiling noise (MIST_NOISE_N square, MIST_NOISE_TILE world units across), read once a pixel in the morning only. */
+  fwMistNoise: { value: THREE.DataTexture };
+  /** The morning's dew (MORNING_DEW x state.morning): how much fresher the greens come out of the grade. */
+  fwDew: { value: number };
 }
 
 /**
@@ -1778,6 +2301,16 @@ export function nightPale(mat: THREE.Material): void {
   mat.customProgramCacheKey = () => "v6-night-pale";
 }
 
+/**
+ * The morning mist's drift (the haze pass): a tiling value noise, two
+ * octaves (4 and 8 cells across), MIST_NOISE_N texels square and
+ * MIST_NOISE_TILE world units across, so the bank's top rises and falls in
+ * drifts of about 140 to 280 units. One texture read a pixel, in the morning
+ * only, in place of the two sines the first build of the bank used.
+ */
+const MIST_NOISE_N = 64;
+const MIST_NOISE_TILE = 1100;
+
 const FW_FOG_PARS_VERTEX = /* glsl */ `
 #ifdef USE_FOG
 	varying float vFogDepth;
@@ -1810,6 +2343,11 @@ const FW_FOG_PARS_FRAGMENT = /* glsl */ `
 	uniform vec3 fwSunDir;
 	uniform vec3 fwLobe;
 	uniform float fwAdd;
+	uniform vec4 fwMist;
+	uniform vec4 fwMistShape;
+	uniform vec4 fwMistShade;
+	uniform vec3 fwAir;
+	uniform sampler2D fwMistNoise;
 #endif
 `;
 const FW_FOG_FRAGMENT = /* glsl */ `
@@ -1836,6 +2374,37 @@ const FW_FOG_FRAGMENT = /* glsl */ `
 			// v6 additive term: mid distance layers lighten toward the ramp's hue;
 			// a * (1 - a) keeps the far end (a -> cap) meeting the sky.
 			gl_FragColor.rgb = min( gl_FragColor.rgb + fwOut * ( fwAdd * 2.0 * fwF.a * ( 1.0 - fwF.a ) ), vec3( 1.0 ) );
+			// The morning (light.ts MORNING_LOOK; fwMist.a is 0 but in the
+			// morning, and then all of this is skipped). One test on a uniform
+			// and nothing that tests the pixel inside it: a test on the pixel
+			// (an early way out under the mist, nested or joined to this one)
+			// changed how the lines above compile and moved the day's picture
+			// by a level on a few pixels.
+			if ( fwMist.a > 0.0 ) {
+				float fwMy = cameraPosition.y + vFwOff.y - fwHaze.x;
+				// The air: more of the ramp's own haze on the low ground
+				// (fwAir.x of its alpha up to fwAir.z over the haze base, falling
+				// off above that, fwAir.y = -log2(e) / the fall), so the
+				// mountains' feet are lost in it and each ridge further back is
+				// paler, the peaks above in the day's air.
+				gl_FragColor.rgb = mix( gl_FragColor.rgb, fwOut, min( fwF.a * fwAir.x * exp2( max( fwMy - fwAir.z, 0.0 ) * fwAir.y ), fwRamp.z ) );
+				// The mist: a bank lying in the low ground, its top fwMistShape.x
+				// over the haze base, rising and falling by up to fwMistShade.a
+				// over the ground (a tiling noise on the world's x and z,
+				// MIST_NOISE_TILE across) and soft over its edge, so the tree
+				// tops and the ridges stand out of it; coming in with distance
+				// (from fwMistShape.y), so the foreground stays crisp. Lit: the
+				// side toward the sun in fwMist.rgb (the sun's glow already in
+				// it), the side turned from it in fwMistShade.rgb, both display
+				// colours, so nothing is converted here.
+				float fwTop = fwMistShape.x + fwMistShade.a * ( texture2D( fwMistNoise, ( cameraPosition.xz + vFwOff.xz ) * ${(1 / MIST_NOISE_TILE).toFixed(8)} ).r * 2.0 - 1.0 );
+				// The top edge's smoothstep written out and the distance a straight
+				// fade, their divisions done once on the CPU (fwMistShape.w =
+				// 1 / (2 x soft), .z = 1 / (far - near)).
+				float fwMt = clamp( ( fwTop - fwMy ) * fwMistShape.w + 0.5, 0.0, 1.0 );
+				float fwMk = fwMt * fwMt * ( 3.0 - 2.0 * fwMt ) * clamp( ( fwD - fwMistShape.y ) * fwMistShape.z, 0.0, 1.0 ) * fwMist.a;
+				gl_FragColor.rgb = mix( gl_FragColor.rgb, mix( fwMistShade.rgb, fwMist.rgb, fwT ), fwMk );
+			}
 		} else {
 			float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
 			gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
@@ -1849,6 +2418,7 @@ const FW_GRADE = /* glsl */ `
 uniform vec3 fwLift;
 uniform vec3 fwGain;
 uniform vec2 fwGS;
+uniform float fwDew;
 vec3 CustomToneMapping( vec3 color ) {
 	vec3 c = clamp( ACESFilmicToneMapping( color ), 0.0, 1.0 );
 	vec3 g = pow( c, vec3( 1.0 / 2.2 ) );
@@ -1857,6 +2427,13 @@ vec3 CustomToneMapping( vec3 color ) {
 	g = pow( max( g, 0.0 ), vec3( 1.0 / ( 1.0 + fwGS.x ) ) );
 	float l = dot( g, vec3( 0.2126, 0.7152, 0.0722 ) );
 	g = max( mix( vec3( l ), g, 1.0 + fwGS.y ), 0.0 );
+	// The morning's dew (light.ts MORNING_DEW; fwDew is 0 but in the morning,
+	// and then this is skipped): what is green comes out fresher, a touch
+	// brighter and cooler.
+	if ( fwDew > 0.0 ) {
+		float gk = smoothstep( 0.0, 0.08, g.g - max( g.r, g.b ) * 0.95 );
+		g = mix( g, g * vec3( ${MORNING_DEW.mul.map((v) => v.toFixed(3)).join(", ")} ), gk * fwDew );
+	}
 	return pow( g, vec3( 2.2 ) );
 }
 `;
@@ -1872,6 +2449,44 @@ export const FW_FOG_GLSL = {
 /** The live shared ramp and grade uniforms of the scene's light module (null before it installs). */
 export function rampFogUniforms(scene: THREE.Scene): FwUniforms | null {
   return (scene.userData.fwUniforms as FwUniforms | undefined) ?? null;
+}
+
+function buildMistNoise(): THREE.DataTexture {
+  const N = MIST_NOISE_N;
+  const data = new Uint8Array(N * N);
+  const fade = (t: number) => t * t * (3 - 2 * t);
+  // Value noise on a lattice of `cells` that wraps at the tile's edge, so the texture tiles.
+  const octave = (u: number, v: number, cells: number, seed: number) => {
+    const x = u * cells;
+    const y = v * cells;
+    const i = Math.floor(x);
+    const j = Math.floor(y);
+    const fx = fade(x - i);
+    const fy = fade(y - j);
+    const at = (a: number, b: number) => hash1(((a % cells) + cells) % cells + (((b % cells) + cells) % cells) * cells, seed);
+    const top = at(i, j) + (at(i + 1, j) - at(i, j)) * fx;
+    const bot = at(i, j + 1) + (at(i + 1, j + 1) - at(i, j + 1)) * fx;
+    return top + (bot - top) * fy;
+  };
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const u = x / N;
+      const v = y / N;
+      const n = octave(u, v, 4, 31) * 0.68 + octave(u, v, 8, 37) * 0.32;
+      // Stretched toward the ends, so the drifts rise and fall the full amount.
+      const c = Math.min(1, Math.max(0, (n - 0.5) * 1.6 + 0.5));
+      data[y * N + x] = Math.round(c * 255);
+    }
+  }
+  const tex = new THREE.DataTexture(data, N, N, THREE.RedFormat, THREE.UnsignedByteType);
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.generateMipmaps = false;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.needsUpdate = true;
+  return tex;
 }
 
 const RAMP_W = 256;
@@ -1933,6 +2548,8 @@ function hermite(xs: readonly number[], ys: readonly number[], ms: readonly numb
 
 const _rc = new THREE.Color();
 const _ra = new THREE.Color();
+const _mistShade = new THREE.Color();
+const _mistLit = new THREE.Color();
 const _stopR: number[] = [];
 const _stopG: number[] = [];
 const _stopB: number[] = [];
@@ -2046,11 +2663,10 @@ export function install(ctx: LightCtx): LightModule {
   const owned: THREE.Object3D[] = [];
   const disposables: { dispose(): void }[] = [];
   let forcedU: number | null = null;
-  // The night layer (setNight): the factor shown, and the ease toward a new one.
+  // The clock's layers (setClock): the night and morning factors shown, and the ease toward new ones (both together).
   let nightNow = 0;
-  const nightEase = { from: 0, to: 0, t0: 0, ms: 0 };
-  /** NOT SHIPPED: the morning probe's strength (setMood), 0 off. */
-  let moodK = 0;
+  let morningNow = 0;
+  const clockEase = { from: 0, to: 0, mFrom: 0, mTo: 0, t0: 0, ms: 0 };
 
   const skyUniforms = {
     uHaze: { value: new THREE.Color() },
@@ -2071,6 +2687,7 @@ export function install(ctx: LightCtx): LightModule {
   // ── Fog ramp and grade (see "The fog ramp and the grade") ──
   const rampSun = newRampTexture();
   const rampAway = newRampTexture();
+  const mistNoise = buildMistNoise();
   const fw: FwUniforms = {
     fwOn: { value: 1 },
     fwRampSun: { value: rampSun },
@@ -2084,6 +2701,12 @@ export function install(ctx: LightCtx): LightModule {
     fwGS: { value: new THREE.Vector2() },
     fwAdd: { value: 0 },
     fwPale: { value: new THREE.Vector2(0, 0) },
+    fwMist: { value: new THREE.Vector4(1, 1, 1, 0) },
+    fwMistShape: { value: new THREE.Vector4(1, 0, 1, 1) },
+    fwMistShade: { value: new THREE.Vector4(1, 1, 1, 0) },
+    fwAir: { value: new THREE.Vector3(0, -Math.LOG2E, 0) },
+    fwMistNoise: { value: mistNoise },
+    fwDew: { value: 0 },
   };
   scene.userData.fwUniforms = fw;
   const chunks = THREE.ShaderChunk as unknown as Record<string, string>;
@@ -2642,36 +3265,41 @@ export function install(ctx: LightCtx): LightModule {
       if (mode !== reflectMode) reflectFrozen = false;
       reflectMode = mode;
     },
-    setNight(f: number, easeMs = 0) {
-      const to = Math.min(1, Math.max(0, Number.isFinite(f) ? f : 0));
+    setClock(night: number, morning: number, easeMs = 0) {
+      const to = Math.min(1, Math.max(0, Number.isFinite(night) ? night : 0));
+      const mTo = Math.min(1, Math.max(0, Number.isFinite(morning) ? morning : 0));
       if (!(easeMs > 0)) {
-        nightEase.ms = 0;
-        nightEase.to = to;
-        layNight(to);
+        clockEase.ms = 0;
+        clockEase.to = to;
+        clockEase.mTo = mTo;
+        layClock(to, mTo);
         return;
       }
-      if (nightEase.ms > 0 && nightEase.to === to) return;
-      if (nightEase.ms <= 0 && to === nightNow) return;
-      nightEase.from = nightNow;
-      nightEase.to = to;
-      nightEase.t0 = performance.now();
-      nightEase.ms = easeMs;
+      if (clockEase.ms > 0 && clockEase.to === to && clockEase.mTo === mTo) return;
+      if (clockEase.ms <= 0 && to === nightNow && mTo === morningNow) return;
+      clockEase.from = nightNow;
+      clockEase.to = to;
+      clockEase.mFrom = morningNow;
+      clockEase.mTo = mTo;
+      clockEase.t0 = performance.now();
+      clockEase.ms = easeMs;
     },
     get nightFactor() {
       return nightNow;
     },
-    setMood(mood) {
-      moodK = mood === "morning" ? MORNING_PROBE.k : 0;
-      lastU = NaN;
+    get morningFactor() {
+      return morningNow;
     },
     update() {
-      // The night's ease, by the wall clock: a frame drawn late (the map woke
+      // The clock's ease, by the wall clock: a frame drawn late (the map woke
       // after a sleep) lands on the light the ease would have reached.
-      if (nightEase.ms > 0) {
-        const t = Math.min(1, (performance.now() - nightEase.t0) / nightEase.ms);
-        const f = nightEase.from + (nightEase.to - nightEase.from) * (t * t * (3 - 2 * t));
-        if (t >= 1) nightEase.ms = 0;
-        layNight(t >= 1 ? nightEase.to : f, t >= 1);
+      if (clockEase.ms > 0) {
+        const t = Math.min(1, (performance.now() - clockEase.t0) / clockEase.ms);
+        const e = t * t * (3 - 2 * t);
+        const f = clockEase.from + (clockEase.to - clockEase.from) * e;
+        const m = clockEase.mFrom + (clockEase.mTo - clockEase.mFrom) * e;
+        if (t >= 1) clockEase.ms = 0;
+        layClock(t >= 1 ? clockEase.to : f, t >= 1 ? clockEase.mTo : m, t >= 1);
       }
       const u = forcedU ?? ctx.railU();
       const cam = ctx.camera;
@@ -2688,8 +3316,6 @@ export function install(ctx: LightCtx): LightModule {
       if (uChanged) {
         lastU = u;
         blendTrack(u, track, placeU, state);
-        // NOT SHIPPED: the morning probe, full to the forest, gone by the island.
-        if (moodK > 0) applyMorningProbe(state, moodK * (1 - smoothstep(placeU[5], placeU[6], u)));
         state.rev++;
         applyState();
         walkMaterials();
@@ -2701,8 +3327,8 @@ export function install(ctx: LightCtx): LightModule {
       return uChanged;
     },
     isAnimating() {
-      // Only while the night eases in: nothing in the light moves on its own.
-      return nightEase.ms > 0;
+      // Only while the clock's layers ease in: nothing in the light moves on its own.
+      return clockEase.ms > 0;
     },
     dispose() {
       for (const o of owned) o.parent?.remove(o);
@@ -2720,6 +3346,7 @@ export function install(ctx: LightCtx): LightModule {
       if (gradeOk && renderer.toneMapping === THREE.CustomToneMapping) renderer.toneMapping = toneMappingWas;
       rampSun.dispose();
       rampAway.dispose();
+      mistNoise.dispose();
       if (scene.userData.fwUniforms === fw) delete scene.userData.fwUniforms;
       if (scene.userData.light === handle) delete scene.userData.light;
     },
@@ -2757,10 +3384,12 @@ export function install(ctx: LightCtx): LightModule {
         rampEnd: Math.round(fw.fwRamp.value.y),
         lampGlow: Math.round(state.lampGlow * 1e3) / 1e3,
         magicGlow: Math.round(state.magicGlow * 1e3) / 1e3,
-        // The night layer: the clock's factor (mid ease: the one shown), and how much of it is here.
+        // The clock's layers: the factors (mid ease: the ones shown), and how much of each is here.
         night: Math.round(nightNow * 1e3) / 1e3,
         nightHere: Math.round(state.night * 1e3) / 1e3,
-        nightEasing: nightEase.ms > 0 ? 1 : 0,
+        nightEasing: clockEase.ms > 0 ? 1 : 0,
+        morning: Math.round(morningNow * 1e3) / 1e3,
+        morningHere: Math.round(state.morning * 1e3) / 1e3,
         aurora: Math.round(state.aurora * 1e3) / 1e3,
         forestDim: Math.round(forestNow * 1e3) / 1e3,
         cloudTriangles: cloudIndexUp.count / 3,
@@ -2773,18 +3402,19 @@ export function install(ctx: LightCtx): LightModule {
   };
 
   /**
-   * The night layer at factor f: the track's keys blended (setTrackNight), the
-   * light re-applied on the next update (as a scroll would), and the lowest
-   * tier's kept reflection drawn again, or a student parked at the lake would
-   * see the old sky in the water.
+   * The clock's layers at night factor f and morning factor m: the track's
+   * keys blended (setTrackClock), the light re-applied on the next update (as
+   * a scroll would), and the lowest tier's kept reflection drawn again, or a
+   * student parked at the lake would see the old sky in the water.
    */
-  function layNight(f: number, redrawFrozen = true) {
-    if (f === nightNow) {
+  function layClock(f: number, m: number, redrawFrozen = true) {
+    if (f === nightNow && m === morningNow) {
       if (redrawFrozen) reflectFrozen = false;
       return;
     }
     nightNow = f;
-    setTrackNight(track, f);
+    morningNow = m;
+    setTrackClock(track, f, m);
     lastU = NaN;
     // Mid ease the kept reflection waits for the ease to land (one redraw, not one a frame on the slowest machines).
     if (redrawFrozen) reflectFrozen = false;
@@ -2869,12 +3499,16 @@ export function install(ctx: LightCtx): LightModule {
         // The night layer: a lamp warms toward NIGHT_LAMP_TINT (at 1.1 under the
         // night's exposure ACES took a lit window to white). Magic keeps its hue.
         const warm = kind === "lamp" ? state.night : 0;
-        if (mat.userData.lightGlowLevel === level && (mat.userData.lightGlowWarm ?? 0) === warm) continue;
+        // The morning layer: a lamp turns toward unlit glass (MORNING_LAMP_TINT); 0 by day and at night.
+        const cool = kind === "lamp" ? state.morning : 0;
+        if (mat.userData.lightGlowLevel === level && (mat.userData.lightGlowWarm ?? 0) === warm && (mat.userData.lightGlowCool ?? 0) === cool) continue;
         if (!mat.userData.lightGlowBase) mat.userData.lightGlowBase = colored.color.clone();
         colored.color.copy(mat.userData.lightGlowBase as THREE.Color).multiplyScalar(level);
         if (warm > 0) colored.color.multiply(_lampTint.setRGB(1, 1, 1).lerp(_nightLampTint, warm));
+        if (cool > 0) colored.color.multiply(_lampTint.setRGB(1, 1, 1).lerp(_morningLampTint, cool));
         mat.userData.lightGlowLevel = level;
         mat.userData.lightGlowWarm = warm;
+        mat.userData.lightGlowCool = cool;
       }
     });
     glowMaterials = found;
@@ -2971,6 +3605,17 @@ export function install(ctx: LightCtx): LightModule {
     fw.fwGS.value.set(s.gamma - 1, s.sat - 1);
     fw.fwAdd.value = s.fogAdd;
     fw.fwPale.value.set(NIGHT_PALE.pull * s.night, NIGHT_PALE.grey * s.night);
+    // The morning's mist and air (0 but in the morning: the fog's morning branches are skipped).
+    // The mist's two colours go up as display colours (the fog mixes in display space, and this saves the shader a conversion a pixel);
+    // the side toward the sun carries the sun's glow (sunGlow, the ramp's lobe strength, times mistGlow), so the shader adds none.
+    _mistLit.copy(s.sunGlow).multiplyScalar(s.sunLobe * s.mistGlow * smoothstep(-6, 1, s.sunEl)).add(s.mistColor).convertLinearToSRGB();
+    fw.fwMist.value.set(Math.min(1, _mistLit.r), Math.min(1, _mistLit.g), Math.min(1, _mistLit.b), s.mist);
+    // The shape's two ranges as reciprocals (the shader's smoothsteps are written out).
+    fw.fwMistShape.value.set(Math.max(1, s.mistDepth), s.mistNear, 1 / Math.max(1, s.mistFar - s.mistNear), 1 / (2 * Math.max(1, s.mistSoft)));
+    _mistShade.copy(s.mistColor).lerp(s.haze, s.mistCool).convertLinearToSRGB();
+    fw.fwMistShade.value.set(_mistShade.r, _mistShade.g, _mistShade.b, Math.max(0, s.mistWave));
+    fw.fwAir.value.set(Math.max(0, s.air), -Math.LOG2E / Math.max(1, s.airFall), s.airLift);
+    fw.fwDew.value = MORNING_DEW.k * s.morning;
     lakeMat.uniforms.uDeep.value.copy(s.water);
     // The lake's colour when it is too far to reflect: the sky a little above the horizon.
     skyCpu(s, tmpDir.set(0, 0.18, -1).normalize(), lakeMat.uniforms.uSkyTint.value);
@@ -3045,17 +3690,22 @@ export function install(ctx: LightCtx): LightModule {
   Object.assign(handle, {
     debugKey: (k: LightKeyframe, look: LookKey) => linearKey(k, look),
     debugRows: () => ({ LIGHTS, LIGHTS_BETWEEN, LOOKS }),
-    // Harness only: the night layer's rows, live. Change NIGHT_ROWS, NIGHT_BASE
-    // or NIGHT_LOOK in the page, then debugNight().rebuild() lays them.
+    // Harness only: the clock's rows, live. Change NIGHT_ROWS, NIGHT_BASE,
+    // NIGHT_LOOK, MORNING_ROWS, MORNING_BASE, MORNING_LOOK or MORNING_LIGHT in
+    // the page, then debugNight().rebuild() lays them.
     debugNight: () => ({
       NIGHT_ROWS,
       NIGHT_BASE,
       NIGHT_LOOK,
+      MORNING_ROWS,
+      MORNING_BASE,
+      MORNING_LOOK,
+      MORNING_LIGHT,
       rebuild() {
-        rebuildTrackNight(track);
+        rebuildTrackClock(track);
         const f = nightNow;
         nightNow = -1;
-        layNight(f);
+        layClock(f, morningNow);
       },
     }),
   });

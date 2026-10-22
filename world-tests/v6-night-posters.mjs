@@ -38,7 +38,32 @@
  *   6. The clock crossing the line with the page open (20:20, then 20:30 on
  *      coming back to the tab): poster mode's posters, the phone's picture
  *      and <html> turn to night.
- * Pictures in --out (default world-tests/shots/v6/night-posters/). About 2 minutes.
+ * And the morning posters (2026-10-21, the morning on the same clock):
+ *   7. 07:30, desktop: morning from the first frame; k0-morning.webp and no
+ *      day or night file of a place that has a morning; every frame the page
+ *      painted, from its first to the live map's 1.5 s after it took over,
+ *      nearer the page's morning than its day and its night; its layout shift
+ *      the day load's. The morning and the day are closer than the day and
+ *      the night (the page's shade over the poster's sea weighs as much as
+ *      the light), so the references are the page's own frames at 12:00,
+ *      23:00 and 07:30 (the poster showing at 1 s, and the live map alone),
+ *      a frame of one flat colour is the page's blank ground before any
+ *      picture (counted apart), and every other frame is fitted as a fade
+ *      from that ground toward each reference before its distance is read.
+ *   8. 07:30, phone: the loading card's ground and the Landing's picture in
+ *      the morning, no day or night file, and in every frame the band where a
+ *      picture shows (under the header: the card's ground, then the place's
+ *      picture) dark (before any picture, counted apart) or, fitted as a fade
+ *      from dark, nearer the morning's pictures than the day's and the
+ *      night's.
+ *   9. Round the morning's two lines: 05:30 night, 05:40 morning, 09:15
+ *      morning, 09:45 day (the attribute and the files).
+ *  10. Poster mode at 07:30: k0 to a6 their morning twins, a7 and a8 their
+ *      one file, all loaded.
+ *  11. The clock crossing the morning's lines with the page open (05:30 then
+ *      05:40, and 09:25 then 09:35): poster mode's posters, the phone's
+ *      picture and <html> follow.
+ * Pictures in --out (default world-tests/shots/v6/night-posters/). About 3 minutes.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -60,6 +85,8 @@ const Q = "catalog=course&p=p0&discount=locked&tod=clock";
 const DESKTOP = { width: 1691, height: 1278, deviceScaleFactor: 1 };
 const PHONE = { width: 390, height: 844, deviceScaleFactor: 3, isMobile: true, hasTouch: true };
 const NIGHT_IDS = ["k0", "a1", "a2", "a3", "a4", "a5", "a6"];
+/** The places with a morning twin: the same seven (poster.ts MORNING_POSTER_IDS). */
+const MORNING_IDS = NIGHT_IDS;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let pass = 0;
 const fails = [];
@@ -80,7 +107,7 @@ const STILLS = (() => {
     const i = css.indexOf(`${sel} {`);
     return i < 0 ? null : /url\("(data:image\/webp;base64,[^"]+)"\)/.exec(css.slice(i, css.indexOf("}", i)))?.[1] ?? null;
   };
-  return { day: uri(".poster::before"), night: uri(':global(html[data-world-tod="night"]) .poster::before') };
+  return { day: uri(".poster::before"), night: uri(':global(html[data-world-tod="night"]) .poster::before'), morning: uri(':global(html[data-world-tod="morning"]) .poster::before') };
 })();
 /** What the stylesheets give the poster layer's still, its landing poster and the loading card (if up), as the page computes them. */
 const drawn = (page) =>
@@ -105,6 +132,39 @@ const dist = (a, b) => {
   let s = 0;
   for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
   return s / a.length;
+};
+/**
+ * The morning rows: how far a painted frame is from showing `ref`, allowing
+ * for a fade from the page's blank ground (`blank`, its first paint, before
+ * any picture): the frame is fitted as blank + a (ref - blank), a in 0..1,
+ * and the mean channel distance left over is returned. A frame mid fade-in of
+ * the morning picture is then nearest the morning, where a plain distance
+ * found its darkness nearer the night.
+ */
+const fitRes = (f, blank, ref) => {
+  let vw = 0;
+  let ww = 0;
+  for (let i = 0; i < f.length; i++) {
+    const w = ref[i] - blank[i];
+    vw += (f[i] - blank[i]) * w;
+    ww += w * w;
+  }
+  const a = ww > 0 ? Math.min(1, Math.max(0, vw / ww)) : 0;
+  let s = 0;
+  for (let i = 0; i < f.length; i++) s += Math.abs(f[i] - blank[i] - a * (ref[i] - blank[i]));
+  return s / f.length;
+};
+/** A frame of one flat colour (the page's ground before any picture): its luma's standard deviation under 2. */
+const flat = (px) => {
+  let s = 0;
+  let s2 = 0;
+  const n = px.length / 3;
+  for (let i = 0; i < px.length; i += 3) {
+    const l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+    s += l;
+    s2 += l * l;
+  }
+  return Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) < 2;
 };
 
 const browser = await puppeteer.launch({
@@ -267,13 +327,21 @@ try {
 
   console.log("\n1. 12:00, desktop: the day");
   const cls = {};
+  /** The page's own frames at each hour, the morning rows' references: the poster showing (1 s) and the live map alone. */
+  const deskRef = {};
   {
-    const L = await load({ viewport: DESKTOP, ms: at(12), until: () => window.__worldReady === true && window.__letGo !== undefined });
+    const L = await load({ viewport: DESKTOP, ms: at(12), cast: true, until: () => window.__worldReady === true && window.__letGo !== undefined });
+    await sleep(1500);
     const tl = await timeline(L.page);
+    deskRef.day = { live: path.join(OUT, "desktop-1200-live.png"), poster: path.join(OUT, "desktop-1200-1s.jpg") };
+    await L.page.screenshot({ path: deskRef.day.live, captureBeyondViewport: false });
+    await L.cdp.send("Page.stopScreencast");
+    const f1 = frameAt(L.frames, tl.origin, 1000);
+    if (f1) saveFrame(f1, deskRef.day.poster);
     ok(tl.tod.raf === "day" && tl.tod.dcl === "day", "<html> says day from the first frame", JSON.stringify(tl.tod));
     const d = await drawn(L.page);
     ok(!!STILLS.day && d.still?.includes(STILLS.day) && /\/k0\.webp/.test(d.landing ?? ""), "the stylesheets draw the day's still and landing poster", `${d.still?.slice(0, 60)}…, ${d.landing}`);
-    ok(L.asked.includes("k0.webp") && !L.asked.some((f) => f.endsWith("-night.webp")), "the page asks for k0.webp and no night file", L.asked.join(" "));
+    ok(L.asked.includes("k0.webp") && !L.asked.some((f) => f.endsWith("-night.webp") || f.endsWith("-morning.webp")), "the page asks for k0.webp and no night or morning file", L.asked.join(" "));
     const body = L.bodies.get("k0.webp");
     ok(!!body && body.equals(fs.readFileSync(path.join(POSTERS, "k0.webp"))), "and gets the bytes on disk", body ? `${body.length} bytes` : "no body");
     ok(L.errors.length === 0, "no page errors", L.errors.join(" | "));
@@ -318,6 +386,9 @@ try {
     // The frames asked for: 0.05 s, 1 s, the take over (the poster layer letting go), and the first paint and the live map alone.
     const shots = pickFrames(L.frames, tl, "desktop-2300", tl.letGo, "the live map takes over (the poster fades out)");
     shots.push({ file: live, label: `${((tl.letGo + 1500) / 1000).toFixed(2)} s, the live map alone` });
+    deskRef.night = { live, poster: path.join(OUT, "desktop-2300-1s.jpg") };
+    const f1 = frameAt(L.frames, tl.origin, 1000);
+    if (f1) saveFrame(f1, deskRef.night.poster);
     console.log(`        first paint ${Math.round(tl.firstPaint)} ms, the live map took over at ${Math.round(tl.letGo)} ms`);
     ok(tl.cls !== null && Math.abs(tl.cls - cls.desktopDay) < 1e-6, "no layout shift from the pick: the night load shifts what the day load shifts", `layout shift ${tl.cls} at 23:00, ${cls.desktopDay} at 12:00`);
     await sheet(path.join(OUT, "load-2300-desktop.jpg"), shots, 3, 560, 423, `23:00 on the student's clock, desktop 1691 x 1278: the load, ${painted.length} painted frames, none nearer the day poster`);
@@ -425,6 +496,189 @@ try {
     await L.page.waitForFunction(() => /-night\.webp$/.test(document.querySelector('[class*="phoneWorld"] img')?.getAttribute("src") ?? ""), { timeout: 10000, polling: 100 }).catch(() => {});
     const after = await L.page.evaluate(() => [document.documentElement.getAttribute("data-world-tod"), document.querySelector('[class*="phoneWorld"] img')?.getAttribute("src")]);
     ok(before === "/world-v6/posters/a1.webp" && after[0] === "night" && after[1] === "/world-v6/posters/a1-night.webp", "the phone's picture: the day's at 20:20, the night's at 20:30", `${before} then ${after.join(" ")}`);
+    await L.ctx.close();
+  }
+
+  console.log("\n7. 07:30, desktop: the morning from the first frame to the live map");
+  {
+    const L = await load({ viewport: DESKTOP, ms: at(7, 30), cast: true, until: () => window.__worldReady === true && window.__letGo !== undefined });
+    await sleep(1500);
+    const tl = await timeline(L.page);
+    const live = path.join(OUT, "desktop-0730-live.png");
+    await L.page.screenshot({ path: live, captureBeyondViewport: false });
+    await L.cdp.send("Page.stopScreencast");
+    ok(tl.tod.raf === "morning" && tl.tod.dcl === "morning", "<html> says morning from the first frame", JSON.stringify(tl.tod));
+    const d = await drawn(L.page);
+    ok(!!STILLS.morning && d.still?.includes(STILLS.morning) && /\/k0-morning\.webp/.test(d.landing ?? ""), "the stylesheets draw the morning's still and landing poster", `${d.still?.slice(0, 60)}…, ${d.landing}`);
+    ok(L.asked.includes("k0-morning.webp"), "the page asks for k0-morning.webp", L.asked.join(" "));
+    const others = L.asked.filter((f) => MORNING_IDS.includes(f.replace(/(-night)?\.webp$/, "")) && !f.endsWith("-morning.webp"));
+    ok(others.length === 0, "and for no day or night poster of a place that has a morning", others.join(" ") || "none");
+    // The references are the page's own frames, as the student sees them (the
+    // page's shade lies over the poster, darkening the sea, and the live map
+    // has its interface): the poster showing at 1 s and the live map alone, at
+    // 12:00, 23:00 and here at 07:30.
+    deskRef.morning = { live, poster: path.join(OUT, "desktop-0730-1s.jpg") };
+    const f1 = frameAt(L.frames, tl.origin, 1000);
+    if (f1) saveFrame(f1, deskRef.morning.poster);
+    const refPx = Object.fromEntries(Object.entries(deskRef).map(([k, r]) => [k, [pixels(r.poster), pixels(r.live)]]));
+    const painted = L.frames.filter((f) => f.ts - tl.origin >= (tl.firstPaint ?? 0) - 1);
+    const tmp = path.join(OUT, "_frame.jpg");
+    let blank = null;
+    let blanks = 0;
+    let worst = Infinity;
+    let worstAt = null;
+    const off = [];
+    for (const f of painted) {
+      saveFrame(f, tmp);
+      const px = pixels(tmp);
+      if (flat(px)) {
+        blank ??= px;
+        blanks++;
+        continue;
+      }
+      const b = blank ?? px.map(() => 0);
+      const res = (k) => Math.min(...refPx[k].map((r) => fitRes(px, b, r)));
+      const margin = Math.min(res("day"), res("night")) - res("morning");
+      if (margin < worst) {
+        worst = margin;
+        worstAt = Math.round(f.ts - tl.origin);
+      }
+      if (margin <= 0) off.push(Math.round(f.ts - tl.origin));
+    }
+    fs.rmSync(tmp, { force: true });
+    ok(painted.length > 10 && painted.length - blanks > 10 && off.length === 0, `no day or night frame: all ${painted.length} painted frames, ${Math.round(tl.firstPaint)} ms to ${Math.round(tl.now)} ms, ${blanks} of them the page's blank ground before any picture and every other one nearer the page's morning than its day and its night`, `the closest call ${worst.toFixed(1)} (mean channel distance left once fitted, the nearer of day and night minus morning) at ${worstAt} ms${off.length ? `; nearer another at ${off.join(", ")} ms` : ""}`);
+    const shots = pickFrames(L.frames, tl, "desktop-0730", tl.letGo, "the live map takes over (the poster fades out)");
+    shots.push({ file: live, label: `${((tl.letGo + 1500) / 1000).toFixed(2)} s, the live map alone` });
+    console.log(`        first paint ${Math.round(tl.firstPaint)} ms, the live map took over at ${Math.round(tl.letGo)} ms`);
+    ok(tl.cls !== null && Math.abs(tl.cls - cls.desktopDay) < 1e-6, "no layout shift from the pick: the morning load shifts what the day load shifts", `layout shift ${tl.cls} at 07:30, ${cls.desktopDay} at 12:00`);
+    await sheet(path.join(OUT, "load-0730-desktop.jpg"), shots, 3, 560, 423, `07:30 on the student's clock, desktop 1691 x 1278: the load, ${painted.length} painted frames, none nearer the day or the night poster`);
+    ok(L.errors.length === 0, "no page errors", L.errors.join(" | "));
+    await L.ctx.close();
+  }
+
+  console.log("\n8. The phone at 07:30: the loading card and the place's picture in the morning");
+  {
+    const L = await load({ viewport: PHONE, ms: at(7, 30), cast: true, until: phoneOn });
+    await sleep(800);
+    const tl = await timeline(L.page);
+    phoneFinal.morning = path.join(OUT, "phone-0730-final.png");
+    await L.page.screenshot({ path: phoneFinal.morning, captureBeyondViewport: false });
+    await L.cdp.send("Page.stopScreencast");
+    const src = await L.page.evaluate(() => document.querySelector('[class*="phoneWorld"] img')?.getAttribute("src"));
+    ok(tl.tod.raf === "morning" && tl.tod.dcl === "morning", "07:30: <html> says morning from the first frame", JSON.stringify(tl.tod));
+    ok(src === "/world-v6/posters/a1-morning.webp", "the Landing's morning picture", src);
+    ok(L.asked.includes("k0-morning.webp") && L.asked.every((f) => f.endsWith("-morning.webp")), "the loading card's ground and the picture are the morning files, and no day or night file is asked for", L.asked.join(" "));
+    // On the phone a picture shows in one band, under the header: first the
+    // loading card's ground (the opening's poster, cover), then the place's
+    // picture at the top of the list. Only that band is read (the list and the
+    // card are the same at every hour); a band still dark is the page before
+    // any picture (counted apart); every other is fitted as a fade from the
+    // dark band toward each hour's picture: the opening's poster as the card's
+    // ground shows it, and the place's picture as the 12:00, 23:00 and 07:30
+    // loads ended on it.
+    const BAND = "crop=iw:ih*0.26:0:ih*0.10,scale=48:24:flags=area";
+    const band = (file) => pixels(file, BAND);
+    const ground = (file) => pixels(file, `scale=-2:${PHONE.height},crop=${PHONE.width}:${PHONE.height},${BAND}`);
+    const refs = {
+      day: [band(phoneFinal.day), ground(path.join(POSTERS, "k0.webp"))],
+      night: [band(phoneFinal.night), ground(path.join(POSTERS, "k0-night.webp"))],
+      morning: [band(phoneFinal.morning), ground(path.join(POSTERS, "k0-morning.webp"))],
+    };
+    const lumaOf = (px) => {
+      let l = 0;
+      for (let i = 0; i < px.length; i += 3) l += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+      return l / (px.length / 3);
+    };
+    const painted = L.frames.filter((f) => f.ts - tl.origin >= (tl.firstPaint ?? 0) - 1);
+    const tmp = path.join(OUT, "_frame.jpg");
+    let dark = null;
+    let blanks = 0;
+    let worst = Infinity;
+    const off = [];
+    for (const f of painted) {
+      saveFrame(f, tmp);
+      const px = band(tmp);
+      if (lumaOf(px) < 45) {
+        dark ??= px;
+        blanks++;
+        continue;
+      }
+      const g = dark ?? px.map(() => 20);
+      const res = (k) => Math.min(...refs[k].map((r) => fitRes(px, g, r)));
+      const margin = Math.min(res("day"), res("night")) - res("morning");
+      worst = Math.min(worst, margin);
+      if (margin <= 0) off.push(Math.round(f.ts - tl.origin));
+    }
+    fs.rmSync(tmp, { force: true });
+    ok(painted.length > 3 && painted.length - blanks > 1 && off.length === 0, `no day or night frame: all ${painted.length} painted frames, ${blanks} of them before any picture and every other one's picture nearer the morning's than the day's and the night's`, `the closest call ${worst.toFixed(1)} (the picture band, fitted as a fade from the dark band)${off.length ? `; nearer another at ${off.join(", ")} ms` : ""}`);
+    const shots = pickFrames(L.frames, tl, "phone-0730", tl.phoneOn, "the place's picture comes on");
+    shots.push({ file: phoneFinal.morning, label: `${((tl.phoneOn + 800) / 1000).toFixed(2)} s, settled` });
+    shots.push({ file: phoneFinal.day, label: "12:00, the same, to compare" });
+    shots.push({ file: phoneFinal.night, label: "23:00, the same, to compare" });
+    console.log(`        first paint ${Math.round(tl.firstPaint)} ms, the picture on at ${Math.round(tl.phoneOn)} ms`);
+    ok(tl.cls !== null && Math.abs(tl.cls - cls.phoneDay) < 1e-6, "no layout shift from the pick on the phone either", `layout shift ${tl.cls} at 07:30, ${cls.phoneDay} at 12:00`);
+    await sheet(path.join(OUT, "load-0730-phone.jpg"), shots, shots.length, 250, 541, `07:30 on the student's clock, phone 390 x 844: the load, ${painted.length} painted frames, none nearer the day or the night`);
+    ok(L.errors.length === 0, "no page errors", L.errors.join(" | "));
+    await L.ctx.close();
+  }
+
+  console.log("\n9. Round the morning's lines: 05:30, 05:40, 09:15, 09:45");
+  for (const [h, m, want, file] of [[5, 30, "night", "k0-night.webp"], [5, 40, "morning", "k0-morning.webp"], [9, 15, "morning", "k0-morning.webp"], [9, 45, "day", "k0.webp"]]) {
+    const L = await load({ viewport: DESKTOP, ms: at(h, m), until: () => !!document.querySelector("main picture") });
+    await sleep(400);
+    const tl = await timeline(L.page);
+    const k0s = L.asked.filter((f) => /^k0(-night|-morning)?\.webp$/.test(f));
+    ok(tl.tod.raf === want && k0s.length === 1 && k0s[0] === file, `${hhmm(h, m)}: the ${want} poster`, `${JSON.stringify(tl.tod)} [${L.asked.join(" ")}]`);
+    await L.ctx.close();
+  }
+
+  console.log("\n10. Poster mode at 07:30: the nine posters");
+  {
+    const allOn = () => {
+      const p = window.__worldPoster?.();
+      return !!p && p.layerShown && p.shown.every((s) => s.loaded);
+    };
+    const L = await load({ viewport: DESKTOP, ms: at(7, 30), query: `${Q}&poster=on`, until: allOn });
+    const srcs = await L.page.evaluate(() => [...document.querySelector("main picture").parentElement.querySelectorAll("img")].map((i) => i.getAttribute("src")));
+    const want = ["k0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"].map((id) => `/world-v6/posters/${id}${MORNING_IDS.includes(id) ? "-morning" : ""}.webp`);
+    ok(JSON.stringify(srcs) === JSON.stringify(want), "k0 to a6 their morning twins, a7 and a8 their one file", srcs.map((s) => path.basename(s ?? "none")).join(" "));
+    ok(await L.page.evaluate(allOn), "all nine loaded");
+    ok(!L.asked.some((f) => MORNING_IDS.includes(f.replace(/(-night)?\.webp$/, "")) && !f.endsWith("-morning.webp")), "no day or night file of a place that has a morning", L.asked.join(" "));
+    await L.page.screenshot({ path: path.join(OUT, "postermode-0730.png"), captureBeyondViewport: false });
+    await L.ctx.close();
+  }
+
+  console.log("\n11. The clock crossing the morning's lines with the page open");
+  {
+    const allOn = () => {
+      const p = window.__worldPoster?.();
+      return !!p && p.layerShown && p.shown.every((s) => s.loaded);
+    };
+    const srcsOf = (page) => page.evaluate(() => [document.documentElement.getAttribute("data-world-tod"), ...[...document.querySelector("main picture").parentElement.querySelectorAll("img")].map((i) => i.getAttribute("src"))]);
+    for (const [[h0, m0], [h1, m1], from, to] of [
+      [[5, 30], [5, 40], "night", "morning"],
+      [[9, 25], [9, 35], "morning", "day"],
+    ]) {
+      const L = await load({ viewport: DESKTOP, ms: at(h0, m0), query: `${Q}&poster=on`, until: allOn });
+      const before = await srcsOf(L.page);
+      await L.page.evaluate((v) => window.__clock.set(v), at(h1, m1));
+      await L.page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+      await L.page.waitForFunction(allOn, { timeout: 20000, polling: 100 });
+      await sleep(300);
+      const after = await srcsOf(L.page);
+      const setOf = (srcs) => srcs.slice(1, 8).map((s) => (s.endsWith("-night.webp") ? "night" : s.endsWith("-morning.webp") ? "morning" : "day"));
+      const fixed = (srcs) => srcs.slice(8).every((s) => !/-(night|morning)\.webp$/.test(s));
+      ok(before[0] === from && setOf(before).every((t) => t === from) && fixed(before), `poster mode at ${hhmm(h0, m0)}: the ${from} posters`, before.map((s) => path.basename(s)).join(" "));
+      ok(after[0] === to && setOf(after).every((t) => t === to) && fixed(after), `at ${hhmm(h1, m1)} the ${to} posters, k0 to a6, loaded`, after.map((s) => path.basename(s)).join(" "));
+      await L.ctx.close();
+    }
+    const L = await load({ viewport: PHONE, ms: at(9, 25), until: phoneOn });
+    const before = await L.page.evaluate(() => document.querySelector('[class*="phoneWorld"] img')?.getAttribute("src"));
+    await L.page.evaluate((v) => window.__clock.set(v), at(9, 35));
+    await L.page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await L.page.waitForFunction(() => /\/a1\.webp$/.test(document.querySelector('[class*="phoneWorld"] img')?.getAttribute("src") ?? ""), { timeout: 10000, polling: 100 }).catch(() => {});
+    const after = await L.page.evaluate(() => [document.documentElement.getAttribute("data-world-tod"), document.querySelector('[class*="phoneWorld"] img')?.getAttribute("src")]);
+    ok(before === "/world-v6/posters/a1-morning.webp" && after[0] === "day" && after[1] === "/world-v6/posters/a1.webp", "the phone's picture: the morning's at 09:25, the day's at 09:35", `${before} then ${after.join(" ")}`);
     await L.ctx.close();
   }
 } finally {

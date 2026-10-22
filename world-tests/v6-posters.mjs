@@ -7,6 +7,7 @@
  *
  *   node world-tests/v6-posters.mjs [--q=0.8] [--budget=2.9]
  *   node world-tests/v6-posters.mjs --tod=night
+ *   node world-tests/v6-posters.mjs --tod=morning
  *
  * Each poster is drawn at 1920x1080 CSS px with device pixel ratio 1.5 (tier
  * 0, 4x MSAA, 2880x1620 on the GPU), with every piece of the interface
@@ -32,6 +33,13 @@
  * arrives (world.module.css .poster::before), with the recipe the day's was
  * made with (cwebp -q 80 -m 6 -resize 48 27), and prints it. Contact sheet:
  * world-tests/shots/v6/fallback/posters-night-sheet.png.
+ *
+ * --tod=morning (2026-10-21, the morning on the student's clock): the morning
+ * twins of poster.ts MORNING_POSTER_IDS, the same way as the night's, with
+ * ?hour=07.30 added (the clock in the middle of the morning: the night factor
+ * 0, the morning factor 1), into <id>-morning.webp, and only the manifest's
+ * `morning` block written. Its still (.poster::before under the morning) is
+ * printed the same way. Contact sheet: posters-morning-sheet.png.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -51,7 +59,12 @@ const arg = (k, d) => {
   return a ? a.slice(k.length + 3) : d;
 };
 const BASE = process.env.BASE_URL || "http://localhost:3111";
-const NIGHT = arg("tod", "day") === "night";
+const TOD = arg("tod", "day");
+if (!["day", "night", "morning"].includes(TOD)) throw new Error(`--tod=${TOD}: day, night or morning`);
+const NIGHT = TOD === "night";
+const MORNING = TOD === "morning";
+/** A twin set (night or morning): only its files and its manifest block are written, the day's are left as they are. */
+const TWIN = NIGHT || MORNING;
 const Q0 = Number(arg("q", "0.8"));
 const BUDGET = Number(arg("budget", "2.9")) * 1024 * 1024;
 const OVER = Number(arg("over", "0.15"));
@@ -59,20 +72,22 @@ const W = 1920;
 const H = 1080;
 const DPR = 1.5;
 const ALL = ["k0", "a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8"];
-/** poster.ts NIGHT_POSTER_IDS, read from the source (this script runs under plain node). */
-function nightIds() {
+/** poster.ts NIGHT_POSTER_IDS or MORNING_POSTER_IDS, read from the source (this script runs under plain node). */
+function twinIds(name) {
   const src = fs.readFileSync(path.join(ROOT, "src/lib/world-v6/poster.ts"), "utf8");
-  const m = /export const NIGHT_POSTER_IDS[^=]*=\s*\[([^\]]*)\]/.exec(src);
-  if (!m) throw new Error("poster.ts NIGHT_POSTER_IDS not found");
+  const m = new RegExp(`export const ${name}[^=]*=\\s*\\[([^\\]]*)\\]`).exec(src);
+  if (!m) throw new Error(`poster.ts ${name} not found`);
   const ids = [...m[1].matchAll(/"([a-z0-9]+)"/g)].map((x) => x[1]);
-  if (!ids.length || ids.some((id) => !ALL.includes(id))) throw new Error(`poster.ts NIGHT_POSTER_IDS reads ${JSON.stringify(ids)}`);
+  if (!ids.length || ids.some((id) => !ALL.includes(id))) throw new Error(`poster.ts ${name} reads ${JSON.stringify(ids)}`);
   return ids;
 }
-const IDS = NIGHT ? nightIds() : ALL;
+const IDS = NIGHT ? twinIds("NIGHT_POSTER_IDS") : MORNING ? twinIds("MORNING_POSTER_IDS") : ALL;
+/** The morning twins' hour on the clock (?hour=07.30): the middle of the morning (clock.ts MORNING_HOURS). */
+const MORNING_HOUR = "07.30";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const manifestPath = path.join(OUT, "manifest.json");
-const dayManifest = NIGHT ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : null;
+const dayManifest = TWIN ? JSON.parse(fs.readFileSync(manifestPath, "utf8")) : null;
 
 const browser = await puppeteer.launch({
   executablePath: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
@@ -90,7 +105,7 @@ try {
   // walk to the arch) where a student's map has none. ?discount=locked pins the cache's look to
   // a new student's.
   const t0 = Date.now();
-  await page.goto(`${BASE}/dev/world-app?catalog=course&p=p0&discount=locked&poster=off${NIGHT ? "&tod=night" : ""}`, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.goto(`${BASE}/dev/world-app?catalog=course&p=p0&discount=locked&poster=off${NIGHT ? "&tod=night" : MORNING ? `&hour=${MORNING_HOUR}` : ""}`, { waitUntil: "domcontentloaded", timeout: 60000 });
   await page.waitForFunction(() => window.__worldReady === true, { timeout: 80000, polling: 200 });
   log("ready", Date.now() - t0, "ms");
   const q = await page.evaluate(() => window.__worldV6Debug.qualityInfo());
@@ -103,6 +118,11 @@ try {
     const n = await page.evaluate(() => window.__worldV6Debug.nightInfo());
     log("night", JSON.stringify(n));
     if (n.target !== 1 || n.shown !== 1) throw new Error(`the page is not at night: ${JSON.stringify(n)}`);
+  }
+  if (MORNING) {
+    const n = await page.evaluate(() => window.__worldV6Debug.nightInfo());
+    log("morning", JSON.stringify(n));
+    if (n.target !== 0 || n.shown !== 0 || n.morningTarget !== 1 || n.morningShown !== 1) throw new Error(`the page is not in the morning: ${JSON.stringify(n)}`);
   }
   // Nothing of the interface on the posters (the page keeps its own shade on top).
   await page.addStyleTag({ content: "body * { visibility: hidden !important; } canvas { visibility: visible !important; }" });
@@ -153,7 +173,7 @@ try {
   let quality = Q0;
   let files;
   let qualities;
-  if (!NIGHT) {
+  if (!TWIN) {
     for (;;) {
       files = [];
       for (const r of raw) files.push(Buffer.from(await encode(r.png, quality), "base64"));
@@ -179,7 +199,7 @@ try {
       }
       files.push(buf);
       qualities.push(+qq.toFixed(2));
-      log(`${r.id}-night: quality ${qq.toFixed(2)}, ${(buf.length / 1024).toFixed(1)} KB (day ${twin ? (twin.bytes / 1024).toFixed(1) : "?"} KB, ${twin ? (((buf.length - twin.bytes) / twin.bytes) * 100).toFixed(0) : "?"}%)`);
+      log(`${r.id}-${TOD}: quality ${qq.toFixed(2)}, ${(buf.length / 1024).toFixed(1)} KB (day ${twin ? (twin.bytes / 1024).toFixed(1) : "?"} KB, ${twin ? (((buf.length - twin.bytes) / twin.bytes) * 100).toFixed(0) : "?"}%)`);
     }
     // Same camera, same markers: the day's entries serve the night (poster mode's labels, the phone's crop).
     let worst = 0;
@@ -189,16 +209,16 @@ try {
         const t = twin?.markers.find((x) => x.id === m.id);
         if (!t) throw new Error(`${r.id}: marker ${m.id} has no day twin`);
         worst = Math.max(worst, Math.abs(m.x / W - t.fx), Math.abs(m.y / H - t.fy));
-        if (!!m.visible !== t.visible) throw new Error(`${r.id}: marker ${m.id} visible ${m.visible} at night, ${t.visible} by day`);
+        if (!!m.visible !== t.visible) throw new Error(`${r.id}: marker ${m.id} visible ${m.visible} in the ${TOD}, ${t.visible} by day`);
       }
     }
-    log(`markers: the night's sit within ${worst.toFixed(5)} of the day's (as a share of the poster)`);
-    if (worst > 0.002) throw new Error("the night's markers moved: the day's manifest would put the labels off");
+    log(`markers: the ${TOD}'s sit within ${worst.toFixed(5)} of the day's (as a share of the poster)`);
+    if (worst > 0.002) throw new Error(`the ${TOD}'s markers moved: the day's manifest would put the labels off`);
   }
 
-  const names = raw.map((r) => (NIGHT ? `${r.id}-night.webp` : `${r.id}.webp`));
+  const names = raw.map((r) => (TWIN ? `${r.id}-${TOD}.webp` : `${r.id}.webp`));
   let manifest;
-  if (!NIGHT) {
+  if (!TWIN) {
     manifest = { version: 1, width: W, height: H, made: new Date().toISOString(), quality: +quality.toFixed(2), posters: [] };
     raw.forEach((r, i) => {
       const file = names[i];
@@ -213,18 +233,19 @@ try {
     });
   } else {
     manifest = dayManifest;
-    manifest.night = { made: new Date().toISOString(), factor: 1, posters: [] };
+    const block = NIGHT ? { made: new Date().toISOString(), factor: 1, posters: [] } : { made: new Date().toISOString(), hour: 7.5, factor: 1, posters: [] };
+    manifest[TOD] = block;
     raw.forEach((r, i) => {
       fs.writeFileSync(path.join(OUT, names[i]), files[i]);
-      manifest.night.posters.push({ id: r.id, file: names[i], bytes: files[i].length, quality: qualities[i] });
+      block.posters.push({ id: r.id, file: names[i], bytes: files[i].length, quality: qualities[i] });
     });
     const total = files.reduce((a, b) => a + b.length, 0);
     const dayTotal = raw.reduce((a, r) => a + dayManifest.posters.find((p) => p.id === r.id).bytes, 0);
-    log(`night set: ${(total / 1024).toFixed(0)} KB for ${raw.length} (their day twins ${(dayTotal / 1024).toFixed(0)} KB)`);
+    log(`${TOD} set: ${(total / 1024).toFixed(0)} KB for ${raw.length} (their day twins ${(dayTotal / 1024).toFixed(0)} KB)`);
     // The opening's 48 px still for the poster layer's first paint (world.module.css .poster::before).
-    const thumb = path.join(SHOTS, "k0-night-48.webp");
-    execFileSync("cwebp", ["-quiet", "-q", "80", "-m", "6", "-resize", "48", "27", path.join(OUT, "k0-night.webp"), "-o", thumb]);
-    log(`k0-night 48 px still (${fs.statSync(thumb).size} bytes), for world.module.css:`);
+    const thumb = path.join(SHOTS, `k0-${TOD}-48.webp`);
+    execFileSync("cwebp", ["-quiet", "-q", "80", "-m", "6", "-resize", "48", "27", path.join(OUT, `k0-${TOD}.webp`), "-o", thumb]);
+    log(`k0-${TOD} 48 px still (${fs.statSync(thumb).size} bytes), for world.module.css:`);
     console.log(`data:image/webp;base64,${fs.readFileSync(thumb).toString("base64")}`);
   }
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 1));
@@ -235,9 +256,9 @@ try {
   const cells = raw
     .map((r, i) => `<figure style="margin:0;position:relative"><img src="data:image/webp;base64,${files[i].toString("base64")}" style="width:640px;height:360px;display:block"><figcaption style="position:absolute;left:8px;top:6px;font:600 14px ui-monospace;color:#fff;text-shadow:0 1px 2px #000">${names[i].replace(".webp", "")} · ${(files[i].length / 1024).toFixed(0)} KB</figcaption></figure>`)
     .join("");
-  const what = NIGHT ? `v6 night posters, webp q ${qualities.map((x) => x.toFixed(2)).join("/")}` : `v6 posters, webp q ${quality.toFixed(2)}`;
+  const what = TWIN ? `v6 ${TOD} posters, webp q ${qualities.map((x) => x.toFixed(2)).join("/")}` : `v6 posters, webp q ${quality.toFixed(2)}`;
   await sheet.setContent(`<body style="margin:0;background:#1d1826"><div style="display:grid;grid-template-columns:repeat(3,640px)">${cells}</div><p style="font:13px ui-monospace;color:#ccc;margin:10px">${what}, total ${(files.reduce((a, b) => a + b.length, 0) / 1024).toFixed(0)} KB</p></body>`, { waitUntil: "load" });
-  const sheetFile = path.join(SHOTS, NIGHT ? "posters-night-sheet.png" : "posters-sheet.png");
+  const sheetFile = path.join(SHOTS, TWIN ? `posters-${TOD}-sheet.png` : "posters-sheet.png");
   await sheet.screenshot({ path: sheetFile });
   log("wrote", OUT, "and", sheetFile);
 } finally {

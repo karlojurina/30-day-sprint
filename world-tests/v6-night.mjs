@@ -17,7 +17,13 @@
  *      no more, lands at once, and the map stays asleep;
  *   5. the lake at tier 3, whose reflection is drawn once and kept until the
  *      camera moves: with the camera still, a change of the light draws it again.
- * Takes about 90 s (row 4 waits for the map to fall asleep).
+ * And the morning on the same clock (2026-10-21):
+ *   6. ?tod=clock at 07:30: the first frame is the morning (no fade in at load);
+ *      ?tod=morning on a dev page the same, at any hour;
+ *   7. ?tod=clock, 05:00 then 05:30 on coming back to the tab: the night eases
+ *      off the morning (the morning under it all along);
+ *   8. ?tod=clock, 09:00 then 09:30: the morning eases halfway into the day.
+ * Takes about 2 minutes (row 4 waits for the map to fall asleep).
  */
 import puppeteer from "puppeteer-core";
 
@@ -82,7 +88,7 @@ const lightOf = (page) =>
     const sc = window.__worldV6Debug;
     const l = sc.debugScene().userData.light;
     const st = l.stats();
-    return { ...sc.nightInfo(), here: l.state.night, easing: st.nightEasing, idle: sc.qualityInfo().idle.phase, frames: window.__worldFrameCount ?? 0, passes: st.reflectionPasses, mode: st.reflectionMode };
+    return { ...sc.nightInfo(), here: l.state.night, morningHere: l.state.morning, easing: st.nightEasing, idle: sc.qualityInfo().idle.phase, frames: window.__worldFrameCount ?? 0, passes: st.reflectionPasses, mode: st.reflectionMode };
   });
 /** The page comes back to the tab: the clock watcher reads the clock (clock.ts watchClock). */
 const visible = (page) => page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
@@ -170,6 +176,55 @@ try {
     ok(c.shown === 1, "the night came in", String(c.shown));
     ok(c.passes > b.passes, "a change of the light draws the reflection again (the camera never moved)", `${c.passes - b.passes} passes`);
     await c5.close();
+  }
+
+  console.log("\n6. The morning: ?tod=clock at 07:30, and ?tod=morning at 23:00");
+  {
+    const { ctx: c6, page: p6, errors: e6 } = await open("tod=clock", at(7, 30));
+    const l = await lightOf(p6);
+    ok(l.target === 0 && l.shown === 0 && l.morningTarget === 1 && l.morningShown === 1 && l.morningHere === 1 && l.here === 0 && l.easing === 0, "07:30: the first frame is the morning, with no fade in at load", JSON.stringify(l));
+    ok(e6.length === 0, "no page errors", e6.join(" | "));
+    await c6.close();
+    const { ctx: c6b, page: p6b } = await open("tod=morning", at(23));
+    const m = await lightOf(p6b);
+    ok(m.target === 0 && m.morningTarget === 1 && m.morningShown === 1 && m.morningHere === 1, "?tod=morning at 23:00: the morning (the address wins over the clock)", JSON.stringify(m));
+    await c6b.close();
+  }
+
+  console.log("\n7. ?tod=clock, 05:00 then 05:30 on coming back to the tab: the night goes off the morning");
+  {
+    const { ctx: c7, page: p7 } = await open("tod=clock", at(5));
+    const a = await lightOf(p7);
+    ok(a.target === 1 && a.shown === 1 && a.morningTarget === 1 && a.here === 1 && a.morningHere === 0, "05:00: the full night, the morning under it and none of it shown", JSON.stringify(a));
+    await p7.mouse.move(400, 400);
+    await p7.mouse.move(420, 410);
+    await p7.evaluate((v) => window.__clock.set(v), at(5, 30));
+    await visible(p7);
+    await sleep(120);
+    const b = await lightOf(p7);
+    ok(Math.abs(b.target - 0.5) < 1e-9 && b.morningTarget === 1 && b.easing === 1 && b.shown < 1 && b.shown > 0.5, "05:30: the night factor follows (0.5) and eases in, the map awake", JSON.stringify(b));
+    await sleep(1900);
+    const c = await lightOf(p7);
+    ok(Math.abs(c.shown - 0.5) < 1e-9 && c.morningShown === 1 && c.easing === 0 && c.morningHere > 0.1 && c.morningHere < 0.25, "and lands: the night at 82%, the morning showing through it", JSON.stringify(c));
+    await c7.close();
+  }
+
+  console.log("\n8. ?tod=clock, 09:00 then 09:30: the morning eases halfway into the day");
+  {
+    const { ctx: c8, page: p8 } = await open("tod=clock", at(9));
+    const a = await lightOf(p8);
+    ok(a.target === 0 && a.morningTarget === 1 && a.morningShown === 1, "09:00: the morning", JSON.stringify(a));
+    await p8.mouse.move(400, 400);
+    await p8.mouse.move(420, 410);
+    await p8.evaluate((v) => window.__clock.set(v), at(9, 30));
+    await visible(p8);
+    await sleep(120);
+    const b = await lightOf(p8);
+    ok(Math.abs(b.morningTarget - 0.5) < 1e-9 && b.easing === 1 && b.morningShown < 1 && b.morningShown > 0.5, "09:30: the morning factor follows (0.5) and eases out, the map awake", JSON.stringify(b));
+    await sleep(1900);
+    const c = await lightOf(p8);
+    ok(Math.abs(c.morningShown - 0.5) < 1e-9 && Math.abs(c.morningHere - 0.5) < 1e-9 && c.easing === 0 && c.shown === 0, "and lands halfway between the morning and the day", JSON.stringify(c));
+    await c8.close();
   }
 } finally {
   await browser.close();

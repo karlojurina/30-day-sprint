@@ -64,15 +64,20 @@
 }
 
 /* The loading card's ground: the opening's poster (WorldMap.tsx Card), the
-   night one after dark on the student's clock (clock.ts posterNight, written
-   on <html> by the page head's script before the first paint). By the
-   stylesheet, so only the file that shows downloads. */
+   night one after dark and the morning one in the morning on the student's
+   clock (clock.ts posterTod, written on <html> by the page head's script
+   before the first paint). By the stylesheet, so only the file that shows
+   downloads. */
 .groundPoster {
   background-image: url("/world-v6/posters/k0.webp");
 }
 
 :global(html[data-world-tod="night"]) .groundPoster {
   background-image: url("/world-v6/posters/k0-night.webp");
+}
+
+:global(html[data-world-tod="morning"]) .groundPoster {
+  background-image: url("/world-v6/posters/k0-morning.webp");
 }
 
 /* ── The card: the floating panel over the world ───────────── */

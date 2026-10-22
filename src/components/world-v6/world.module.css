@@ -98,6 +98,15 @@
   );
 }
 
+/* The morning (2026-10-22): half the bottom shade, so the banks of morning
+   mist low in the frame read lit, not greige. The page writes the value as
+   it runs (WorldV6 apply(), MORNING_SHADE, the morning at the camera); until
+   then the posters' set says it, so the loading picture and the map meet
+   with the same shade. */
+:global(html[data-world-tod="morning"]) .shade::after {
+  opacity: var(--shade-bottom, 0.5);
+}
+
 /* Final pass C: through the telescope (a7's click-in). A soft circular lens
    round the hero constellation, which sits about 17vh right of the frame's
    centre at the park's end (the lens is vertical, so vh keeps it on the
@@ -1667,7 +1676,7 @@
   filter: blur(14px);
 }
 
-/* After dark on the student's clock (clock.ts posterNight, written on <html>
+/* After dark on the student's clock (clock.ts posterTod, written on <html>
    by the page head's script before the first paint): the night poster's,
    made the same way from public/world-v6/posters/k0-night.webp
    (world-tests/v6-posters.mjs --tod=night prints it). */
@@ -1675,8 +1684,15 @@
   background-image: url("data:image/webp;base64,UklGRvIAAABXRUJQVlA4IOYAAADwBgCdASowABsAPm0qkUYkIiGhMBVdUIANiWUApawubW7sejbr/l5U6NnGj4xTpb0s7iN8P4lY8ustHhWQJmTgAP78s9C5xkzzS6dMD/q787fN7vO2ClH5sUGD98NfZAYb8sc9RsNehzQyL4vkPSjUDa2DLAsEPLSYUvqqy+ow7BKVITkpb49ja+1f3xxehXgAcwqepCi2j3luqXZvnz5ckY7H0dQ9SMKEfJ/bnv8Uio2E0uo17FgBauAL7XQjfmCvlS0qKlOTeN1lLvolg5RgVb/EuDEY0yfHPzJ9bejV0ootsj8AAA==");
 }
 
+/* In the morning on the student's clock (the same attribute): the morning
+   poster's, made the same way from public/world-v6/posters/k0-morning.webp
+   (world-tests/v6-posters.mjs --tod=morning prints it). */
+:global(html[data-world-tod="morning"]) .poster::before {
+  background-image: url("data:image/webp;base64,UklGRmABAABXRUJQVlA4IFQBAACwCACdASowABsAPmkskEWkIqGarAQAQAaEsgBOnKCeT/Zr8JCzsf9gsDig9IbEH+Q/itpidXmHVrEyyN70ck0pDHpdDcc7Csl4V7FKPoAA/u/RQhFdMX4ILcB/vepZD+/yPfc587sb8p+Iz2viFQh+VVf4F/v9/r7qmQTBe2JDwcMVEwl5kUtSreUml2CmFYL5Tc8OQeyxbbWLIEmU6Gzfz7T/fUMh95c9q02zl2aMPvTQ+bk02K/Hd+bibkB06I2JAcize1IocCfUNrXd4MzTzUU5IT8H6vqr/saRHG6V6llKezFPJd/g86sa9zkXm2yO/JTTKtOqgvOzn0fEUbemZXbwOyBSDJ1/bAyLOqp6yuOakBGhA9jSnFGqur5CVCbY8ij2clPqvJW3+TmPjW2nwtLynq0xr4BHEoBUgqmVjgqMnzMu7pM19rXXqgPfoN30AAAA");
+}
+
 /* The landing poster, the opening's, from the first paint: drawn by the
-   stylesheet, so the day or the night file is chosen before any of the
+   stylesheet, so the day, the morning or the night file is chosen before any of the
    page's code runs, and only that one downloads. Only where the 3D draws
    (the complement of WorldV6.tsx NARROW_QUERY, its twin in
    client-tests/media-query.mjs), so a phone never downloads it. Once the
@@ -1689,6 +1705,10 @@
 
   :global(html[data-world-tod="night"]) .posterLanding {
     background-image: url("/world-v6/posters/k0-night.webp");
+  }
+
+  :global(html[data-world-tod="morning"]) .posterLanding {
+    background-image: url("/world-v6/posters/k0-morning.webp");
   }
 }
 

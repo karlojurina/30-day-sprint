@@ -1410,10 +1410,13 @@ export const install: InstallFn = (ctx: WorldCtx): WorldModule => {
     // Additive sprites: at most 64 CSS px across (bible 3.1 overdraw rules).
     haloMat.uniforms.uMaxPx.value = 64 * renderer.getPixelRatio();
     // light.ts sets the glow material's colour to white x the lamp level; at
-    // night it also tints it (NIGHT_LAMP_TINT, red at half), so the level is
-    // read from the light's state where it has one (the same value by day).
-    const lit = (scene.userData.light as { state?: { lampGlow?: number } } | undefined)?.state?.lampGlow;
-    haloMat.uniforms.uLevel.value = Math.min(1.2, lit ?? glowMat.color.r);
+    // night it also tints it (NIGHT_LAMP_TINT, red at half), and in the
+    // morning toward unlit glass (MORNING_LAMP_TINT), so the level is read
+    // from the light's state where it has one (the same value by day). In the
+    // morning the lamps are out: no halo (state.morning, 0 by day and at night).
+    const st = (scene.userData.light as { state?: { lampGlow?: number; morning?: number } } | undefined)?.state;
+    const lit = st?.lampGlow;
+    haloMat.uniforms.uLevel.value = Math.min(1.2, lit ?? glowMat.color.r) * (1 - Math.min(1, Math.max(0, st?.morning ?? 0)));
   };
   root.add(halos);
 

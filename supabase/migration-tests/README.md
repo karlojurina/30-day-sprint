@@ -25,12 +25,21 @@ to `run.mjs` merged without touching it), then `v112.test.mjs` (below), with
 `--experimental-strip-types` because it imports
 `src/lib/achievement-rules.ts`, then `v113.test.mjs` (v113 and its undo,
 T-122: `student_membership_discounts.source`, the step of the coupon check
-that answered; a row carrying it refused before v113, pasted twice, only the
-three words or empty, the undo keeping every row, and v113 on a database
-without v111). On `night/admin2` with the 5 lanes merged: `PASS 702 FAIL 0`,
-then `PASS 22 FAIL 0`. On `night/achievements`: the same two, then `PASS 65
-FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`, `PASS 22 FAIL 0`,
-then `PASS 23 FAIL 0`.
+that answered, since T-122's fifth fix round THE RULE STAMP, the rule's
+version and the step (`r5-membership`, `r5-user`, `r5-payment`), with
+`source_checked_at`, the `checked_at` of the write that set it; a row
+carrying them refused before v113, pasted twice, only this rule's three
+values or empty, an earlier round's words (`membership`, `user`, `payment`)
+refused and emptied from a database that holds the earlier copy of the file,
+the older builds' writes made as PostgREST makes them, an earlier round's
+refused whole and one from before T-122 keeping the stamp with a new
+`checked_at`, the undo dropping both columns and keeping every row, and v113
+on a database without v111). On `night/admin2` with the 5 lanes merged:
+`PASS 702 FAIL 0`, then `PASS 22 FAIL 0`. On `night/achievements`: the same
+two, then `PASS 65 FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`,
+`PASS 22 FAIL 0`, then `PASS 23 FAIL 0`; for its fifth fix round
+(2026-10-22): `PASS 702   FAIL 0`, `PASS 22   FAIL 0`, then `PASS 34   FAIL
+0`.
 
 `v112.test.mjs` (2026-10-21, the badges for the new course) builds its own
 database: `base.sql`, Supabase's default privileges, the badge tables made

@@ -67,7 +67,8 @@ copyRoute('src/app/api/discounts/approve/route.ts', 'admin-approve-route', [
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
 ], [
-  // The coupon check (D5) on build.mjs's copy: no WHOP_API_KEY here, so it reads no Whop and finds no stored row.
+  // The coupon check (D5) on build.mjs's copy: no WHOP_API_KEY here, so it reads no Whop, and the stored row freshDb
+  // seeds answers (since T-122's fourth fix round a check with no answer refuses the normal Approve).
   ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
 ])
 
@@ -173,6 +174,13 @@ function tab(source, routes, { answer = null, teamMember = { id: 'team-1' } } = 
  * the 14 days: the shortest way to a request the rule approves. What these
  * checks are about, the route's last write, is the same on both courses.
  * The ads are ticked for the routes at BASE, which still refuse without it.
+ * The coupon check finds a stored "no coupon" this rule wrote (its source
+ * set, naming no code): with no Whop key here it gives the approve route its
+ * answer, as the cron's row does on production when Whop does not answer.
+ * Since T-122's fourth fix round a check with no answer refuses the normal
+ * Approve, so without the row every Approve below would be that 503. Since
+ * its fifth the row carries the rule's stamp: `source` with the rule's
+ * version, and `source_checked_at` its checked_at.
  */
 function freshDb(requests) {
   const db = new FakeDb({
@@ -184,6 +192,11 @@ function freshDb(requests) {
     discount_requests: requests.map((r) => ({
       student_id: 'a1b2c3d4-0000-4000-8000-000000000001', created_at: '2026-10-05T10:00:00.000Z', ...r,
     })),
+    student_membership_discounts: [{
+      student_id: 'a1b2c3d4-0000-4000-8000-000000000001', whop_membership_id: null, promo_code_id: null, promo_code: null,
+      renewal_price: null, plan_renewal_price: null, discounted: false, checked_at: '2026-10-05T09:40:00.000Z',
+      source: 'r5-payment', source_checked_at: '2026-10-05T09:40:00.000Z',
+    }],
   })
   installDb(db)
   setTeam({ id: 'team-1', role: 'founder' })

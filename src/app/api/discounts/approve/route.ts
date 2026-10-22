@@ -4,10 +4,11 @@ import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 import { createWhopPromoCode } from "@/lib/whop";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
-import { checkMembershipDiscount } from "@/lib/membership-discount";
+import { checkMembershipDiscount, teamThirtyCodeFor } from "@/lib/membership-discount";
 import {
   approvalVerdict,
   couponApprovalRefusal,
+  couponUncheckedApprovalRefusal,
   explainOldCourseRequest,
   loadDiscountReads,
 } from "@/lib/world/discount-server";
@@ -16,13 +17,25 @@ import {
  * Approve a pending discount request.
  *
  * Flow (one click for Astrid):
- *   0. The coupon (admin rebuild 2, D5): a student whose Whop membership
- *      already has a discount on its next renewal gets no 30%, whatever the
- *      rule says and with `override` too. Whop is asked now
- *      (checkMembershipDiscount); when it does not answer, the stored row
- *      decides; with neither, nothing blocks. The refusal is a 400 with
- *      code "has-discount" and names the code. `overrideCoupon` skips it
- *      (below).
+ *   0. The coupon (admin rebuild 2, D5): a student who already has a coupon
+ *      gets no 30%, whatever the rule says and with `override` too. Whop is
+ *      asked now (checkMembershipDiscount, the owner's rule since T-122's
+ *      third fix round: a code other than the student's own 30% on any
+ *      course membership or course payment, since the fifth a discount a
+ *      payment naming no code shows, then with neither anywhere the price of
+ *      the first real course payment, under 97.00 since the fourth); when it
+ *      does not answer, the stored row decides if it is a coupon, or no
+ *      coupon written by that rule and nothing since (its source carrying
+ *      the rule's version, v113, since the fifth) naming no code but the
+ *      student's own, the student's row read. The refusal is a 400 with code
+ *      "has-discount"
+ *      and names the code. `overrideCoupon` skips it (below). With neither
+ *      an answer from Whop nor a stored row that answers, the normal Approve
+ *      is refused since T-122's fourth fix round, once the rule below has had
+ *      its say (503, code "rule", the reason in the team's words:
+ *      couponUncheckedApprovalRefusal); until then it went on. Approve
+ *      anyway (`override`, a founder's or an admin's) still goes on, which
+ *      the page offers on that refusal.
  *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
  *      the ads are not checked (the owner's decision: the 30% already asks
  *      for 61 videos), so students.ad_submissions_verified decides nothing
@@ -72,7 +85,11 @@ import {
  *                    2026-10-19).
  */
 
-/** The refusals Approve anyway skips with `override`: the 30% rule said no, or a read it needs failed. */
+/**
+ * The refusals Approve anyway skips with `override`: the 30% rule said no, or
+ * a read it needs failed, and since T-122's fourth fix round the coupon check
+ * gave no answer.
+ */
 const RULE = { code: "rule" } as const;
 
 export async function POST(request: NextRequest) {
@@ -136,7 +153,9 @@ export async function POST(request: NextRequest) {
   // D5: a discount already on the next renewal, before the rule and before
   // `override`. No Whop code is made for this student, unless a founder or an
   // admin pressed Approve anyway on the row the coupon refuses
-  // (`overrideCoupon`): then Whop is not asked at all.
+  // (`overrideCoupon`): then Whop is not asked at all. A check that gave no
+  // answer is remembered, and refuses the normal Approve after the rule.
+  let couponUnchecked: { liveFail: string | null } | null = null;
   if (!overrideCoupon) {
     const coupon = await checkMembershipDiscount(supabase, discountReq.student_id);
     if (coupon.discounted) {
@@ -145,6 +164,7 @@ export async function POST(request: NextRequest) {
         { status: 400 },
       );
     }
+    if (coupon.source === "none") couponUnchecked = { liveFail: coupon.liveFail };
   }
 
   if (CATALOG_IS_V2) {
@@ -284,8 +304,26 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // T-122's fourth fix round: the coupon check gave no answer (Whop down or
+  // refusing, nothing stored that answers), so the normal Approve makes no
+  // code for a student who may hold a coupon. Approve anyway (`override`)
+  // still goes on, its log line saying the check gave no answer.
+  if (couponUnchecked !== null && !override) {
+    console.warn(
+      `[discount approve] request ${requestId}: nothing approved, the coupon check gave no answer (${couponUnchecked.liveFail ?? "no answer"})`,
+    );
+    return NextResponse.json(
+      { error: couponUncheckedApprovalRefusal(couponUnchecked.liveFail), ...RULE },
+      { status: 503 },
+    );
+  }
+
   if (override || overrideCoupon) {
-    const skipped = [override ? "Eligibility gates skipped." : null, overrideCoupon ? "The coupon check skipped." : null]
+    const skipped = [
+      override ? "Eligibility gates skipped." : null,
+      overrideCoupon ? "The coupon check skipped." : null,
+      couponUnchecked !== null ? "The coupon check gave no answer." : null,
+    ]
       .filter(Boolean)
       .join(" ");
     console.warn(
@@ -296,8 +334,10 @@ export async function POST(request: NextRequest) {
   // Generate the code via Whop API.
   // Format: ECOM30-{first 6 chars of student id, uppercased}. Stable
   // per-student so a re-run would collide on Whop's side rather than
-  // silently mint a duplicate.
-  const code = `ECOM30-${studentRow.id.slice(0, 6).toUpperCase()}`;
+  // silently mint a duplicate. teamThirtyCodeFor makes it, and the coupon
+  // check reads a code by that name on this student's membership or payment
+  // as their own 30%, never a coupon (T-122's third fix round).
+  const code = teamThirtyCodeFor(studentRow.id);
 
   // Optional plan scoping. If WHOP_DISCOUNT_PLAN_IDS is set, the code
   // only works on those specific plans (comma-separated plan IDs).

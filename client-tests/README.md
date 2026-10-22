@@ -616,6 +616,203 @@ probes the check ran (`step3-probe.mjs`, `step2-probe.mjs`, outside the
 repository) print a discount for each of its four coupon cases now; their
 $1 plan with no code read as one before and still does (a known limit).
 
+T-122's second fix round (2026-10-21, `night/admin3`): a re-check on a
+stand-in Whop found a code used on the first payment alone passing, a code on
+a second course membership never read beside a full-price one on file, and a
+membership naming a code whose price or plan does not read dropping the code.
+`membership-discount` (365, +56) runs its own section, with its own fixtures
+so it runs unchanged against the commit before: each case through
+`judgeStudentDiscount`, both request routes (400 and the student's line,
+nothing written) and the cron. welcome50 on file, paid 48.50, renewing at
+97.00; a first-year 10% on the $970 yearly (873.00, renewing at 970.00);
+evolve10 on an older membership beside a newer full-price one on file (the
+row naming the payment's membership); a membership naming evolve10 with no
+renewal price, one whose plan Whop does not know, and one found through the
+Whop user with no renewal price, each beside a 97.00 payment naming no code.
+The controls go in through all three: 97.00, 116.40 with 19.40 added on top
+("exclusive"), 97.00 with the tax inside ("inclusive"), 97.00 holding a tax
+whose behaviour is null, `unspecified` or `unable_to_collect` (read as 80.83
+or 77.60 until then), 116.40 with a null behaviour, EUR 89.90 with a
+`usd_total` of 97.00 (read as 89.90 dollars until then) and with none, and a
+full-price membership on file followed by its payments. In euros a code that
+took money off and 86.30 in dollars are coupons. A payments read that hangs
+after a full-price membership is the routes' 503 within 8 s. The team's own
+30% (ECOM30) is never a coupon: used, it leaves its 67.90 payment out; named
+on a membership with no renewal price it is not one by itself; still on the
+renewal, an Approved row marks it the team's and does not warn; beside
+welcome50, the page warns about welcome50. Against 73c9d83 in a scratch copy,
+37 of the section's 50 checks fail and 13 pass (controls and team cases the
+old code already let through). The earlier checks follow the new rule where it
+changed their answer: `taxOnTopOf` reads only `exclusive` as on top;
+`readMembershipDiscount` hands back `unpriced` with bad_shape and
+no_plan_price; `fetchLatestRealPayment` is `fetchRealCoursePayments` (every
+payment, newest first, with `currency` and `usdTotal`); the memberships with
+no renewal price the first rounds used name no code, so the payments still
+decide there; an 87.30 on evolve10 before a newest 97.00 is now a coupon (the
+judge, the request routes, Approve, Check Whop again and the cron's
+s-no-plan, its `discounted` 9); the row names the coupon payment's membership;
+Check Whop again and the cron read the payments after a membership with no
+discount (4 reads, 6 payment reads); and the fixture students hold a Whop
+user, as every student does on production. `admin-review` (100) gives its
+stand-in fetch the payments list (empty), which a full-price membership is
+now followed by.
+
+T-122's third fix round (2026-10-22, `night/admin3`): a re-check of the second
+round still found the owner's rule broken whenever a code the student came in
+on did not show taking money off a payment, and any ECOM30 code passed as the
+team's. The check is now his rule as he put it: a code other than the
+student's own 30% on any course membership read (on file, and through the
+Whop user every time) or on any course payment, the $0 ones too, is a coupon;
+with no code anywhere, the price of a real payment in dollars that is no plan
+change. `membership-discount` (456, +91) runs a section of its own again, 84
+checks with their own fixtures, each case through `judgeStudentDiscount`, both
+request routes (400 and the student's line, nothing written) and the cron:
+(a) a 100% first month, its $0 checkout listed, left out of the list, and with
+the renewal naming the used code, then with the code on the payments alone;
+(b) a first-year 10% yearly whose payment's `promo_code_id` is null or absent,
+and welcome50's 48.50 whose total or `paid_at` does not read, on the membership
+and on the payment alone; (c) a EUR payment naming no code beside welcome50 on
+the membership; (d) a second membership on a 100% code beside the full-price
+one on file, its $0 row listed or left out, and no longer granting access;
+another student's ECOM30-ABC123, a code named ECOM30 and one named
+Ecom30Friends, on the membership and on the payment alone; a code whose name
+cannot be read; each a coupon. The controls go in through all three: 97.00 with
+no code, 97.00 and a 12.34 plan change (`subscription_update`), this student's
+own ECOM30-5A1B2C on the membership (still on the renewal) and on a payment,
+116.40 exclusive, 97.00 inclusive, EUR 89.90 with a `usd_total` of 96.99 and
+with none. The student's own code by its request's promo id, through
+`checkMembershipDiscount` for an approved and an applied request, and its
+requests unreadable (the name alone, a line logged); the routes refusing an
+applied request before Whop is asked; the $1 first week still a coupon (the
+known limit); the stored fallback with Whop down: a no coupon row with no
+source the 503, with its source let in, a coupon either way, and without v113
+(the read naming `source` refused with 42703 and made again) no stored no
+coupon answering; Approve naming its code with `teamThirtyCodeFor`; and the
+$0 payment still no real payment for `first_paid_at`. Against 4e77736 in a
+scratch copy, the new suite with only the payments read's old name standing
+in, 64 of the section's 84 checks fail and 20 pass (the controls the old code
+already let in, a code with no readable name on a 67.90 renewal, the $1 known
+limit, the stored coupons, the applied request's refusal and the answer naming
+no Whop id), and 29 earlier checks fail where the round changed their answer:
+a used code still named on a membership or a payment is a coupon (the request
+routes, Check Whop again and the cron's s-used, its `discounted` 10), the
+user's list is read every time (the cron's 7 lists and 5 payment reads),
+`fetchCoursePayments` keeps every course payment with `real` and
+`billingReason` and reads no `usd_total`, the price judges no payment in
+another currency, the student's own 30% is theirs by its name or its
+request's promo id (`isTeamThirtyCode` is gone), and a stored no coupon needs
+its `source`. `discount-double-submit` (33), `discount-september` (65) and
+`admin-owner-review` (58) seed their "no coupon" rows with a `source`, as this
+rule writes them.
+
+T-122's fourth fix round (2026-10-22, `night/admin3`): the third round's
+re-check passed with nothing blocking, and its should-fixes and nits are this
+round's cases. `membership-discount` (536, +80) runs a section of its own, 76
+checks with their own fixtures, each through `judgeStudentDiscount`, both
+request routes and the cron where it applies. Its stand-in Whop gained an
+answer delay on the suite's clock (`whop.delayMs`) and a v2 list that answers
+a status for a user (a number in `whop.byUser`). The cases: the world-engine
+preview's stored "no coupon" (source `membership`, naming welcome50) with Whop
+down is the 503 for both routes and refuses the normal Approve, with Whop at
+2.1 s an answer Whop's own refusal, and the same row naming no code still
+lets the request in; `checkMembershipDiscount` answers a stored no coupon
+naming the student's own 30% by the promo id on their applied or approved
+request, and nothing for welcome50, their code's name with another promo id,
+no request, a rejected one or no source. The v2 list answering 410 or 404 is
+a fall-through (`userListUnusable`, the cron's `user_list_unusable`: the
+second membership's 100% code then seen on its listed 0.00 payment, and not
+without it, the known limit), and answering another shape, another user's
+row, 5 pages (one page read) or rows naming no buyer is no answer, the routes'
+503 and the cron's `failed`. A code on a canceled or expired course membership
+(a 100% first month with its 0.00 checkout listed, left out or naming no code;
+a first-year 10% whose 873.00 was refunded) is a coupon, found on that
+membership. A later 10.00 manual charge and a 47.00 add-on after a 97.00 first
+payment let the student in, by the payment `first_paid_at` names and by the
+earliest real one alike (`firstRealPayment`, also run on its own); the $1 and
+$5 first weeks stay coupons and the cron lists them in `refused_by_price`
+with their price and `billing_reason`. Another student's ECOM30-5A1B2C (their
+ids sharing 6 characters) is a coupon with no request of this student's, and
+this student's own code is none by the promo id on their request or by the
+name beside one (with a request held, another code by that name passes: the
+known limit). A membership read answering an array, a JSON string or no JSON
+is no answer and kept nowhere (asked again, the code shows), a plan or a
+code's name answering one is kept nowhere either, and `{}` reads as no code
+(the known limit). Approve with the check giving no answer is refused, 503
+with code `rule` and a plain sentence, and Approve anyway goes on, the 30%
+page's confirm naming the sentence. A student with no code at 2.5 s an answer
+gets in with 3 reads in 5250 ms (the last started at 2750 ms), and a code on
+file is refused in 7500 ms. Against a89ff1c in a scratch copy 52 of the
+section's 76 checks fail and 24 pass (cases the old code already answered the
+same way, the known limits kept, the unreadable plan and name, the answer
+naming no Whop id, the cron's Whop-down run and the run after it), and 37
+earlier checks fail where the round changed their answer: the reads' order
+(the list beside the payments, no plan read for a membership naming no code,
+none to order the memberships), the list in another shape or holding another
+user's row now no answer and a 404 list the fall-through, an ended
+membership's code found on it, the student's own code by its name only beside
+a request (the third round's two controls are coupons now, and the cron's
+ab12cd student), and the approval with no answer refused. `admin-discounts`
+(29) seeds a stored "no coupon" this rule wrote, since its approvals run with
+no Whop key; `admin-review` (100) follows the reads' order; `admin-owner-review`
+(58) counts the seventh refusal carrying `code: "rule"`.
+
+T-122's fifth fix round (2026-10-22, `night/admin3`), the last: the fourth
+round's re-check passed with nothing blocking, and this round's items are its
+cases. `membership-discount` (634, +98) runs a section of its own, 96 checks
+with their own fixtures (ids `f5`), one case per item through
+`judgeStudentDiscount`, both request routes, the normal Approve (a founder,
+the stand-in's login) and the cron, beside the controls (a 97.00 checkout with
+no code; a no-code student with two canceled course memberships at 2.0 s an
+answer, let in by both routes in 6.5 s, the two read 250 ms apart, the last
+started at 4.5 s). (1) THE RULE STAMP: the "no coupon" a89ff1c or the
+world-engine preview stored (source `membership`, a step's word alone) and
+this rule's stamped row written over by a build from before T-122 (an upsert
+of the eight v111 columns through the stand-in client, which keeps the stamp
+and takes a new `checked_at`) are the 503 with Whop down, and Approve's
+refusal, each with its log line; a stamped row from one write still answers;
+`stampedByThisRule` alone. (2) The students read failing in the check: a
+stored no coupon is the 503 (it let the request in) with a warning line, and
+Approve's refusal in the team's words; a stored coupon still refuses. (3) A
+membership read wrapped, `{}`, with no code field or of another id is no
+answer (`bad_shape`), and the key's older `promo_code` still reads; welcome50
+on a payment row naming no buyer refuses, and a 10.00 row naming no buyer at
+the first payment's moment never judges by its price. (4) Another product's
+membership on file naming its code: let in with the course membership at
+97.00 through the user, refused with welcome50 on it, and the course one on
+file let in. (5) A 0.00 of 97.00, 873.00 of 970.00, EUR 44.95 of 89.90 and a
+refunded 48.50 of 97.00, none naming a code, refuse by the subtotal; the
+student's own 30% named on a payment is no coupon by their request; a plan
+change's 12.34 of 97.00 is not judged; `discountWithoutCode` alone. (6) A
+10.00 add-on listed before the 97.00 checkout at the first payment's moment
+lets in, the same with no billing reason too (the highest price), and a 48.50
+checkout beside a 97.00 one-time charge refuses (the checkout); the canceled
+memberships read at once (the two read 250 ms apart), one on a 100% code
+refused inside the 8 s; `firstRealPayment` alone. (7) The v2 list answering
+410 or 404: the live answer lets in, the row stored with no source, then with
+Whop down that row is the 503 and Approve's refusal; a coupon judged with the
+list unusable keeps its stamp. The cron writes every case past a stand-in of
+v113's check (an upsert carrying a `source` that is not this rule's fails
+23514), each coupon stamped, the no coupons stamped but the two judged without
+the list, the four unreadable membership reads in `failed`, and lists the four
+refused by a subtotal in `refused_by_subtotal` and the checkout refused by the
+price in `refused_by_price`. Against `f7e6b27` in a scratch copy (`git
+archive`, this file copied in) 78 of the section's 96 checks fail and 18 pass:
+the controls, the Approve answers both builds give, and two the old code
+refuses only because it does not know this round's stamp. Earlier checks moved
+with the round: the stored source reads as the stamp (`R5` and `stampedBy` in
+the suite), the seeds of this rule's rows carry it, and three changed their
+answer: with no course product named nothing is read (the membership on file
+was, and its code answered), a membership read answering `{}` is no answer (a
+known limit until now), and a stored no coupon holding a step's word alone is
+no answer; the fourth round's section gains two checks on the preview's row
+(stamped and naming welcome50, and naming no code with the preview's word, each
+the 503). `admin-discounts` (29), `admin-owner-review` (58),
+`discount-double-submit` (33) and `discount-september` (65) seed their stored
+no coupon with this rule's stamp; `admin-review` (100) answers a membership
+read with the id asked for (its stand-in answered `mem_x` for any) and names
+the course product for its stalled cron run, since a check with none named
+stops before any read.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

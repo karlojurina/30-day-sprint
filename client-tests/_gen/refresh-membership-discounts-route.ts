@@ -19,20 +19,42 @@
  * again" asks for one student (POST /api/admin/thirty/check-coupon).
  *
  * Since T-122 every student ends in a yes or a no unless Whop does not
- * answer: the membership on file, else every course membership found through
- * the student's Whop user, else the latest real payment (a code on it that
- * took money off, or a price under 97.00, is a discount; since T-122's fix
- * round). `by_source` counts the answers by that step, and `failed` holds
- * only the students Whop gave no answer for (no connection, a 5xx, a 429
- * after its retries, no answer in time, a refused key, payments it could not
- * judge, or a deployment that cannot ask). The first dry run on production
- * (2026-10-21, before T-122) could not read 46 of 290: 22 payment ids where
- * the membership's belongs, 24 memberships with no plan or no renewal price.
+ * answer, and since its third fix round by the owner's rule as he put it: a
+ * promo code other than the student's own 30% on the membership on file, on
+ * any course membership found through their Whop user (read whatever the one
+ * on file said; since its fourth, those that no longer grant access too) or
+ * on any course payment, the $0 ones too, is a coupon, and since its fifth
+ * so is a course payment naming no code that came to less than its
+ * subtotal; with neither anywhere, the student's first real course payment
+ * in dollars under 97.00 that is no plan change is one (every real payment
+ * until the fourth). `by_source` counts the answers by the step that
+ * answered, and `failed` holds only the students Whop gave no answer for (no
+ * connection, a 5xx, a 429 after its retries, no answer in time, a refused
+ * key, payments or a list of memberships it could not judge, a membership
+ * read it could not read, or a deployment that cannot ask). Since the fourth
+ * fix round `user_list_unusable` counts the students whose Whop user's list
+ * answered a 404 or another 4xx (judged without it, and since the fifth
+ * their no coupon stored with no source), and `refused_by_price` lists the
+ * students the price alone refused, by student id, with that payment's
+ * price and billing_reason; since the fifth `refused_by_subtotal` lists
+ * those a payment naming no code refused by its subtotal, with its price,
+ * subtotal, currency and billing_reason. Every row this cron writes carries
+ * the rule's stamp (v113: `source` "r5-" and the step, `source_checked_at`
+ * its checked_at). The first dry run on production (2026-10-21, before
+ * T-122) could not read 46 of 290: 22 payment ids where the membership's
+ * belongs, 24 memberships with no plan or no renewal price.
  *
  * ?mode=dry reads Whop and writes nothing, for the first look after a deploy:
  * it passes when `checked` is above 0 and `failed` is empty, and
- * `discounted` is about the number of students in the window on a code like
- * evolve10.
+ * `discounted` is about the number of students in the window who came in on
+ * a code, a used one included (evolve10, welcome50, a 100% first month);
+ * `refused_by_price` and `refused_by_subtotal` are for the owner to rule on.
+ * In order (CONTEXT.md, the coupon check's Before /ship): the preview's dry
+ * run, the deploy of T-122's fifth fix round, v113 pasted, then the run in
+ * write mode repeated until `left` is 0, before anyone approves, so every
+ * stored row is one this rule wrote: until then a stored "no coupon" holds
+ * no stamp of this rule, and the request routes and the normal Approve
+ * refuse for it when Whop does not answer.
  *
  * Auth: CRON_SECRET as a bearer, like every cron (src/lib/cron-auth.ts), with
  * a cron_runs row. Answers 500, ok: false, when who is in the window or who
@@ -40,7 +62,8 @@
  * Whop read failed, or when Whop
  * answered no read before the time ran out, so nothing was checked (the
  * review's fix round; that run answered 200, ok); 500 without WHOP_API_KEY. No request starts after 240 s; a student not reached is read
- * first by the next run. No answer names a student, an email or a Whop id.
+ * first by the next run. No answer names a student, an email or a Whop id:
+ * student ids only.
  */
 
 import { NextRequest, NextResponse } from "./stub-server.ts";

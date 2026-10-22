@@ -266,7 +266,8 @@ async function approve(body) {
   ok(/if \(\(override \|\| overrideCoupon\) && auth\.teamMember\.role !== "founder" && auth\.teamMember\.role !== "admin"\) \{\s*return NextResponse\.json\(\{ error: "Only a founder or an admin can approve past a check\." \}, \{ status: 403 \}\);/.test(route)
        && route.indexOf('auth.teamMember.role !== "founder"') < route.indexOf('.from("discount_requests")'),
      'a csm\'s override is refused before anything is read (the routes\' real login runs it in admin-discounts.test.mjs)')
-  ok((route.match(/\.\.\.RULE/g) ?? []).length === 6, 'every refusal the override skips carries the code: the switch date unread, the new rule, and the old rule\'s four', String((route.match(/\.\.\.RULE/g) ?? []).length))
+  // Since T-122's fourth fix round the coupon check that gave no answer refuses the normal Approve with the code too.
+  ok((route.match(/\.\.\.RULE/g) ?? []).length === 7, 'every refusal the override skips carries the code: the switch date unread, the new rule, the old rule\'s four, and the coupon check that gave no answer', String((route.match(/\.\.\.RULE/g) ?? []).length))
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -277,7 +278,12 @@ console.log('\n=== Apply: the coupon check that cannot run writes nothing ===')
 }
 
 // ── The survey, and both apply routes ───────────────────────────────────────
-/** A student ready to apply on the new course, the coupon `coupon` ('clean' stored, or none), and the team's questions. */
+/**
+ * A student ready to apply on the new course, the coupon `coupon` ('clean' stored, or none), and the team's
+ * questions. The clean row holds its source: since T-122's third fix round a stored "no coupon" answers only when the
+ * rule of that round wrote it (v113's source set), and since its fifth only with the rule's stamp (`source` with the
+ * rule's version, `source_checked_at` its checked_at).
+ */
 function applyDb({ coupon = 'clean', questions = [] } = {}) {
   setCatalog({ v2: true, lessonsTable: 'lessons_next' })
   const db = new FakeDb({
@@ -294,7 +300,7 @@ function applyDb({ coupon = 'clean', questions = [] } = {}) {
     discount_requests: [],
     discount_feedback_questions: questions,
     student_membership_discounts: coupon === 'clean'
-      ? [{ student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: PAID }]
+      ? [{ student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: PAID, source: 'r5-membership', source_checked_at: PAID }]
       : [],
   }, { 'tok-1': 'auth-1' })
   db.functions.submit_discount_with_feedback = async (args, client) => {

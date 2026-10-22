@@ -325,9 +325,11 @@ export function decideDiscountRequest(reads: DiscountReads, now: Date): RequestD
 
 /**
  * Both request routes on the new course, once decideDiscountRequest has
- * granted: the student's Whop membership already has a discount on its next
- * renewal (D5, src/lib/membership-discount.ts checkMembershipDiscount), so
- * nothing is written and the student reads the map's own line.
+ * granted: the student already has a coupon (D5, src/lib/membership-discount.ts
+ * checkMembershipDiscount: since T-122's third fix round a code other than
+ * their own 30% on a course membership or payment, since its fifth a
+ * discount a payment naming no code shows, or with neither a price under
+ * 97.00), so nothing is written and the student reads the map's own line.
  */
 export function membershipDiscountRefusal(): Extract<RequestDecision, { grant: false }> {
   const state: DiscountState = { kind: "not-eligible", reason: "has-discount" };
@@ -341,15 +343,19 @@ export const MEMBERSHIP_UNCHECKED = "We couldn't check your membership just now.
  * Both request routes on the new course, once decideDiscountRequest has
  * granted: the coupon check could not run (the owner's review, 2026-10-21:
  * applying fails closed, so a student whose membership may hold a code never
- * gets a request in). Whop gave no answer and nothing is stored for the membership the
- * student has now (checkMembershipDiscount's source "none": Whop down or
- * refusing the key, no key or no course product on the deployment, the
- * student's row unreadable), so nothing is written and the student is asked
- * to try again. It used to let the request through and leave the coupon to
- * the approve route. Since T-122 a Whop id on file that is missing, a
- * payment's, or one Whop does not know is no reason any more: the check
- * finds the membership through the student's Whop user, or judges the
- * latest real payment.
+ * gets a request in). Whop gave no answer and nothing stored answers for the
+ * membership the student has now (checkMembershipDiscount's source "none":
+ * Whop down or refusing the key, no key or no course product on the
+ * deployment, the student's row unreadable; and since T-122's third fix
+ * round a stored "no coupon" that holds no source, which the rule before it
+ * wrote, or any stored "no coupon" on a database without v113; since its
+ * fifth one that does not carry the rule's stamp, or any stored "no coupon"
+ * while the student's row cannot be read), so nothing is written and the
+ * student is asked to try again. It used to let the
+ * request through and leave the coupon to the approve route. Since T-122 a
+ * Whop id on file that is missing, a payment's, or one Whop does not know is
+ * no reason any more: the check finds the memberships through the student's
+ * Whop user, and judges the student's course payments.
  */
 export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: false }> {
   return { grant: false, status: 503, state: "read-failed", error: MEMBERSHIP_UNCHECKED };
@@ -365,6 +371,37 @@ export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: 
  */
 export function couponApprovalRefusal(code: string | null): string {
   return `This student already has a discount on their membership (${code ?? "code not known"}).`;
+}
+
+/**
+ * The approve route's refusal of the normal Approve when the coupon check
+ * gave no answer (checkMembershipDiscount's source "none": Whop gave none and
+ * nothing stored answers), in the team's words, by `liveFail`, the reason the
+ * check could not answer (T-122's fourth fix round; until then the approval
+ * went on, a code made for a student who might hold a coupon). A founder's or
+ * an admin's Approve anyway still goes on: the page offers it on the refusal
+ * (the route's code "rule").
+ */
+export function couponUncheckedApprovalRefusal(liveFail: string | null): string {
+  switch (liveFail) {
+    case "no_whop_user":
+      return "The student's Whop account is not on file, so the coupon check couldn't run and nothing was approved. Check the coupon in Whop.";
+    case "no_api_key":
+      return "This deployment has no Whop key, so the coupon check couldn't run and nothing was approved.";
+    case "no_course_product":
+      return "This deployment doesn't name the course's Whop product, so the coupon check couldn't run and nothing was approved.";
+    case "student_unread":
+      return "Couldn't read this student's details, so the coupon check couldn't run and nothing was approved. Try again.";
+    case "http_401_403":
+      return "Whop refused this deployment's key, so the coupon check couldn't run and nothing was approved.";
+    case "filter_ignored":
+    case "bad_page":
+    case "too_many_pages":
+    case "bad_shape":
+      return "Whop answered the coupon check in a way it can't read, so nothing was approved. Try again in a minute.";
+    default:
+      return "Whop gave no answer to the coupon check, so nothing was approved. Try again in a minute.";
+  }
 }
 
 /**

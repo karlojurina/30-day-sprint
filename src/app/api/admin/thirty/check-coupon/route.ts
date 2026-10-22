@@ -8,9 +8,14 @@
  * Whop since it was read, the team asks Whop again for that one student here.
  * The read is the one the request routes and the approve route make
  * (checkMembershipDiscount in src/lib/membership-discount.ts: Whop now, no
- * request started after 6 s and none waited on past 8 s; since T-122 the
- * membership on file, else every course membership found through the
- * student's Whop user, else the latest real payment), and Whop's answer
+ * request started after 6 s and none waited on past 8 s; since T-122's third
+ * fix round the owner's rule as he put it: a code other than the student's
+ * own 30% on the membership on file, on any course membership found through
+ * their Whop user or on any course payment, then with no code anywhere a
+ * price under 97.00; since its fourth, the memberships that no longer grant
+ * access read for a code too, and the price that of the first real course
+ * payment alone; since its fifth, a payment naming no code that came to less
+ * than its subtotal a coupon too), and Whop's answer
  * is written to student_membership_discounts, so the list read after it
  * shows the row as Whop has it now: with the coupon gone, the 30% rule
  * decides the row again and Approve is back. No Whop code is made and the

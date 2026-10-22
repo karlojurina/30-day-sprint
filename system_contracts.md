@@ -959,7 +959,11 @@ When adding a new table, append it here. When deleting a field, scan
   ones, whose students it reads whatever their window),
   `POST /api/admin/thirty/check-coupon` (the same round: `id,
   student_id, status` of the one request it is asked about, which must
-  be pending), Whop promo flow, `src/lib/csm-triggers.ts`
+  be pending), `checkMembershipDiscount` in
+  `src/lib/membership-discount.ts` (since T-122's third fix round:
+  `whop_promo_id` of the student's own approved and applied requests, a
+  code holding one of those ids being their own 30%, never a coupon),
+  Whop promo flow, `src/lib/csm-triggers.ts`
   (membership/discount status checks where applicable),
   `src/lib/first-paid-repair.ts` (reads `student_id`, `status`,
   `created_at` of the students whose `first_paid_at` it would move, to
@@ -1024,60 +1028,77 @@ When adding a new table, append it here. When deleting a field, scan
   (`requestCounts`) that was rejected, approved or applied
   (`madeOutsideApply`, `src/lib/world/discount-server.ts`).
 - **The coupon (admin rebuild 2, D5, branch `night/a2-thirty`, not on
-  production):** a student whose Whop membership already has a discount
-  on its next renewal gets no request and no approval. On the new course
-  `POST /api/discounts/request` and `POST /api/discounts/submit-feedback`,
-  once the rule grants and before anything is written, and
-  `POST /api/discounts/approve`, before the rule and with `override` too,
-  call `checkMembershipDiscount` (`src/lib/membership-discount.ts`): Whop
-  now, then the stored row in `student_membership_discounts` for the
-  student's current membership, then nothing. Since T-122 (2026-10-21,
-  branch `night/admin3`, not on production) Whop now is
-  `judgeStudentDiscount`: the membership on file by the rule, unless
-  (since T-122's fix round, the same day) it is on a plan that renews at 0
-  and carries no discount; when the id on file is missing, a payment's,
-  one Whop does not know (404 or another 4xx) or one on a free plan, every
-  course membership found through `students.whop_user_id` that grants
-  access (v2 `GET /api/v2/memberships?user_id=`, the course's products
+  production):** a student who already has a coupon gets no request and no
+  approval. On the new course `POST /api/discounts/request` and
+  `POST /api/discounts/submit-feedback`, once the rule grants and before
+  anything is written, and `POST /api/discounts/approve`, before the rule
+  and with `override` too, call `checkMembershipDiscount`
+  (`src/lib/membership-discount.ts`): Whop now, then the stored row in
+  `student_membership_discounts` for the student's current membership,
+  then nothing. Whop now is `judgeStudentDiscount`, since T-122's third fix
+  round (2026-10-22, branch `night/admin3`, not on production) the owner's
+  rule as he put it, in this order, the first coupon answering: (1) a
+  promo code other than the student's own 30% on any course membership the
+  check reads is a coupon, whatever its renewal price and whether its
+  price or plan reads: the membership on file (an id that is not a
+  membership's, or one Whop does not know, a 404 or another 4xx, is passed
+  over), then every course membership found through
+  `students.whop_user_id` that grants access, read whatever the one on
+  file said (v2 `GET /api/v2/memberships?user_id=`, the course's products
   from `WHOP_PRODUCT_ID` less ETfB and Apex; a plan that renews above 0
-  first, then active before past due, then the newest) by the same rule,
-  a discount on any one of them being a discount (until the fix round the
-  first in that order alone); in either step a membership naming a promo
-  code whose renewal price or plan does not read is a discount by itself,
-  unless the code is the team's own 30% (an ECOM30 code, `isTeamThirtyCode`;
-  since T-122's second fix round, the same day). Whenever those show no
-  discount (since the second fix round; until then only when a membership
-  read gave no plan or no renewal price, or no course membership granted
-  access, and then the newest payment alone), every real course payment
-  (`GET /api/v1/payments?user_id=&status=paid`, pinned,
-  `fetchRealCoursePayments`), each by `paymentCoupon`: a promo code on it
-  that took money off (its `total` less a tax added on top, below its
-  `subtotal`), a code whose subtotal or tax is not known, or that price
-  under 97.00 is a coupon; a tax is taken off only when `tax_behavior` is
-  `exclusive`, and a payment whose `currency` is not `usd` is held against
-  97.00 at its `usd_total`'s rate, or by its code alone without one. Any
-  one payment on a coupon is a discount, except one on the team's own 30%
-  code (the 30% itself, after an approved request); with none, the
-  membership the steps settled on answers, and no real payment at all is
-  none (until the fix round a total under 97.00 alone was a discount, so a
-  yearly payment on a code and one with tax added on top passed; until the
-  second fix round a code used on the first payment alone passed). It
-  gives no answer only when Whop does
-  not answer (no connection, a 5xx, a 429 after two retries, the time
-  limits, which more reads in one check do not stretch), refuses the
-  key, or answers the payments in a way it cannot judge, or when the deployment
-  has no key or no course product. The request routes refuse
-  with 400 `{ error: "You can't apply for this discount because you
-  already have a discount applied to your account.", state:
-  "not-eligible" }`; the approve route with 400 `{ error: "This student
-  already has a discount on their membership (<code>).", code:
-  "has-discount" }`, before any Whop code is made.
+  first, then active before past due, then the newest); (2) a promo code
+  other than the student's own 30% on any course payment is a coupon,
+  whatever its totals and whether they read, the $0 ones too
+  (`GET /api/v1/payments?user_id=&status=paid&first=100`, pinned,
+  `fetchCoursePayments`, which sends no `include_free`: Whop's changelog
+  for 2026-09-02 says the pinned list includes zero-amount payments and
+  refuses a proxy-only filter with a 400); (3) with no code anywhere, a
+  real course payment naming no code whose price is under 97.00 is a
+  coupon (`paymentCoupon`: the price its total less a tax added on top,
+  only when `tax_behavior` is exactly `exclusive`), except a payment not in
+  dollars, a charge whose `billing_reason` is `subscription_update` and a
+  $0 payment. The student's own 30% is a code named, the case not minded,
+  as the approve route names theirs (`teamThirtyCodeFor`: `ECOM30-` and
+  the first 6 characters of the student's id, upper-cased; the approve
+  route builds its code with it), or the Whop promo id on their own
+  approved or applied request (`isOwnThirtyCode`; `checkMembershipDiscount`
+  reads `discount_requests.whop_promo_id` for them, a read that fails
+  leaving the name alone); any other ECOM30 code is a coupon. With no
+  coupon the membership the check settled on answers, else the newest real
+  payment, and no real payment at all is none. Until the third fix round a
+  code on a membership counted only when it took money off the next
+  renewal, the user's memberships were read only when the one on file gave
+  no answer or was free, any ECOM30 code was the team's
+  (`isTeamThirtyCode`), a payment's code counted only when it took money
+  off, no $0 payment was read (`fetchRealCoursePayments`), and the price
+  also judged a payment naming a code, a plan change and, at its
+  `usd_total`'s rate, a payment in another currency; until the second a
+  code used on the first payment alone passed, and until the first a total
+  under 97.00 alone was a discount. The stored row answers when Whop does
+  not (since the third fix round): a stored coupon whoever wrote it, a
+  stored no coupon only when its `source` (v113) names a step, so that
+  round's rule wrote it; a row with no source (production's cron has
+  written them every 2 hours since 2026-10-21 11:37, by the rule before)
+  answers nothing, and on a database without v113 the read naming `source`
+  is refused (42703), made again without it, and no stored no coupon
+  answers. It gives no answer only when Whop does not answer (no
+  connection, a 5xx, a 429 after two retries, the time limits, which more
+  reads in one check do not stretch), refuses the key, or answers the
+  payments in a way it cannot judge, or when the deployment has no key or
+  no course product. The request routes refuse with 400 `{ error: "You
+  can't apply for this discount because you already have a discount
+  applied to your account.", state: "not-eligible" }`; the approve route
+  with 400 `{ error: "This student already has a discount on their
+  membership (<code>).", code: "has-discount" }`, before any Whop code is
+  made.
 - **Applying fails closed when the coupon check cannot run (the owner's
   review, 2026-10-21; branch `night/admin3`, not on production):** with
-  neither Whop's answer nor a stored row for the current membership
-  (`checkMembershipDiscount`'s `source: "none"`: Whop down or refusing, no
-  Whop key or no course product, the student's row unread; until T-122
-  also no membership on file, a payment's id in its place, or no plan or
+  neither Whop's answer nor a stored row that answers for the current
+  membership (`checkMembershipDiscount`'s `source: "none"`: Whop down or
+  refusing, no Whop key or no course product, the student's row unread;
+  since T-122's third fix round also a stored no coupon with no `source`,
+  and on a database without v113 every stored no coupon; until T-122 also
+  no membership on file, a payment's id in its place, or no plan or
   renewal price), both request routes write nothing and answer
   503 `{ error: "We couldn't check your membership just now. Try again in
   a minute.", state: "read-failed" }` (`membershipUncheckedRefusal`).
@@ -1124,12 +1145,19 @@ When adding a new table, append it here. When deleting a field, scan
   `Api-Version-Date: 2026-10-15-1`; since T-122 (branch `night/admin3`)
   also v2's memberships by `user_id` and the pinned v1 payments by
   `user_id` (their `subtotal`, `tax_amount` and `tax_behavior` since its
-  fix round, `currency` and `usd_total` since its second), for a student
-  with no readable membership on file or, since that round, one on a free
-  plan (`judgeStudentDiscount`), and since its second fix round the
-  payments of every student whose memberships show no discount, and
-  `WHOP_PRODUCT_ID` for the course's products. v2 stops working on 13
-  November 2026 (Whop's `Sunset` header).
+  fix round, `currency` since its second, `billing_reason` and the $0
+  payments since its third, `usd_total` read in the second alone), for a
+  student with no readable membership on file or, since that round, one
+  on a free plan (`judgeStudentDiscount`), since its second fix round the
+  payments of every student whose memberships show no discount, and since
+  its third the v2 list and the payments of every student whose membership
+  on file names no code; `discount_requests.whop_promo_id` of the
+  student's own approved or applied requests (since the third fix round,
+  read by `checkMembershipDiscount`); and `WHOP_PRODUCT_ID` for the
+  course's products. v2 stops working on 13 November 2026 (Whop's
+  `Sunset` header); the plans are read from `GET /api/v1/plans/{id}`,
+  which Whop's reference for `2026-10-15-1` lists as variants
+  (`/api/v1/variants/{id}`), deprecated there and still answering.
 - **Written by (the service role only; row level security has no write
   policy, and `anon` and `authenticated` hold no write privilege):** the
   cron `GET /api/cron/refresh-membership-discounts` (every 2 hours at
@@ -1156,7 +1184,11 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depended on by:** `GET /api/student/data` (`whop_membership_id,
   discounted` only; answers `membershipDiscounted`, never the code or the
   prices, and a failed read is `false`, never a 500), the request and
-  approve routes (their fallback when Whop does not answer), and
+  approve routes (their fallback when Whop does not answer: `whop_membership_id,
+  promo_code_id, promo_code, discounted, source`, read again without
+  `source` on a database without v113; a stored coupon answers, a stored
+  no coupon only when `source` names a step, since T-122's third fix
+  round), and
   `GET /api/admin/thirty` (every column, for the coupon on a row and the
   verdict on a pending one; on an Approved row only when Whop gives no
   answer to the route's own live read, since the review's fix round).
@@ -1166,28 +1198,33 @@ When adding a new table, append it here. When deleting a field, scan
   membership's, or none, their row counts whatever membership it names,
   `storedRowApplies`), `promo_code_id`, `promo_code` (the code's name,
   null when Whop gave none), `renewal_price`, `plan_renewal_price`
-  (numeric, dollars), `discounted` (a promo code on the membership and a
-  renewal below the plan's renewal price), `checked_at`. v113 (T-122,
+  (numeric, as Whop gives them), `discounted` (the coupon check's answer:
+  since T-122's third fix round a code other than the student's own 30% on
+  a course membership or a course payment, or with no code anywhere a real
+  payment in dollars under 97.00 that is no plan change; until then a
+  promo code on the membership and a renewal below the plan's renewal
+  price), `checked_at`. v113 (T-122,
   branch `night/admin3`, not pasted) adds `source`: `membership`, `user`
-  (a course membership found through the Whop user, by the same rule: the
-  one that carried the code, or with none the first in the order, a paid
-  plan before a free one) or `payment` (a real course payment, by
-  `paymentCoupon`: the one on a coupon, its membership named, or when it
-  names none the membership the steps settled on; with no coupon and no
-  membership that answered, the newest. `renewal_price` holds its price
-  after discounts, the total less a tax added on top, and
-  `plan_renewal_price` what that was held against, its subtotal when it
-  names a code that took money off, else 97.00, both null with no real
-  payment; for a payment in another currency both in dollars at its
-  `usd_total`'s rate, and without one in its own currency with
-  `plan_renewal_price` null unless its code took money off; until T-122's
-  fix round `discounted` was its total under 97.00 and `renewal_price`
-  that total; the code is the payment's), or null on rows written before.
-  A `membership` or `user` row for a membership naming a code whose
-  renewal price or plan does not read holds `discounted` true, its
-  renewal price when that read and a null `plan_renewal_price`. No
-  reader selects `source`, and the writers write the row without it while
-  v113 is not pasted.
+  (a course membership found through the Whop user: the one that carries
+  the code, or with none the first in the order, a paid plan before a free
+  one) or `payment` (a course payment: the one naming a code other than
+  the student's own 30%, or with none the one the price judged a coupon,
+  its membership named, or when it names none the membership the check
+  settled on; with no coupon and no membership that answered, the newest
+  real one. `renewal_price` holds its price after discounts, the total
+  less a tax added on top, in its own currency (null when its total does
+  not read), and `plan_renewal_price` its subtotal when it names a code,
+  97.00 when the price judged it, else null, both null with no real
+  payment; until T-122's third fix round a payment in another currency
+  was held against 97.00 at its `usd_total`'s rate, and until its first
+  `discounted` was its total under 97.00; the code is the payment's), or
+  null on rows written before. A `membership` or `user` row holds the
+  membership's renewal price and its plan's, each null when it did not
+  read. Since T-122's third fix round the request and approve routes'
+  fallback is the one read of `source`: a stored no coupon with it null
+  answers nothing (the request routes' 503), so v113 goes in before or
+  with the deploy and the cron then runs in write mode until `left` is 0;
+  the writers write the row without it while v113 is not pasted.
 - **Read by the team:** the policy "Team reads membership discounts",
   `current_user_is_team()`. A student reads nothing here, not even their
   own row; their flag reaches them through `/api/student/data`.
@@ -2279,7 +2316,10 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   `students.whop_membership_id` and, since T-122, `whop_user_id`; Whop's
   v1 membership, plan and promo code pinned to `2026-10-15-1`, and since
   T-122 v2's memberships by user and the pinned v1 payments by user (no
-  request started after 6 s, none waited on past 8 s); the stored row as
+  request started after 6 s, none waited on past 8 s; since T-122's third
+  fix round both read for every student whose membership on file names no
+  code, the $0 payments among them, and `discount_requests.whop_promo_id`
+  of the student's own approved or applied requests); the stored row as
   its fallback.
 - **Produces:**
   - 200 `{ discounted, code }`: Whop answered now and its answer is

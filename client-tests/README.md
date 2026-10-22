@@ -607,6 +607,54 @@ user, as every student does on production. `admin-review` (100) gives its
 stand-in fetch the payments list (empty), which a full-price membership is
 now followed by.
 
+T-122's third fix round (2026-10-22, `night/admin3`): a re-check of the second
+round still found the owner's rule broken whenever a code the student came in
+on did not show taking money off a payment, and any ECOM30 code passed as the
+team's. The check is now his rule as he put it: a code other than the
+student's own 30% on any course membership read (on file, and through the
+Whop user every time) or on any course payment, the $0 ones too, is a coupon;
+with no code anywhere, the price of a real payment in dollars that is no plan
+change. `membership-discount` (456, +91) runs a section of its own again, 84
+checks with their own fixtures, each case through `judgeStudentDiscount`, both
+request routes (400 and the student's line, nothing written) and the cron:
+(a) a 100% first month, its $0 checkout listed, left out of the list, and with
+the renewal naming the used code, then with the code on the payments alone;
+(b) a first-year 10% yearly whose payment's `promo_code_id` is null or absent,
+and welcome50's 48.50 whose total or `paid_at` does not read, on the membership
+and on the payment alone; (c) a EUR payment naming no code beside welcome50 on
+the membership; (d) a second membership on a 100% code beside the full-price
+one on file, its $0 row listed or left out, and no longer granting access;
+another student's ECOM30-ABC123, a code named ECOM30 and one named
+Ecom30Friends, on the membership and on the payment alone; a code whose name
+cannot be read; each a coupon. The controls go in through all three: 97.00 with
+no code, 97.00 and a 12.34 plan change (`subscription_update`), this student's
+own ECOM30-5A1B2C on the membership (still on the renewal) and on a payment,
+116.40 exclusive, 97.00 inclusive, EUR 89.90 with a `usd_total` of 96.99 and
+with none. The student's own code by its request's promo id, through
+`checkMembershipDiscount` for an approved and an applied request, and its
+requests unreadable (the name alone, a line logged); the routes refusing an
+applied request before Whop is asked; the $1 first week still a coupon (the
+known limit); the stored fallback with Whop down: a no coupon row with no
+source the 503, with its source let in, a coupon either way, and without v113
+(the read naming `source` refused with 42703 and made again) no stored no
+coupon answering; Approve naming its code with `teamThirtyCodeFor`; and the
+$0 payment still no real payment for `first_paid_at`. Against 4e77736 in a
+scratch copy, the new suite with only the payments read's old name standing
+in, 64 of the section's 84 checks fail and 20 pass (the controls the old code
+already let in, a code with no readable name on a 67.90 renewal, the $1 known
+limit, the stored coupons, the applied request's refusal and the answer naming
+no Whop id), and 29 earlier checks fail where the round changed their answer:
+a used code still named on a membership or a payment is a coupon (the request
+routes, Check Whop again and the cron's s-used, its `discounted` 10), the
+user's list is read every time (the cron's 7 lists and 5 payment reads),
+`fetchCoursePayments` keeps every course payment with `real` and
+`billingReason` and reads no `usd_total`, the price judges no payment in
+another currency, the student's own 30% is theirs by its name or its
+request's promo id (`isTeamThirtyCode` is gone), and a stored no coupon needs
+its `source`. `discount-double-submit` (33), `discount-september` (65) and
+`admin-owner-review` (58) seed their "no coupon" rows with a `source`, as this
+rule writes them.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

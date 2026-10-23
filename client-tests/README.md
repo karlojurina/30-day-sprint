@@ -194,8 +194,10 @@ files. The list (`DONE_ONLY_ACTION_ITEMS` and `isDoneOnly` in
 action items of AI Ads + Content, every one a setup lesson, and three of
 Static Ads, checked with its fourth by the titles the owner named (The
 Backbone and Imitation with a video, the Brand Deck a setup lesson, the
-Static Ad Brief with a video); the other three, `a3l17`, `a3l25` and
-`a5l23`, are the course's other action items. No other file in `src/` writes
+Static Ad Brief with a video); the other seven, `a3l17`, `a3l25`, Video Ads
+II's four editing breakdowns `a4l02` to `a4l05` (action items since
+2026-10-23, migration v114) and `a5l23`, are the course's other action items,
+each with a video. No other file in `src/` writes
 the seven ids in a string but three development fixtures (the admin dev
 page's made-up student who did `a6l03`, its made-up rating of `a5l22`, the
 placeholder course's action items). The lesson page's block,
@@ -212,7 +214,7 @@ five with no video completes with no link and the same steps after it; on
 `a5l08` and `a5l12` Done writes the action half alone with the steps of an
 action done before its video (no "last active"), the same as the Discord
 kind's hand-in on `a5l23` before its video, and after the video both halves
-with the video's time kept; each of the other three without a link is
+with the video's time kept; each of the other seven without a link is
 refused with `PASTE_LINK_FIRST`, its video watched or not, and with a link
 goes through; a link already on a row of the seven is kept, one sent in the
 body is never written, an undo is refused and a failed read is a 500.
@@ -282,6 +284,51 @@ Done; the backfill with its skip and its filter both gone, or finishing a
 row Whop does not list; the drawer showing the link. The backfill with its
 skip alone gone fails nothing: its update's filter still writes nothing over
 a press.
+
+`video-ads-ii-action-items.test.mjs` (2026-10-23, the owner's decision of
+2026-10-22 and 23: Video Ads II's four editing breakdowns, `a4l02` to `a4l05`,
+become action items with a Discord link, migration v114) proves that the
+app's code needs no change for them, on v114's rows (three comments that
+counted the action items were brought up to date). It reads the four ids
+and briefs out of the migration's own text and holds them to
+`course_catalog.json`, then builds the catalog as `GET /api/student/data`
+hands it over after v114 (the data file's rows) and before it (the four plain
+videos). Its eight parts: the rules the routes use (`takesDiscordLink`,
+`hasActionHalf`) take the four from the rows alone and none of them is on
+`DONE_ONLY_ACTION_ITEMS`; the lesson page's source puts the Milestone box and
+the block on any lesson with `requires_action`, and `ActionItemBlock`,
+compiled into `_gen/video-ads-ii-block.mjs` as done-only compiles it, renders
+the Discord kind for each of the four before its video, after it (still the
+field and Save, no complete button), with a link saved ("Complete the
+action", then "Complete lesson") and handed in; `save-action-link` and
+`mark-action-shipped` on the new course refuse the four before v114 ("Only
+action-item lessons can have a Discord link", "Not a compound lesson"), and
+after it refuse a hand-in with no link (no row, or the video watched) with
+`PASTE_LINK_FIRST` and take one with a link, both halves and the steps of a
+lesson finished, or the action half alone before the video; the 30% for a
+student who watched every video through Video Ads II and handed in none of
+the four: ready on the map (`discountState`, equal to before v114), granted
+(`decideDiscountRequest`) and approved (`approvalVerdict`), and locked on the
+four's videos when those are not watched; the real map (`catalog.ts`,
+`map-model.ts`): each of the four watched in turn moves the next lesson on as
+before v114, each an open action item, passed and not done, and with places 1
+to 4 finished but the four only watched the student is in Static Ads with
+Video Ads II at 13 of 17 (17 before); `isLessonComplete` needs both halves on
+the four (the SQL twin runs on v114's rows in
+`supabase/migration-tests/v114.test.mjs`); the CSM (`buildStudentSnapshot`
+and every built-in trigger, on every course day from 1 to 30 for three
+students, before v114 and after it: the same firings, none for a student who
+watched lessons; the old course's noship and pace rules off; the alert
+mapping unchanged for a student with lessons done, and its one change, a
+student whose only lessons are the four watched counted as 0 lessons done,
+as one who watched `a3l17` alone already is, the `nolessons` rule itself not
+matching them; a custom "a4l02 not shipped" the same before and after, a
+custom "Video Ads II complete" waiting for the four); and the journey's
+drawer (`buildStudentDetail`): the four among the action items, "Not yet"
+then "Handed in" with the link, Video Ads II counting a watched one open.
+`map-model.test.mjs`'s real-course block (Whop progress up to `a4l05`) now
+counts six open hand-ins where it counted two, and checks the four open,
+passed and not holding the student.
 
 The crons (bug hunt of 19 October) run with less stood in than the routes
 above: `engagement-alerts.test.mjs` copies the real route, `discord.ts`,

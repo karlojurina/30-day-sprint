@@ -399,6 +399,31 @@ When adding a new table, append it here. When deleting a field, scan
   other, until the week-later deletion removes those constants. On the
   new course `a7l19` (the pond) is the one row outside the count and no
   row holds `playbook_unlock`.
+- **`requires_action` and `action_brief` on Video Ads II's four (v114,
+  2026-10-23, branch `night/v114`, not pasted).** The owner's decision of
+  2026-10-22 and 23: `a4l02` to `a4l05`, the four editing breakdowns,
+  become action items with a Discord link. v114 is the one writer: it sets
+  `requires_action` true and `action_brief` to the owner's brief on those
+  four rows of `lessons` (the live catalog since the switch; `lessons_next`
+  is left as it is, nothing reading its action items any more), only where
+  either differs; the row's trigger moves `updated_at`. Its undo puts them
+  back to plain videos while they hold v114's brief. No reader changes:
+  every reader of `requires_action` takes them as it takes any action item
+  with a video. The lesson page shows the Milestone box with `action_brief`
+  and the Discord block (they are not on `DONE_ONLY_ACTION_ITEMS`);
+  `save-action-link` and `mark-action-shipped` take them by
+  `takesDiscordLink` and `hasActionHalf`, the hand-in refused with no link;
+  `lesson_is_complete`, `isLessonComplete`, the two progress views,
+  `student_last_counted_completion`, the snapshot function, the CSM's
+  snapshot and the admin pages then need both halves for them; the map's
+  `isPassed` passes each once its watch half is in; the badges read them
+  as action items (Took the Shot, Triple Threat at the hand-in). The
+  discount routes and `discount.ts` never read `requires_action`, so the
+  30% still asks for the four's videos alone. The trigger editor offers
+  them among the lessons with an action item, and the template switch
+  (`offCourseConditions`) then lets a "shipped" condition name them. The
+  same four briefs are in `supabase/catalog/course_catalog.json`, which
+  the development page and a rebuilt catalog read.
 
 ### `regions_next` (v94)
 - **Owner:** the course rebuild (branch `world-engine`). The staging
@@ -900,10 +925,12 @@ When adding a new table, append it here. When deleting a field, scan
   `shipped: false` is refused (T-079), and `toggle-lesson` writes no
   new-course action item.
 - **The action items with nothing to post (2026-10-22, branch
-  `night/action-done`, not on production):** seven of the ten, the four
+  `night/action-done`, not on production):** seven of them, the four
   of AI Ads + Content, `a6l03`, `a6l10`, `a6l17` and `a6l19`, and three
   of Static Ads, `a5l08`, `a5l12` and `a5l22`, are the one exception to
-  the link rule above; `a3l17`, `a3l25` and `a5l23` keep it. The list is
+  the link rule above; `a3l17`, `a3l25` and `a5l23` keep it, and so do
+  Video Ads II's four, `a4l02` to `a4l05`, once v114 makes them action
+  items (`lessons`, above), with no code changed for them. The list is
   `DONE_ONLY_ACTION_ITEMS` in `src/lib/world/action-items.ts`, by lesson
   id, and nothing in the database says it: no column, no migration.
   `mark-action-shipped` completes them with no `discord_message_link` on

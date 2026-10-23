@@ -34,12 +34,48 @@ refused and emptied from a database that holds the earlier copy of the file,
 the older builds' writes made as PostgREST makes them, an earlier round's
 refused whole and one from before T-122 keeping the stamp with a new
 `checked_at`, the undo dropping both columns and keeping every row, and v113
-on a database without v111). On `night/admin2` with the 5 lanes merged:
+on a database without v111), then `v114.test.mjs` (below), with
+`--experimental-strip-types` because it imports `src/lib/progress.ts`. On
+`night/admin2` with the 5 lanes merged:
 `PASS 702 FAIL 0`, then `PASS 22 FAIL 0`. On `night/achievements`: the same
 two, then `PASS 65 FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`,
 `PASS 22 FAIL 0`, then `PASS 23 FAIL 0`; for its fifth fix round
 (2026-10-22): `PASS 702   FAIL 0`, `PASS 22   FAIL 0`, then `PASS 34   FAIL
-0`.
+0`. On `night/v114` (2026-10-23): `PASS 702`, `PASS 22`, `PASS 65`, `PASS
+34`, then `PASS 51`, each with `FAIL 0`.
+
+`v114.test.mjs` (2026-10-23, Video Ads II's four editing breakdowns,
+`a4l02` to `a4l05`, become action items with a Discord link) builds
+production as the course switch left it from the real files: `base.sql`,
+the pre-v92 views and function lifted as `run.mjs` lifts them, v78's
+hardening, v28 (the Discord link's column and its check), a made-up old
+course with one student, v92 to v101, then v103 and the switch (v104), with
+`lessons_next` holding the four as plain videos as production's did when
+the switch copied it. Made-up students then stand on the new course (one who
+watched `a4l01` to `a4l05`, one who watched every video through Video Ads II
+and handed in Video Ads I's two, one with nothing), with a watch row and a
+made-up video row on `a4l02`. It pastes v114 as the owner does and reads its
+table; checks `lessons` then equals `course_catalog.json` in every catalog
+column (so a rebuilt catalog agrees with v114), that no other lesson and no
+other table moved (every student's row, `lessons_next`, the archive), that
+`lesson_is_complete()` agrees with `isLessonComplete` on every completion
+row before and after, that the four need the link half and that the
+progress view counts them open (5 to 1, 61 to 57); a second paste changing
+nothing; a hand-in as the two routes write it and the database's link check
+(v28); the undo twice, keeping the hand-in on its row, then v114 again with
+the hand-in counted again; the undo leaving a brief changed by hand since,
+and v114 then refusing it; seven refusals, each on a copy of the database
+(PGlite's `dumpDataDir`) or on one before the switch, each changing nothing
+(one of the four missing, in another place, not a watch lesson, an action
+item with another brief or with none, `lessons` missing, and the four all
+missing before the switch), the undo refusing with `lessons` missing, and
+one of the four already v114's (the other three change); and the lock,
+SHARE ROW EXCLUSIVE on `lessons` alone before the first read with
+`lock_timeout` 5s, and a timeout in its place stopping each file with its
+sentence. Each of 15 breaks of v114 and its undo (a brief's word, the area,
+watch and other-brief checks, the update made every time, the lock's mode
+or timeout, the flag left false, a fifth lesson, the undo's brief rule, its
+flag, a student's row touched, its lock) fails it.
 
 `v112.test.mjs` (2026-10-21, the badges for the new course) builds its own
 database: `base.sql`, Supabase's default privileges, the badge tables made

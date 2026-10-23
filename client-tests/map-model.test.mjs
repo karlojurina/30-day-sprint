@@ -251,12 +251,16 @@ console.log('\n=== an action item holds the student only until its video is watc
   const actionOnly = student([...upTo('a3l16').map(doneRow), { lesson_id: 'a3l17', completed_at: null, action_completed_at: AT, skipped_at: null }])
   ok(nextOf(actionOnly) === 'a3l17', 'its hand-in in and its video not watched: a3l17 is still next', nextOf(actionOnly))
 
-  // Day one: Whop progress up to a4l05 arrives as the watch half of every lesson.
+  // Day one: Whop progress up to a4l05 arrives as the watch half of every lesson. Since 2026-10-23 (v114)
+  // Video Ads II's four editing breakdowns, a4l02 to a4l05, are action items with a video too.
   const whop = student(upTo('a4l05').map(watchedRow))
-  ok(nextOf(whop) === 'a4l06' && whop.place === 3, 'Whop progress up to a4l05, a3l17 and a3l25 not handed in: a4l06 is next', `${nextOf(whop)} at place ${whop.place + 1}`)
+  ok(nextOf(whop) === 'a4l06' && whop.place === 3, 'Whop progress up to a4l05, a3l17, a3l25 and a4l02 to a4l05 not handed in: a4l06 is next', `${nextOf(whop)} at place ${whop.place + 1}`)
   ok(['a3l17', 'a3l25'].every((id) => !lessonIn(whop, id).done && lessonIn(whop, id).passed), 'and a3l17 and a3l25 are both still open')
+  ok(['a4l02', 'a4l03', 'a4l04', 'a4l05'].every((id) => lessonIn(whop, id).action && !lessonIn(whop, id).done && lessonIn(whop, id).passed),
+     'and so are Video Ads II\'s four: action items, open, passed (none of them holds the student)')
   ok(whop.areas[2].done === 23 && whop.areas[2].lessons.length === 25, 'Video Ads I is 23 of 25: the place is not done while a hand-in is open', `${whop.areas[2].done} of ${whop.areas[2].lessons.length}`)
-  ok(whop.doneTotal === upTo('a4l05').length - 2 && whop.total === 140, 'the course count leaves the two open hand-ins out', `${whop.doneTotal}/${whop.total}`)
+  ok(whop.areas[3].done === 1, 'Video Ads II is 1 done (a4l01): its four watched breakdowns wait for their hand-ins', String(whop.areas[3].done))
+  ok(whop.doneTotal === upTo('a4l05').length - 6 && whop.total === 140, 'the course count leaves the six open hand-ins out', `${whop.doneTotal}/${whop.total}`)
 
   // A setup action item has no watch half to pass, even when Whop sent a completion for it.
   const setup = student(upTo('a5l22').map(watchedRow))

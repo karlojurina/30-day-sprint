@@ -1,7 +1,7 @@
 {
  "course": "Ad Creative Program",
  "read": "2026-10-13, checked again on 2026-10-19",
- "source": "The course as it stands in the course builder on Whop, read through Whop's API on 2026-10-13 (141 lessons, 8 chapters). The order and every title are Whop's. The split of Video Ads into two places, the place of the Ad Bounty lesson, the gate and the action briefs are decisions recorded in _admin/prds/course-catalog/course_catalog_prd.md, section 3. Checked again through Whop's API on 2026-10-19: the same 141 lessons in the same order under the same Whop lesson ids, and Whop had renamed a7l15 and a7l16, so they carry Whop's new titles. Your First Boss Battle (a3l17) is an action item since 2026-10-19, Lovro's call; its brief is written from the course's titles (_admin/prds/map-review-2026-10-15/decisions.md, Preview review, 2026-10-19).",
+ "source": "The course as it stands in the course builder on Whop, read through Whop's API on 2026-10-13 (141 lessons, 8 chapters). The order and every title are Whop's. The split of Video Ads into two places, the place of the Ad Bounty lesson, the gate and the action briefs are decisions recorded in _admin/prds/course-catalog/course_catalog_prd.md, section 3. Checked again through Whop's API on 2026-10-19: the same 141 lessons in the same order under the same Whop lesson ids, and Whop had renamed a7l15 and a7l16, so they carry Whop's new titles. Your First Boss Battle (a3l17) is an action item since 2026-10-19, the owner's call; its brief is written from the course's titles (_admin/prds/map-review-2026-10-15/decisions.md, Preview review, 2026-10-19). Video Ads II's four editing breakdowns (a4l02 to a4l05) are action items with a Discord link since 2026-10-23, the owner's decision of 2026-10-22 and 23 (the coaches of Video Ads I and II named their action items, and every one is handed in on Discord); their briefs are the owner's, approved word for word, and migration 2026_v114 puts them on the live catalog, lessons.",
  "areas": [
   {
    "id": "a1",
@@ -359,6 +359,7 @@
    "area": "a4",
    "title": "Editing Breakdown - UGC",
    "type": "watch",
+   "action_brief": "Edit the UGC ad yourself from the brief in the lesson, then post it for the coaches' review.",
    "whop_lesson_id": "lesn_RZAleGyAu1pmm"
   },
   {
@@ -366,6 +367,7 @@
    "area": "a4",
    "title": "Editing Breakdown - Text on Screen Ad",
    "type": "watch",
+   "action_brief": "Edit the text on screen ad yourself from the brief in the lesson, then post it for the coaches' review.",
    "whop_lesson_id": "lesn_Op529V4SoObt2"
   },
   {
@@ -373,6 +375,7 @@
    "area": "a4",
    "title": "Editing Breakdown - AI VO Ad",
    "type": "watch",
+   "action_brief": "Edit the AI voiceover ad yourself from the brief in the lesson, then post it for the coaches' review.",
    "whop_lesson_id": "lesn_JZleFDdLUDGL0"
   },
   {
@@ -380,6 +383,7 @@
    "area": "a4",
    "title": "Editing Breakdown - VSL Ad",
    "type": "watch",
+   "action_brief": "Edit the VSL ad yourself from the brief and the assets in the lesson, then post it for the coaches' review.",
    "whop_lesson_id": "lesn_26RJ8fja7HATk"
   },
   {

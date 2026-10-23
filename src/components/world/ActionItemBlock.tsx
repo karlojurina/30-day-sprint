@@ -35,7 +35,7 @@ const NO_ANSWER = "Couldn't reach the server. Nothing was saved, so try again.";
  *
  * DONE ONLY (`doneOnly`, the owner, 2026-10-22): an action item with nothing
  * to post (isDoneOnly in action-items.ts: DONE_ONLY_ACTION_ITEMS, seven of the
- * course's ten) has no field, no link and no word of Discord. The Milestone
+ * course's fourteen) has no field, no link and no word of Discord. The Milestone
  * box above says what to do; this block holds one button, Done, which calls
  * `onComplete` as the complete button does, so the same request makes the
  * same writes. Then it says "Completed on <date>." and nothing else, whatever

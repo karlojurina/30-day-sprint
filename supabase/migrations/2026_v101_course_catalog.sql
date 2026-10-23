@@ -17,7 +17,7 @@
 --   1. Gives the 8 areas of regions_next the course's own chapter names.
 --   2. Rewrites lessons_next. v94 seeded it with 145 placeholder lessons
 --      ("Fundamentals · lesson 3"). After this file it holds the 141
---      lessons of the course: id, area, type, title, order, the 10 action
+--      lessons of the course: id, area, type, title, order, the 14 action
 --      items with their briefs, the one gate (a4l17), the special
 --      rows (a7l19, feature key bounty_access, outside the lesson count),
 --      and every lesson's Whop lesson id (whop_lesson_id, a column this file
@@ -421,10 +421,10 @@ values
   ('a3l24', 'a3', 'watch', 'How to Submit an Action Item', null, 43, false, null, false, false, null, null, true, null, 'lesn_oBG9UqLxBA6yI'),
   ('a3l25', 'a3', 'watch', '[ACTION ITEM] Congrats! Here''s another one', null, 44, true, 'Edit the entire ad all by yourself, from the brief all the way to the submission.', false, false, null, null, true, null, 'lesn_utZ7VahCXShWV'),
   ('a4l01', 'a4', 'watch', 'How to Improve Fast: Your Daily Editing Routine', null, 45, false, null, false, false, null, null, true, null, 'lesn_lgkk7aRIPBwDf'),
-  ('a4l02', 'a4', 'watch', 'Editing Breakdown - UGC', null, 46, false, null, false, false, null, null, true, null, 'lesn_RZAleGyAu1pmm'),
-  ('a4l03', 'a4', 'watch', 'Editing Breakdown - Text on Screen Ad', null, 47, false, null, false, false, null, null, true, null, 'lesn_Op529V4SoObt2'),
-  ('a4l04', 'a4', 'watch', 'Editing Breakdown - AI VO Ad', null, 48, false, null, false, false, null, null, true, null, 'lesn_JZleFDdLUDGL0'),
-  ('a4l05', 'a4', 'watch', 'Editing Breakdown - VSL Ad', null, 49, false, null, false, false, null, null, true, null, 'lesn_26RJ8fja7HATk'),
+  ('a4l02', 'a4', 'watch', 'Editing Breakdown - UGC', null, 46, true, 'Edit the UGC ad yourself from the brief in the lesson, then post it for the coaches'' review.', false, false, null, null, true, null, 'lesn_RZAleGyAu1pmm'),
+  ('a4l03', 'a4', 'watch', 'Editing Breakdown - Text on Screen Ad', null, 47, true, 'Edit the text on screen ad yourself from the brief in the lesson, then post it for the coaches'' review.', false, false, null, null, true, null, 'lesn_Op529V4SoObt2'),
+  ('a4l04', 'a4', 'watch', 'Editing Breakdown - AI VO Ad', null, 48, true, 'Edit the AI voiceover ad yourself from the brief in the lesson, then post it for the coaches'' review.', false, false, null, null, true, null, 'lesn_JZleFDdLUDGL0'),
+  ('a4l05', 'a4', 'watch', 'Editing Breakdown - VSL Ad', null, 49, true, 'Edit the VSL ad yourself from the brief and the assets in the lesson, then post it for the coaches'' review.', false, false, null, null, true, null, 'lesn_26RJ8fja7HATk'),
   ('a4l06', 'a4', 'watch', 'Understanding Leverage Moves', null, 50, false, null, false, false, null, null, true, null, 'lesn_hvfqbNtKKrYMq'),
   ('a4l07', 'a4', 'watch', 'The Emotion Map', null, 51, false, null, false, false, null, null, true, null, 'lesn_L73QjVPOxinzc'),
   ('a4l08', 'a4', 'watch', 'Reading Scripts Like the Top 1%', null, 52, false, null, false, false, null, null, true, null, 'lesn_18IWiJpLCWDj5'),
@@ -602,8 +602,8 @@ begin
   if f.specials <> 'a7l19:bounty_access:outside the count' then
     raise exception 'The rows with a feature key or outside the lesson count would be: %. They must be: a7l19:bounty_access:outside the count. Nothing was changed.', f.specials;
   end if;
-  if f.actions <> 10 or f.no_brief <> 0 then
-    raise exception 'There would be % action items, % of them with no brief. The course has 10, each with its brief. Nothing was changed.', f.actions, f.no_brief;
+  if f.actions <> 14 or f.no_brief <> 0 then
+    raise exception 'There would be % action items, % of them with no brief. The course has 14, each with its brief. Nothing was changed.', f.actions, f.no_brief;
   end if;
   if f.setups <> 5 then
     raise exception '% lessons would have the type setup and the course has 5. Nothing was changed.', f.setups;
@@ -649,12 +649,12 @@ select t.area, t.name, t.rows, t.counting, t.action_items, t.with_length
 --     a1        8         8             0
 --     a2       11        11             0
 --     a3       25        25             2
---     a4       17        17             0
+--     a4       17        17             4
 --     a5       26        26             4
 --     a6       22        22             4
 --     a7       19        18             0
 --     a8       13        13             0
---     total   141       140            10
+--     total   141       140            14
 --   with_length is 0 on every row until load-lesson-videos.sql has run. After
 --   it, with_length is the number of lessons that have a video.
 --   If the file stopped with a message ending "Nothing was changed.", it is

@@ -4,11 +4,12 @@
 // then the next lesson opens up"; then, of Static Ads: "Action Item - Static
 // Ad Brief this is the only one they have in statics that's for discord. All
 // other ones in statics are for doing and not sending to coaches"). Seven of
-// the course's ten action items are finished with a Done button and no
-// Discord link: the four of AI Ads + Content and three of Static Ads. The
-// other three (a3l17, a3l25, a5l23) still need theirs. Two of the seven have
-// a video (a5l08, a5l12): there Done is the action half alone, and the video's
-// half still comes only from watching it.
+// the course's action items are finished with a Done button and no Discord
+// link: the four of AI Ads + Content and three of Static Ads. The other seven
+// still need theirs: a3l17, a3l25, a5l23, and since 2026-10-23 (the owner,
+// migration v114) Video Ads II's four editing breakdowns, a4l02 to a4l05.
+// Two of the Done seven have a video (a5l08, a5l12): there Done is the action
+// half alone, and the video's half still comes only from watching it.
 // On the real source:
 //
 //   1. the one list   DONE_ONLY_ACTION_ITEMS and isDoneOnly (action-items.ts),
@@ -22,7 +23,7 @@
 //                     completes with no link (on a5l08 and a5l12 the action
 //                     half alone until the video is watched); a link on its
 //                     row is kept and a link in the body is not read (never
-//                     written); each of the other three without a link is
+//                     written); each of the other seven without a link is
 //                     refused as before, with one it goes through.
 //                     save-action-link still stores a link sent for one of the
 //                     seven (the page never sends one)
@@ -46,7 +47,7 @@
 //                     pressed before the video is kept; the video's half comes
 //                     only from what Whop reports for that lesson; the map
 //                     opens the next lesson with no Done pressed; the other
-//                     three as before
+//                     seven as before
 //
 // build.mjs copies the modules and the routes (run it first; `npm run
 // test:client` does); the block is compiled here as Next compiles it, into
@@ -118,14 +119,17 @@ async function quietly(fn) {
   try { return [await fn(), lines] } catch (e) { return [e, lines] } finally { [console.info, console.warn, console.error] = real }
 }
 
-/** The seven the owner named, and the three that keep their link: typed here, on purpose. */
+/** The seven the owner named, and the seven that keep their link: typed here, on purpose. */
 const DONE_ONLY = ['a5l08', 'a5l12', 'a5l22', 'a6l03', 'a6l10', 'a6l17', 'a6l19']
 /** Of the seven, the two with a video (The Backbone, Imitation): Done is their action half alone. */
 const WITH_VIDEO = ['a5l08', 'a5l12']
 /** And the five with none, setup lessons: Done finishes them. */
 const NO_VIDEO = ['a5l22', 'a6l03', 'a6l10', 'a6l17', 'a6l19']
-/** The three that keep their Discord link: Video Ads I's two and Static Ads' Static Ad Brief, each with a video. */
-const LINK_KIND = ['a3l17', 'a3l25', 'a5l23']
+/**
+ * The seven that keep their Discord link, each with a video: Video Ads I's two, Video Ads II's four editing
+ * breakdowns (action items since 2026-10-23, migration v114) and Static Ads' Static Ad Brief.
+ */
+const LINK_KIND = ['a3l17', 'a3l25', 'a4l02', 'a4l03', 'a4l04', 'a4l05', 'a5l23']
 const LINK = 'https://discord.com/channels/1100000000000000001/1200000000000000002/1300000000000000003'
 const EARLIER = '2026-10-20T09:00:00.000Z'
 const LATER = '2026-10-21T09:00:00.000Z'
@@ -158,7 +162,7 @@ const lessonOf = (id) => LESSONS.find((l) => l.id === id)
 // ═════════════════════════════════════════════════════════════════════════════
 console.log('\n=== 1. The one list ===')
 ok(same([...DONE_ONLY_ACTION_ITEMS].sort(), DONE_ONLY), 'DONE_ONLY_ACTION_ITEMS is the seven the owner named', show([...DONE_ONLY_ACTION_ITEMS]))
-ok(DONE_ONLY.every((id) => isDoneOnly(id)) && LINK_KIND.every((id) => !isDoneOnly(id)), 'isDoneOnly: yes for the seven, no for the three that keep their link (a3l17, a3l25, a5l23)')
+ok(DONE_ONLY.every((id) => isDoneOnly(id)) && LINK_KIND.every((id) => !isDoneOnly(id)), 'isDoneOnly: yes for the seven, no for the seven that keep their link (a3l17, a3l25, a4l02 to a4l05, a5l23)')
 {
   const old = Array.from({ length: 78 }, (_, i) => `l${String(i + 1).padStart(3, '0')}`)
   const plain = LESSONS.filter((l) => !l.requires_action).map((l) => l.id)
@@ -183,7 +187,7 @@ ok(DONE_ONLY.every((id) => isDoneOnly(id)) && LINK_KIND.every((id) => !isDoneOnl
   ok(same(statics.map((l) => [l.id, l.type, l.title, LENGTHS[l.id] > 0]), want),
      'course_catalog.json: Static Ads\' four action items, by the titles the owner named: The Backbone and Imitation (each with a video), the Brand Deck (a setup lesson) and the Static Ad Brief (a video), the one that keeps its link', show(statics.map(kind)))
   ok(same(actions.filter((l) => !DONE_ONLY.includes(l.id)).map((l) => l.id), LINK_KIND) && LINK_KIND.every((id) => lessonOf(id).type === 'watch' && LENGTHS[id] > 0),
-     'and the course\'s other action items are the three, each a watch lesson with a video: Video Ads I\'s two and the Static Ad Brief', show(actions.map((l) => l.id)))
+     'and the course\'s other action items are the seven, each a watch lesson with a video: Video Ads I\'s two, Video Ads II\'s four (v114) and the Static Ad Brief', show(actions.map((l) => l.id)))
   ok(same(DONE_ONLY.filter((id) => lessonOf(id).has_video), WITH_VIDEO) && same(DONE_ONLY.filter((id) => !lessonOf(id).has_video), NO_VIDEO),
      'of the seven, a5l08 and a5l12 have a video and the other five none')
 }

@@ -1559,9 +1559,10 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
             line('total', 'the whole course', COURSE.lessons)]
   }
   // The post-conditions of the PRD (section 9.C, step 7), as its own numbers.
-  // Action items: the PRD's 9, and a3l17 since 2026-10-19 (Lovro), so 10.
+  // Action items: the PRD's 9, a3l17 since 2026-10-19 (the owner) and Video Ads II's four editing
+  // breakdowns since 2026-10-23 (the owner, v114), so 14.
   const THE_COURSE = { n: 141, counting: 140, lo: 1, hi: 141, orders: 141, sizes: '8,11,25,17,26,22,19,13', crossings: 0, gates: 'a4l17',
-                       special: 'a7l19/bounty_access/false', actions: 10, no_brief: 0, setups: 5, placeholders: 0 }
+                       special: 'a7l19/bounty_access/false', actions: 14, no_brief: 0, setups: 5, placeholders: 0 }
   const facts = async d => (await rowsOn(d, `select
       count(*)::int as n,
       count(*) filter (where counts_toward_progress)::int as counting,
@@ -1715,7 +1716,7 @@ console.log('\n=== 20. v101: the real course in the staging catalog, its generat
          r.rows.map(x => `${x.area}:${x.rows}`).join(' '))
     const f = await facts(db)
     note(sameJson(f, THE_COURSE),
-         'the post-conditions hold: 141 rows, 140 counting, sort_order 1 to 141 and rising with the areas, 8/11/25/17/26/22/19/13, gate a4l17, a7l19 the one feature row, 10 action items with briefs, 5 setup, no placeholder title',
+         'the post-conditions hold: 141 rows, 140 counting, sort_order 1 to 141 and rising with the areas, 8/11/25/17/26/22/19/13, gate a4l17, a7l19 the one feature row, 14 action items with briefs, 5 setup, no placeholder title',
          JSON.stringify(f))
     const got = await catalogRows(db)
     const firstOff = got.findIndex((row, i) => !sameJson(row, wantRows[i]))
@@ -3324,8 +3325,8 @@ const cutover = async (d, where) => {
     })
     const areaGot = r.ok ? r.rows.slice(1, 9).map(x => [x.line, x.name, x.lessons, x.counting, x.action_items, x.with_video, x.with_whop_id]) : []
     const tot = r.rows[9] ?? {}
-    say(sameJson(areaGot, areaWant) && tot.line === 'total' && tot.lessons === 141 && tot.counting === 140 && tot.action_items === 10 && tot.with_whop_id === 141,
-        labelOf("...one row per area as the data file has it, with a Whop id on every lesson, and a total of 141, 140 counting, 10 action items"),
+    say(sameJson(areaGot, areaWant) && tot.line === 'total' && tot.lessons === 141 && tot.counting === 140 && tot.action_items === 14 && tot.with_whop_id === 141,
+        labelOf("...one row per area as the data file has it, with a Whop id on every lesson, and a total of 141, 140 counting, 14 action items"),
         areaGot.map(x => `${x[0]}:${x[2]}/${x[5]}v`).join(' '))
     const sum = Object.fromEntries((r.rows ?? []).slice(10).map(x => [x.line, x.value]))
     say(sum.reset_at === reset && sum.archived_completions === String(want.counts.student_lesson_completions)

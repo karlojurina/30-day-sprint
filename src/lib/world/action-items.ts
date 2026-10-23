@@ -39,8 +39,9 @@
  * link is. Done never writes the video's half. mark-action-shipped completes
  * them with no link saved, and the admin drawer says Done and shows no link.
  * Every other action item still needs its link: Static Ads' Static Ad Brief,
- * which the coaches review, and Video Ads I's two. DONE_ONLY_ACTION_ITEMS
- * below is the one list.
+ * which the coaches review, Video Ads I's two, and Video Ads II's four editing
+ * breakdowns (a4l02 to a4l05, action items since 2026-10-23 by migration v114,
+ * with no change here). DONE_ONLY_ACTION_ITEMS below is the one list.
  *
  * FINISHED ON WHOP. A lesson finished on Whop counts in the app as one
  * finished in the app (the owner's standing rule). A Done-only action item has
@@ -53,7 +54,7 @@
  * pressed before the video was watched) is kept. The watch half still comes
  * only from what Whop reports for that lesson, as for every lesson.
  * isLessonComplete and the database's progress view are unchanged: the row
- * has both halves. The other three still need their link and their button.
+ * has both halves. The other seven still need their link and their button.
  */
 
 /**
@@ -66,8 +67,9 @@
  * pasted by hand and code that works before and after the paste. The ids are
  * the course's own (the old course's run from l001 to l078, so none of them
  * is one of these), and client-tests/done-only.test.mjs fails when the
- * catalog no longer has these seven as those action items, or when a5l23
- * (the Static Ad Brief), a3l17 and a3l25 stop being the course's other three.
+ * catalog no longer has these seven as those action items, or when a3l17,
+ * a3l25, a4l02 to a4l05 and a5l23 (the Static Ad Brief) stop being the
+ * course's other seven.
  */
 export const DONE_ONLY_ACTION_ITEMS: ReadonlySet<string> = new Set([
   "a5l08",

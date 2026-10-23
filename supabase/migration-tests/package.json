@@ -2,6 +2,6 @@
   "name": "migration-tests",
   "private": true,
   "type": "module",
-  "scripts": { "test": "node run.mjs && node v111.test.mjs && node --experimental-strip-types v112.test.mjs && node v113.test.mjs" },
+  "scripts": { "test": "node run.mjs && node v111.test.mjs && node --experimental-strip-types v112.test.mjs && node v113.test.mjs && node --experimental-strip-types v114.test.mjs" },
   "dependencies": { "@electric-sql/pglite": "^0.2.0" }
 }

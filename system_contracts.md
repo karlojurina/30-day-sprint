@@ -125,7 +125,7 @@ When adding a new table, append it here. When deleting a field, scan
 ### `student_milestones`
 - **Depends on:** `students`
 - **Depended on by:** `StudentContext` (`bountyAccessClaimedAt`,
-  `playbookWelcomeSeenAt`, `onboardingCompletedAt`), milestone API
+  `playbookWelcomeSeenAt`, `onboardingCompletedAt`, `playbookUnlockedAt`), milestone API
   routes, `src/lib/csm-triggers.ts` (`has_logged_into_app` reads
   `first_sprint_login_at`), `/api/auth/whop/callback` (stamps
   `first_sprint_login_at` on first login),
@@ -149,11 +149,18 @@ When adding a new table, append it here. When deleting a field, scan
   and deletes a row it created when nothing else on it was filled in
   since; the commented statement at the foot of
   `supabase/diagnostics/cutover-postcheck.sql` stamps one named student
-  by hand. The app never writes it. As committed, nothing in `src/`
-  reads it: `GET /api/student/data` selects `*` from this table, so it
-  reaches the browser, and the Playbook gate that honours it is cutover
-  WI-8, not merged at the time of writing. Until then the switch would
-  lock every graduate out. The undo of v103 drops the column.
+  by hand; the commented block at the foot of
+  `supabase/diagnostics/v114-before-paste.sql` (2026-10-23) stamps, on the
+  owner's word only, exactly the students that file's line c counts: those
+  who hold the Playbook by the 80% rule alone and would lose it when v114
+  counts Video Ads II's four open. The app never writes it.
+  `GET /api/student/data` selects `*` from this table, so it reaches the
+  browser; `StudentContext` reads it (`playbookUnlockedAt`) and the
+  Playbook gate, `isPlaybookUnlocked` in `src/lib/progress.ts` (cutover
+  WI-8), opens on it. That gate is worked out on every load from the done
+  lessons and is never stamped, so without the stamp a student can lose
+  the Playbook when lessons they had done count open again. The undo of
+  v103 drops the column.
 - **`first_sprint_login_at` and the switch:** v104 fills it from the
   earliest of `completed_at`, `skipped_at` and `action_completed_at`
   for every student who has a completion and no stamp, so the team's
@@ -404,10 +411,10 @@ When adding a new table, append it here. When deleting a field, scan
   2026-10-22 and 23: `a4l02` to `a4l05`, the four editing breakdowns,
   become action items with a Discord link. v114 is the one writer: it sets
   `requires_action` true and `action_brief` to the owner's brief on those
-  four rows of `lessons` (the live catalog since the switch; `lessons_next`
-  is left as it is, nothing reading its action items any more), only where
-  either differs; the row's trigger moves `updated_at`. Its undo puts them
-  back to plain videos while they hold v114's brief. No reader changes:
+  four rows of `lessons` (the live catalog since the switch), and makes
+  the same change in `lessons_next` (below), only where either differs;
+  the row's trigger moves `updated_at`. Its undo puts them back to plain
+  videos, in each table while they hold v114's brief there. No reader changes:
   every reader of `requires_action` takes them as it takes any action item
   with a video. The lesson page shows the Milestone box with `action_brief`
   and the Discord block (they are not on `DONE_ONLY_ACTION_ITEMS`);
@@ -417,7 +424,15 @@ When adding a new table, append it here. When deleting a field, scan
   `student_last_counted_completion`, the snapshot function, the CSM's
   snapshot and the admin pages then need both halves for them; the map's
   `isPassed` passes each once its watch half is in; the badges read them
-  as action items (Took the Shot, Triple Threat at the hand-in). The
+  as action items (Took the Shot, Triple Threat at the hand-in). Through
+  the done lessons, the Playbook gate (`isPlaybookUnlocked`, which the app
+  works out on every load and never stamps), the rating rule
+  (`ratingRefusal`), `student_current_region`, the CSM's
+  `region_complete` and `region_completion_pct` conditions and the
+  activity word (`activityLabel` over `student_last_counted_completion`)
+  read each of the four open until it is handed in; what that moves for
+  students is in the header of v114 and counted by
+  `supabase/diagnostics/v114-before-paste.sql`. The
   discount routes and `discount.ts` never read `requires_action`, so the
   30% still asks for the four's videos alone. The trigger editor offers
   them among the lessons with an action item, and the template switch
@@ -464,8 +479,9 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** `regions_next` (foreign key on `region_id`, cascade
   on delete)
 - **Written by:** SQL pasted into the Supabase SQL editor, and nothing
-  in `src/`. v94 created and seeded it. Two files write it now, each
-  on its own columns, and an undo file takes the first back.
+  in `src/`. v94 created and seeded it. The files below write it now,
+  each on its own columns but v114, which changes two of v101's on four
+  rows, and an undo file takes v101 back.
   - **Migration v101** (`2026_v101_course_catalog.sql`, generated from
     `supabase/catalog/course_catalog.json` by `npm run build:catalog`)
     rewrites the rows in place over v94's placeholder seed. It owns
@@ -504,12 +520,22 @@ When adding a new table, append it here. When deleting a field, scan
     differs from the title the lesson has here.
   - `supabase/undo/2026_v101_undo.sql` deletes every row and runs v94's
     seed statements again.
+  - **Migration v114** (2026-10-23, branch `night/v114`, not pasted) sets
+    `requires_action` and `action_brief` on `a4l02` to `a4l05` here as in
+    `lessons`, the same change in the same transaction, so the two tables
+    stay equal (the switch's postcheck compares them) and a deployment
+    with `CATALOG_TABLE_SUFFIX=_next` reads the four as production does.
+    It refuses, changing nothing, when a lesson of the four is missing
+    here or differs as it refuses in `lessons`, and writes `lessons` alone
+    when this table is gone. Its undo puts them back here too.
   - Neither v101 nor the load has been run on production (2026-10-13).
     Until v101 is, production holds v94's 145 placeholder lessons.
 - **Depended on by:** while `CATALOG_TABLE_SUFFIX` is `_next`:
   `GET /api/student/data` (returns these rows as `lessons`),
   `POST /api/student/lesson-video` and `POST /api/student/lesson-watched`
-  (both look the lesson up here), and through the data route
+  (both look the lesson up here), `POST /api/student/save-action-link` and
+  `POST /api/student/mark-action-shipped` (both read the lesson's
+  `requires_action` here), and through the data route
   `StudentContext`, `src/lib/world/catalog.ts`,
   `src/lib/world/map-model.ts` and the world map. Whatever the switch
   says, `GET /api/cron/check-lesson-videos` reads `id`, `type` and
@@ -519,7 +545,7 @@ When adding a new table, append it here. When deleting a field, scan
   title, exactly one `is_gate`, and a distinct `whop_lesson_id` on
   every row; it archives and deletes the `lesson_videos` and
   `student_lesson_watch` rows whose id is not here. The table is kept
-  after the switch, and the two private loads still write it.
+  after the switch, and the two private loads and v114 still write it.
 - **Stable contract:** `id`, `region_id`, `type` (`watch` / `setup`
   only; `action` is not allowed here), `title`, `description`,
   `sort_order` (unique, 1 to N across the whole course),

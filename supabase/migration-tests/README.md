@@ -42,7 +42,9 @@ two, then `PASS 65 FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`,
 `PASS 22 FAIL 0`, then `PASS 23 FAIL 0`; for its fifth fix round
 (2026-10-22): `PASS 702   FAIL 0`, `PASS 22   FAIL 0`, then `PASS 34   FAIL
 0`. On `night/v114` (2026-10-23): `PASS 702`, `PASS 22`, `PASS 65`, `PASS
-34`, then `PASS 51`, each with `FAIL 0`.
+34`, then `PASS 51`, each with `FAIL 0`; after the review's fix round the
+same day: `PASS 702`, `PASS 22`, `PASS 65`, `PASS 34`, then `PASS 86`, each
+with `FAIL 0`.
 
 `v114.test.mjs` (2026-10-23, Video Ads II's four editing breakdowns,
 `a4l02` to `a4l05`, become action items with a Discord link) builds
@@ -50,32 +52,57 @@ production as the course switch left it from the real files: `base.sql`,
 the pre-v92 views and function lifted as `run.mjs` lifts them, v78's
 hardening, v28 (the Discord link's column and its check), a made-up old
 course with one student, v92 to v101, then v103 and the switch (v104), with
-`lessons_next` holding the four as plain videos as production's did when
-the switch copied it. Made-up students then stand on the new course (one who
-watched `a4l01` to `a4l05`, one who watched every video through Video Ads II
-and handed in Video Ads I's two, one with nothing), with a watch row and a
-made-up video row on `a4l02`. It pastes v114 as the owner does and reads its
-table; checks `lessons` then equals `course_catalog.json` in every catalog
-column (so a rebuilt catalog agrees with v114), that no other lesson and no
-other table moved (every student's row, `lessons_next`, the archive), that
-`lesson_is_complete()` agrees with `isLessonComplete` on every completion
-row before and after, that the four need the link half and that the
-progress view counts them open (5 to 1, 61 to 57); a second paste changing
-nothing; a hand-in as the two routes write it and the database's link check
-(v28); the undo twice, keeping the hand-in on its row, then v114 again with
-the hand-in counted again; the undo leaving a brief changed by hand since,
-and v114 then refusing it; seven refusals, each on a copy of the database
-(PGlite's `dumpDataDir`) or on one before the switch, each changing nothing
-(one of the four missing, in another place, not a watch lesson, an action
-item with another brief or with none, `lessons` missing, and the four all
-missing before the switch), the undo refusing with `lessons` missing, and
-one of the four already v114's (the other three change); and the lock,
-SHARE ROW EXCLUSIVE on `lessons` alone before the first read with
-`lock_timeout` 5s, and a timeout in its place stopping each file with its
-sentence. Each of 15 breaks of v114 and its undo (a brief's word, the area,
-watch and other-brief checks, the update made every time, the lock's mode
-or timeout, the flag left false, a fifth lesson, the undo's brief rule, its
-flag, a student's row touched, its lock) fails it.
+`lessons` and `lessons_next` holding the four as plain videos as
+production's did when the switch copied it. Made-up students then stand on
+the new course (one who watched `a4l01` to `a4l05`, one who watched every
+video through Video Ads II and handed in Video Ads I's two, one with
+nothing), with a watch row and a made-up video row on `a4l02`. It pastes
+v114 as the owner does and reads its table; checks `lessons` and
+`lessons_next` then equal `course_catalog.json` in every catalog column (so
+a rebuilt catalog agrees with v114, and a deployment reading `lessons_next`
+sees the four as production does), that no other lesson and no other table
+moved (every student's row, the archive), that the switch's postcheck
+(`cutover-postcheck.sql`, its row 4) finds the two tables equal before and
+after, that `lesson_is_complete()` agrees with `isLessonComplete` on every
+completion row before and after, that the four need the link half and that
+the progress view counts them open (5 to 1, 61 to 57); a second paste
+changing nothing; a hand-in as the two routes write it and the database's
+link check (v28); the undo twice, keeping the hand-in on its row, then v114
+again with the hand-in counted again; the undo leaving a brief changed by
+hand since in `lessons` and putting `lessons_next` back, and v114 then
+refusing it; thirteen refusals, each on a copy of the database (PGlite's
+`dumpDataDir`) or on one before the switch, each changing nothing (in
+`lessons` one of the four missing, in another place, not a watch lesson,
+an action item with another brief or with none, a plain video with a
+brief; in `lessons_next` one of the four missing, in another place, not a
+watch lesson, an action item with another brief, a plain video with a
+brief; `lessons` missing; and the four all missing before the switch), the
+undo refusing with `lessons` missing; one of the four already v114's in
+both tables, then in `lessons` alone; a database without `lessons_next`
+(both files write `lessons` alone and say so); the locks, SHARE ROW
+EXCLUSIVE on `lessons` and `lessons_next` alone before the first read with
+`lock_timeout` 5s, and a timeout on each stopping each file with its
+sentence naming the table; both files run statement by statement as psql
+sends them, a refusal after a finished run in the same session reading
+"did not finish"; and `supabase/diagnostics/v114-before-paste.sql`, the
+count before the paste, on 14 made-up students at each edge of the
+Playbook's rule: its five lines held to `isPlaybookUnlocked` and
+`isLessonComplete` over the same rows, the same before v114 and after,
+and its commented stamp, run alone, stamping exactly line c's students.
+33 of 34 breaks of v114, its undo and the count fail it (a brief's word in
+either file, a fifth lesson, the area, watch, brief and `lessons_next`
+checks, the narrower brief check of before, the update made every time,
+the flag left as it was, `lessons_next` not written or not put back, each
+lock's mode, the timeout, the settings emptied inside the transaction in
+either file, a student's row touched by either file, the first row's
+words; in the count, line c blind to the stamp or to the last lesson, the
+join read before the first payment, 80% read as more than 80%, line a
+counting every row on the four, the four read as action items before too,
+line e counting a template turned off or any metric, the stamp reaching
+students under 30 days or left live). The one left, the stamp writing over
+a stamp already there, changes nothing the test can reach: the stamp picks
+only students with none, so it guards only a stamp another session writes
+in between, and the harness has one connection.
 
 `v112.test.mjs` (2026-10-21, the badges for the new course) builds its own
 database: `base.sql`, Supabase's default privileges, the badge tables made

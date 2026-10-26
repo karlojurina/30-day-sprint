@@ -438,6 +438,7 @@ export function Button({
   title,
   expanded,
   controls,
+  unavailable,
 }: {
   children: React.ReactNode;
   variant?: ButtonVariant;
@@ -452,8 +453,17 @@ export function Button({
   expanded?: boolean;
   /** The id of what it opens: aria-controls. */
   controls?: string;
+  /**
+   * Why the button can do nothing here, in a plain sentence: it is greyed and
+   * presses do nothing, but it stays in the keyboard's path (aria-disabled,
+   * not disabled), and the sentence is its title, the hover's tip and what a
+   * screen reader is told. The 30% page's Copy @ and Copy ID for a student
+   * with none on file (2026-10-26).
+   */
+  unavailable?: string;
 }) {
-  const style = buttonStyle(variant, size, busy, disabled);
+  const off = Boolean(unavailable);
+  const style = buttonStyle(variant, size, busy, disabled || off);
   if (href) {
     return (
       <Link href={href} style={style} title={title}>
@@ -464,10 +474,11 @@ export function Button({
   return (
     <button
       type={type}
-      onClick={onClick}
+      onClick={off ? undefined : onClick}
       disabled={busy || disabled}
+      aria-disabled={off || undefined}
       style={style}
-      title={title}
+      title={unavailable ?? title}
       aria-expanded={expanded}
       aria-controls={controls}
     >

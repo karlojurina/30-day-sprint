@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DiscountStandInContext, type DiscountStandIn } from "@/components/world/useWorldDiscount";
-import { DISCOUNT_LAUNCH_DATE, requiredLessons, type DiscountLesson, type DiscountRequestRow } from "@/lib/world/discount";
+import { DISCOUNT_LAUNCH_DATE, requiredLessons, videosNeeded, type DiscountLesson, type DiscountRequestRow } from "@/lib/world/discount";
 import type { CatalogLessonLike } from "@/lib/world/catalog";
 import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/database";
 
@@ -16,7 +16,14 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *   ?discount=locked         first payment 3 days ago (11 days left), videos
  *                            as the ?p= preset has them
  *   ?discount=ready          first payment 5 days ago, every video the offer
- *                            asks for watched (added to the ?p= preset)
+ *                            counts watched (added to the ?p= preset)
+ *   ?discount=almost         first payment 5 days ago, one video short of the
+ *                            80% (the owner, 2026-10-26): the first 48 of the
+ *                            real course's 61 watched (discount.ts
+ *                            videosNeeded less one), so it is locked, "48
+ *                            watched", "49 of 61 needed", the lantern lit
+ *   ?discount=eighty         the same student with one more: 49 of 61, the
+ *                            least the 80% takes, so it is ready
  *   ?discount=pending        as ready, and an application sent 2 hours ago
  *   ?discount=approved       as ready, and the application approved
  *   ?discount=applied        as ready, and the 30% on the Whop subscription
@@ -72,8 +79,9 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            ?p= has them, so the 30% shows with no parameter
  *                            (2026-10-16, Lovro's second Loom: he reviewed
  *                            the plain page, where it showed nothing). Mark
- *                            every video the offer asks for watched and it
- *                            turns ready, as for a real student.
+ *                            80% of the videos the offer counts watched (all
+ *                            3 of the placeholder course's 3) and it turns
+ *                            ready, as for a real student.
  *
  * THE QUESTIONS. Apply opens the application's questions
  * (src/components/world/WorldDiscountForm.tsx), as on /world. They are the
@@ -98,6 +106,8 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
 export type DiscountPreset =
   | "locked"
   | "ready"
+  | "almost"
+  | "eighty"
   | "pending"
   | "approved"
   | "applied"
@@ -114,7 +124,7 @@ export type DiscountPreset =
   | "no-payment"
   | "has-discount";
 const PRESETS: readonly DiscountPreset[] = [
-  "locked", "ready", "pending", "approved", "applied", "applied-after-renewal", "rejected", "expired",
+  "locked", "ready", "almost", "eighty", "pending", "approved", "applied", "applied-after-renewal", "rejected", "expired",
   "before-launch", "september", "october", "october-expired", "october-old-course",
   "october-old-course-pending", "october-old-course-approved", "no-payment", "has-discount",
 ];
@@ -216,12 +226,15 @@ export function discountPresetOf(search: string | null): DiscountPreset | null {
 
 /**
  * The videos a preset needs watched on top of ?p=: for ready and every preset
- * with an application in, every lesson the offer asks for (discount.ts
- * requiredLessons), so the map's lanterns and counts agree with the panel.
+ * with an application in, every lesson the offer counts (discount.ts
+ * requiredLessons), so the map's lanterns and counts agree with the panel;
+ * for eighty the first videosNeeded of them in course order, the least the
+ * 80% takes, and for almost one fewer.
  */
 export function discountPresetIds(search: string | null, lessons: readonly CatalogLessonLike[]): string[] {
   const preset = discountPresetOf(search);
-  if (preset === null || (preset !== "ready" && preset !== "applied-after-renewal" && preset !== "has-discount" && !APPLIED[preset])) return [];
+  const edge = preset === "almost" || preset === "eighty";
+  if (preset === null || (!edge && preset !== "ready" && preset !== "applied-after-renewal" && preset !== "has-discount" && !APPLIED[preset])) return [];
   const course: DiscountLesson[] = [...lessons]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((l) => ({
@@ -232,7 +245,10 @@ export function discountPresetIds(search: string | null, lessons: readonly Catal
       has_video: l.has_video === true,
       duration_seconds: l.duration_seconds ?? null,
     }));
-  return requiredLessons(course).map((l) => l.id);
+  const ids = requiredLessons(course).map((l) => l.id);
+  if (!edge) return ids;
+  const needed = videosNeeded(ids.length);
+  return ids.slice(0, Math.max(0, preset === "eighty" ? needed : needed - 1));
 }
 
 type FixtureDiscountWindow = Window & {
@@ -273,6 +289,8 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   const firstPaidAt = useMemo(() => {
     switch (preset) {
       case "ready":
+      case "almost":
+      case "eighty":
       case "has-discount":
         return new Date(boot - 5 * DAY_MS).toISOString();
       case "pending":

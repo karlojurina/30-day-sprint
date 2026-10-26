@@ -147,14 +147,14 @@ export function LoadError({ title, detail, onRetry, busy, }) {
     return (_jsx(Card, { padding: 20, children: _jsxs("div", { role: "alert", style: { display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-start" }, children: [_jsx("p", { style: { ...T.body, fontSize: 15, fontWeight: 600 }, children: title }), detail && _jsx(ReadFailure, { raw: detail, style: { alignSelf: "stretch" } }), _jsx(Button, { variant: "raised", size: "md", busy: busy, onClick: onRetry, children: "Retry" })] }) }));
 }
 /** A button that copies `text` and says so for a moment. */
-export function CopyButton({ text, label }) {
+export function CopyButton({ text, label, unavailable, }) {
     const [copied, setCopied] = useState(null);
     const timer = useRef(null);
     useEffect(() => () => {
         if (timer.current)
             clearTimeout(timer.current);
     }, []);
-    return (_jsx(Button, { variant: "raised", size: "md", onClick: async () => {
+    return (_jsx(Button, { variant: "raised", size: "md", unavailable: unavailable, onClick: async () => {
             let ok = false;
             try {
                 await navigator.clipboard.writeText(text);

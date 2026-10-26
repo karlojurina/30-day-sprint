@@ -33,7 +33,7 @@ import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
 import { DISCOUNT_PERCENT, MEMBERSHIP_DISCOUNT_LINE } from "@/lib/world/discount";
 import { renewalStillAhead } from "@/lib/world/celebrations";
-import { checkpointView, discountRule, shortDate, type CheckpointView } from "./checkpointView";
+import { checkpointCounts, checkpointView, discountRule, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
 import { TuningPanel } from "./TuningPanel";
@@ -4202,9 +4202,11 @@ function BountyBody({
  * The discount checkpoint's panel (2026-10-14): the offer, where the student
  * stands on it (src/lib/world/discount.ts discountState), and Apply. No video
  * plays here (Lovro's review, 2026-10-15), so a locked student sees the
- * videos watched and to go, and Apply greyed out until every one is watched.
+ * videos watched and how many are needed, and Apply greyed out until 80% of
+ * them are watched (the owner, 2026-10-26; every one until then). Each count
+ * says what is needed (checkpointView.ts checkpointCounts).
  * It is aria-disabled, not disabled, so the keyboard and a screen reader
- * still reach it and hear why: its title, "Watch all 61 videos to apply" on the real course, is
+ * still reach it and hear why: its title, "Watch 49 of 61 videos to apply" on the real course, is
  * both the hover's tip and its description. apply() takes no click, Enter or
  * Space before the state is ready. The copy reuses the old dashboard's
  * (DiscountClaimCelebration, StatsWidget) where it still holds: "30% off your
@@ -4220,8 +4222,9 @@ function BountyBody({
  * still be earned (locked) or is on (ready), never as a dead button.
  *
  * The rule is one line since 2026-10-20 (Lovro: "a lot of confusion for the
- * 30% off"): "Finish every video through Video Ads II within 2 weeks of
- * joining to apply." (checkpointView.ts discountRule), the same words for
+ * 30% off"): since 2026-10-26 "Watch 80% of the videos through Video Ads II
+ * within 2 weeks of joining to apply." (checkpointView.ts discountRule; it
+ * said "Finish every video" until then), the same words for
  * every student, said while locked and with no first payment on record, and
  * after "This closed on ..." or "Your 2 weeks have passed." where it is closed.
  * T-080's shared deadline (a first payment from 1 October until the launch:
@@ -4286,8 +4289,10 @@ function CheckpointBody({
   const status = st.kind === "locked" ? null : st.kind === "ready" ? "Ready" : cv.chip.tail;
 
   // The one Apply, locked and ready. Locked it is greyed out with its reason
-  // and a padlock; ready it opens the questions (useWorldDiscount.ts).
-  const why = st.kind === "locked" ? `Watch all ${st.lessonsTotal} videos to apply` : null;
+  // and a padlock; ready it opens the questions (useWorldDiscount.ts). Every
+  // count says what the 80% needs (checkpointCounts).
+  const counts = st.kind === "locked" ? checkpointCounts(st) : null;
+  const why = counts ? counts.why : null;
   const applyButton = (
     <button
       type="button"
@@ -4304,8 +4309,7 @@ function CheckpointBody({
   );
 
   let body: React.ReactNode = null;
-  if (st.kind === "locked") {
-    const done = st.lessonsTotal - st.lessonsLeft;
+  if (st.kind === "locked" && counts) {
     body = (
       <>
         <p className={s.cpWhen}>
@@ -4315,14 +4319,15 @@ function CheckpointBody({
           {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
         </p>
         <p className={s.desc}>{rule.open}</p>
+        {/* The bar fills to the 80%: full when Apply turns on. */}
         <div className={s.cpBar} aria-hidden="true">
-          <i style={{ transform: `scaleX(${st.lessonsTotal > 0 ? done / st.lessonsTotal : 0})` }} />
+          <i style={{ transform: `scaleX(${counts.fill})` }} />
         </div>
         <p className={s.prog}>
           <span>
-            <b>{done}</b> of {st.lessonsTotal} videos
+            <b>{counts.done}</b> watched
           </span>
-          <span className={s.cpToGo}>{st.lessonsLeft} to go</span>
+          <span className={s.cpToGo}>{counts.needed}</span>
         </p>
         {applyButton}
       </>
@@ -4336,9 +4341,7 @@ function CheckpointBody({
           </span>
           {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
         </p>
-        <p className={s.desc}>
-          Every video through {after} is watched. Apply now and the team confirms within 48 hours.
-        </p>
+        <p className={s.desc}>{rule.ready}</p>
         {applyButton}
         {error && (
           <p className={s.cpError} role="alert">

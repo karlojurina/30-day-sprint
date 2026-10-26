@@ -18,8 +18,9 @@ import {
 /**
  * The new course (2026-10-14): on a deployment that reads the v2 catalog
  * (CATALOG_IS_V2, true on staging and after cutover), the request is decided
- * by src/lib/world/discount.ts, the same rule the map shows: every video up to
- * the gate lesson, by the student's deadline (14 days from a first payment
+ * by src/lib/world/discount.ts, the same rule the map shows: 80% of the videos
+ * up to the gate lesson (videosNeeded, 49 of 61; every one until 2026-10-26),
+ * by the student's deadline (14 days from a first payment
  * made on or after 2026-10-09; the end of 2026-10-23 for one from 2026-10-01
  * until then; never for an earlier one). It grants only on `ready` and fails
  * closed on any read error.

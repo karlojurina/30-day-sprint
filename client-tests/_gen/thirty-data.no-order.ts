@@ -70,14 +70,17 @@ export interface ThirtyStudent {
   id: string;
   name: string | null;
   email: string | null;
-  /** Shown as @username; it can hold a Whop username. */
+  /** Shown as @username; it can hold a Whop username. The page's Copy @ copies it. */
   discord_username: string | null;
+  /** The student's Discord user id (the login and the Whop sync fill it): the page's Copy ID copies it (2026-10-26). */
+  discord_user_id: string | null;
   membership_status: string;
   first_paid_at: string | null;
   /** The membership a stored coupon must have been read from (membership-discount.ts storedRowApplies). */
   whop_membership_id: string | null;
 }
-export const STUDENT_COLUMNS = "id, name, email, discord_username, membership_status, first_paid_at, whop_membership_id";
+export const STUDENT_COLUMNS =
+  "id, name, email, discord_username, discord_user_id, membership_status, first_paid_at, whop_membership_id";
 
 /** A listed request: what the rule reads, plus whose it is and who decided it. */
 export interface ThirtyRequest extends DiscountRequestRow {

@@ -174,11 +174,12 @@ console.log('\n=== The 30%: Approve anyway wherever a check refuses, for a found
   ok(TV.anywaySkip({ ok: true, reason: null }, COURSE) === 'check' && TV.anywaySkip({ ok: true, reason: null }, null) === null,
      'the verdict says yes but the approve route refused (its code "rule", the 409 among them): Approve anyway; nothing refused: none')
   const coupon = TV.approveAnywayText('coupon', 'This student already has a discount on their membership (evolve10).', null)
-  const rule = TV.approveAnywayText('rule', 'Not every video up to the checkpoint is done yet.', null)
-  const check = TV.approveAnywayText('check', 'Every video up to the checkpoint was done in time.', COURSE)
+  // The verdict sentences the page shows (the 80% rule's since 2026-10-26).
+  const rule = TV.approveAnywayText('rule', TV.VERDICT_TEXT.lockedOpen, null)
+  const check = TV.approveAnywayText('check', TV.VERDICT_TEXT.yes, COURSE)
   ok(coupon === "Approve anyway skips the coupon check and the 30% rule, and creates the student's Whop code now. This student already has a discount on their membership (evolve10).",
      'the coupon\'s confirm names the code it skips, and claims nothing about what Whop does with two codes (nobody has checked it)', coupon)
-  ok(rule === "Approve anyway skips the 30% rule, and creates the student's Whop code now. The rule says: Not every video up to the checkpoint is done yet. A discount already on the membership is still checked first.",
+  ok(rule === "Approve anyway skips the 30% rule, and creates the student's Whop code now. The rule says: Fewer than 80% of the videos up to the checkpoint are watched so far. A discount already on the membership is still checked first.",
      'the rule\'s confirm names the rule and why it said no', rule)
   ok(check === `Approve anyway skips the check that refused this approval, and creates the student's Whop code now. The check said: ${COURSE} A discount already on the membership is still checked first.`,
      'after the route\'s refusal: the confirm names the check and what it said', check)

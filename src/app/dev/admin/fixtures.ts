@@ -52,6 +52,12 @@
  *                 and its sentence, and nothing changes
  *
  * The page's clock is FIXTURE_NOW, so every date reads the same on every run.
+ *
+ * The 80% rule (the owner, 2026-10-26: 49 of the 61 videos): Jonah has
+ * watched 49, the least that meets it, and Priya 48, one short. Copy @ and
+ * Copy ID (the same day): Maya has both a Discord username and an id, Hugo a
+ * username only, Leo and Omar an id only, Priya neither, and Lena's username
+ * is stored with its own "@" (copied with one). Every Discord id is invented.
  */
 
 import { buildThirtyView } from "@/lib/admin/thirty-view";
@@ -109,6 +115,8 @@ interface Person {
   id: string;
   name: string;
   username?: string;
+  /** students.discord_user_id, made up. Left out: none on file. */
+  discordId?: string;
   status?: string;
   paid: string | null;
   /** The last Whop backfill. Left out: one after the switch. null: none ever. */
@@ -157,27 +165,28 @@ function fullDb(): FixtureDb {
   return {
     people: [
       // Applied: the rule says yes.
-      { id: "p-maya", name: "Maya Lindqvist", username: "maya.lq", paid: "2026-10-01T09:00:00.000Z", done: 61, stored: USED_UP },
-      { id: "p-jonah", name: "Jonah Pereira", username: "jonah_p", paid: "2026-10-12T15:00:00.000Z", done: 61, doneAt: "2026-10-19T20:00:00.000Z", stored: CLEAN },
-      // Applied: 4 videos missing, payment failed, no Whop backfill since the switch.
-      { id: "p-priya", name: "Priya Raman", status: "past_due", paid: "2026-10-03T08:00:00.000Z", done: 57, synced: "2026-10-18T10:00:00.000Z", stored: CLEAN },
+      { id: "p-maya", name: "Maya Lindqvist", username: "maya.lq", discordId: "100000000000000101", paid: "2026-10-01T09:00:00.000Z", done: 61, stored: USED_UP },
+      // Applied: 49 of the 61 watched, the least the 80% takes (2026-10-26).
+      { id: "p-jonah", name: "Jonah Pereira", username: "jonah_p", discordId: "100000000000000102", paid: "2026-10-12T15:00:00.000Z", done: 49, doneAt: "2026-10-19T20:00:00.000Z", stored: CLEAN },
+      // Applied: 48 of the 61, one short of the 80%, payment failed, no Whop backfill since the switch; no Discord on file.
+      { id: "p-priya", name: "Priya Raman", status: "past_due", paid: "2026-10-03T08:00:00.000Z", done: 48, synced: "2026-10-18T10:00:00.000Z", stored: CLEAN },
       // Applied: asked on the old course, before the switch.
-      { id: "p-sofia", name: "Sofia Marin", username: "sofia.marin", paid: "2026-10-05T10:00:00.000Z", done: 40, stored: CLEAN },
-      // Applied: first payment before 1 October; canceled, so the cron never checked the coupon.
-      { id: "p-leo", name: "Leo Hartmann", status: "canceled", paid: "2026-09-15T10:00:00.000Z", done: 61 },
+      { id: "p-sofia", name: "Sofia Marin", username: "sofia.marin", discordId: "100000000000000104", paid: "2026-10-05T10:00:00.000Z", done: 40, stored: CLEAN },
+      // Applied: first payment before 1 October; canceled, so the cron never checked the coupon. A Discord id, no username.
+      { id: "p-leo", name: "Leo Hartmann", status: "canceled", discordId: "100000000000000105", paid: "2026-09-15T10:00:00.000Z", done: 61 },
       // Applied: a second request after a rejected one (and a long name).
-      { id: "p-max", name: "Maximilian Featherstonehaugh-Smythe", username: "max.fs", paid: "2026-10-09T10:00:00.000Z", done: 61, doneAt: "2026-10-17T09:00:00.000Z", stored: CLEAN },
+      { id: "p-max", name: "Maximilian Featherstonehaugh-Smythe", username: "max.fs", discordId: "100000000000000106", paid: "2026-10-09T10:00:00.000Z", done: 61, doneAt: "2026-10-17T09:00:00.000Z", stored: CLEAN },
       // Applied: every video done, and the forever 10% on the membership: the coupon decides (D5).
-      { id: "p-tara", name: "Tara Quinn", username: "tara.q", paid: "2026-10-10T09:00:00.000Z", done: 61, stored: EVOLVE },
-      // Applied: every video done, nothing stored yet, and Whop says now that a code applies: Approve is refused.
+      { id: "p-tara", name: "Tara Quinn", username: "tara.q", discordId: "100000000000000107", paid: "2026-10-10T09:00:00.000Z", done: 61, stored: EVOLVE },
+      // Applied: every video done, nothing stored yet, and Whop says now that a code applies: Approve is refused. A username, no Discord id.
       { id: "p-hugo", name: "Hugo Lindahl", username: "hugo.l", paid: "2026-10-11T09:00:00.000Z", done: 61, live: EVOLVE },
       // Approved before the coupon rule, so nothing was ever stored for him: Whop says now the forever 10% is on the membership.
-      { id: "p-ethan", name: "Ethan Cole", username: "ethan.cole", paid: "2026-10-02T09:00:00.000Z", done: 61, live: EVOLVE },
+      { id: "p-ethan", name: "Ethan Cole", username: "ethan.cole", discordId: "100000000000000109", paid: "2026-10-02T09:00:00.000Z", done: 61, live: EVOLVE },
       // Approved, the forever 10% stored by the cron, and Whop gives no answer now: the stored row is shown, with its date.
-      { id: "p-nora", name: "Nora Brandt", username: "nora.b", paid: "2026-10-10T12:00:00.000Z", done: 61, stored: EVOLVE, liveFails: true },
-      // Code Applied.
-      { id: "p-omar", name: "Omar Haddad", paid: "2026-10-01T12:00:00.000Z", done: 61 },
-      { id: "p-lena", name: "Lena Vogel", username: "lena.v", status: "past_due", paid: "2026-10-04T08:00:00.000Z", done: 61 },
+      { id: "p-nora", name: "Nora Brandt", username: "nora.b", discordId: "100000000000000110", paid: "2026-10-10T12:00:00.000Z", done: 61, stored: EVOLVE, liveFails: true },
+      // Code Applied. Omar: a Discord id, no username. Lena: her username stored with its "@".
+      { id: "p-omar", name: "Omar Haddad", discordId: "100000000000000111", paid: "2026-10-01T12:00:00.000Z", done: 61 },
+      { id: "p-lena", name: "Lena Vogel", username: "@lena.v", discordId: "100000000000000112", status: "past_due", paid: "2026-10-04T08:00:00.000Z", done: 61 },
       // Rejected.
       { id: "p-ruby", name: "Ruby Okafor", username: "ruby.ok", paid: "2026-10-11T09:00:00.000Z", done: 30 },
       { id: "p-felix", name: "Felix Moreau", paid: "2026-10-06T09:00:00.000Z", done: 20 },
@@ -324,6 +333,7 @@ function toData(db: FixtureDb, opts: { videosFail?: boolean; couponsFail?: boole
       name: p.name,
       email: `${p.id}@example.com`,
       discord_username: p.username ?? null,
+      discord_user_id: p.discordId ?? null,
       membership_status: p.status ?? "active",
       first_paid_at: p.paid,
       whop_membership_id: membershipOf(p),

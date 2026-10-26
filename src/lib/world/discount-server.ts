@@ -6,10 +6,13 @@
  *
  *   loadDiscountReads      the five reads, in parallel, never throwing
  *   factsFromReads         those reads as discount.ts's input, or which failed
- *   decideDiscountRequest  POST /api/discounts/request: grant only on `ready`
- *   approvalVerdict        POST /api/discounts/approve: was every video done
- *                          by the student's deadline (discount.ts), and could
- *                          the app's Apply have made the request
+ *   decideDiscountRequest  POST /api/discounts/request and
+ *                          POST /api/discounts/submit-feedback: grant only on
+ *                          `ready`
+ *   approvalVerdict        POST /api/discounts/approve: were 80% of the
+ *                          videos done by the student's deadline (discount.ts
+ *                          videosNeeded), and could the app's Apply have made
+ *                          the request
  *   secondPendingRequest   both routes that write a request, on either course:
  *                          a double submit the database refused (v106)
  *   SAVE_FAILED            those routes' answer to any other failed write
@@ -35,6 +38,7 @@ import {
   DISCOUNT_ELIGIBLE_FROM,
   DISCOUNT_PERCENT,
   DISCOUNT_SHARED_DEADLINE,
+  DISCOUNT_VIDEO_SHARE,
   DISCOUNT_WINDOW_DAYS,
   MEMBERSHIP_DISCOUNT_LINE,
   discountEndsAt,
@@ -255,6 +259,10 @@ export function secondPendingRequest(
  * the server disagrees with a panel that offered Apply (the deadline passed
  * with the tab open, a completion the server does not have): under Apply, or
  * on the questions' last step.
+ *
+ * Locked, since the 80% rule (2026-10-26): how many more videos the 80% needs
+ * (state.lessonsLeft) and about how long the next ones take, in course order.
+ * Until then it was every video left ("You have 3 videos left to watch").
  */
 export function discountRefusalMessage(state: DiscountState): string {
   switch (state.kind) {
@@ -262,8 +270,8 @@ export function discountRefusalMessage(state: DiscountState): string {
       const n = state.lessonsLeft;
       const time = videoTime(state.secondsLeft);
       return (
-        `You have ${n} ${n === 1 ? "video" : "videos"} left to watch${time ? `, ${time}` : ""}. ` +
-        `Finish ${n === 1 ? "it" : "them"} before your deadline and apply again.`
+        `You need ${n} more ${n === 1 ? "video" : "videos"} to reach ${DISCOUNT_VIDEO_SHARE}%${time ? `, ${time}` : ""}. ` +
+        `Watch ${n === 1 ? "it" : "them"} before your deadline and apply again.`
       );
     }
     case "expired":
@@ -297,7 +305,16 @@ export type RequestDecision =
       log?: string;
     };
 
-/** POST /api/discounts/request on the new course: grant only when discount.ts says `ready`. */
+/**
+ * POST /api/discounts/request and POST /api/discounts/submit-feedback on the
+ * new course: grant only when discount.ts says `ready`, which needs 80% of the
+ * videos (videosNeeded) inside an open window. A student with no first
+ * payment on file has no window (discountWindow: "no-payment"; since the
+ * first-paid fix of 2026-10-20 an empty first_paid_at means no real payment),
+ * so is never ready: refused before anything is written, in the map's own
+ * sentence ("We can't see your first payment yet. Tell the team and they'll
+ * sort it out."), or as their request already made when one counts.
+ */
 export function decideDiscountRequest(reads: DiscountReads, now: Date): RequestDecision {
   const f = factsFromReads(reads);
   if (!f.ok) {
@@ -471,14 +488,17 @@ function madeOutsideApply(
 
 /**
  * POST /api/discounts/approve on the new course: the request route's rule,
- * judged at the end of the window. Every video it asks for must have been
- * done by the student's deadline (14 days from a first payment made on or
- * after the launch, the end of 23 October for one from 1 October until the
- * launch: discount.ts discountWindow), so a request may be approved late and
- * a video watched after the deadline does not count, wherever it was watched:
- * a lesson finished on Whop carries the time the app recorded it. The
- * student's own requests are left out (the one being approved would
- * otherwise decide the answer).
+ * judged at the end of the window. 80% of the videos it counts (discount.ts
+ * videosNeeded, through discountState; every one of them until 2026-10-26)
+ * must have been done by the student's deadline (14 days from a first payment
+ * made on or after the launch, the end of 23 October for one from 1 October
+ * until the launch: discount.ts discountWindow), so a request may be approved
+ * late and a video watched after the deadline does not count, wherever it was
+ * watched: a lesson finished on Whop carries the time the app recorded it. No
+ * first payment on file (no real payment, since the first-paid fix) is no
+ * window at all: refused, reason "no-payment", which only Approve anyway
+ * skips. The student's own requests are left out (the one being approved
+ * would otherwise decide the answer).
  *
  * `requestCreatedAt` is the `created_at` of the request being approved. A
  * video loaded after it is not asked for: the student applied with every
@@ -554,8 +574,8 @@ export function approvalVerdict(
         ok: false,
         status: 400,
         error:
-          `Student has not watched every video up to the discount checkpoint ${by}: ` +
-          `${state.lessonsLeft} of ${state.lessonsTotal} still missing.`,
+          `Student has not watched ${DISCOUNT_VIDEO_SHARE}% of the videos up to the discount checkpoint ${by}: ` +
+          `${state.lessonsDone} of ${state.lessonsTotal} watched, ${state.lessonsNeeded} needed.`,
         reason: "locked",
       };
     }
@@ -600,8 +620,8 @@ export const OLD_COURSE_REQUEST_REFUSAL =
  * before the course switch (`curriculum_reset_at`), in words that say so,
  * when the refusal is about the videos. The old course's progress was
  * archived at the switch, and the request was judged by the new course's
- * videos as they stood at the switch (approvalVerdict's `resetAt`), so "N of
- * M still missing" ("locked") keeps the new rule's words after the old-course
+ * videos as they stood at the switch (approvalVerdict's `resetAt`), so "D of
+ * M watched, N needed" ("locked") keeps the new rule's words after the old-course
  * sentence, and "no video to check" ("no-gate") gets the sentence alone. A
  * first payment before 1 October, or none on
  * file, reads the same on either course, so those refusals keep their own

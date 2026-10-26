@@ -120,14 +120,14 @@ function freshDb() {
       person('s-yes', 'Ana Example', '2026-10-02T10:00:00.000Z', {
         ad_submissions_verified: false, discord_user_id: '100000000000000001', discord_username: 'ana.example', whop_membership_id: 'mem_devAna',
       }),
-      // 50 of the videos, a request waiting: not yet.
+      // 45 of the videos, a request waiting: not yet (the 80% needs 49 of the 61 since 2026-10-26; 50 until then).
       person('s-earn', 'Bo Example', '2026-10-03T10:00:00.000Z', { discord_username: 'bo.example' }),
       // A first payment before 1 October, a request waiting.
       person('s-old', 'Ed Example', '2026-09-20T10:00:00.000Z'),
       // The student who signs in: nothing watched yet.
       person('s-student', 'Stu Example', '2026-10-05T10:00:00.000Z', { supabase_user_id: 'auth-student' }),
     ],
-    student_lesson_completions: [...done('s-yes', REQUIRED), ...done('s-earn', REQUIRED.slice(0, 50))],
+    student_lesson_completions: [...done('s-yes', REQUIRED), ...done('s-earn', REQUIRED.slice(0, 45))],
     discount_requests: [
       { id: 'r-yes', student_id: 's-yes', status: 'pending', created_at: '2026-10-20T10:00:00.000Z', promo_code: null, rejection_reason: null },
       { id: 'r-old', student_id: 's-old', status: 'pending', created_at: '2026-10-20T11:00:00.000Z', promo_code: null, rejection_reason: null },
@@ -195,7 +195,7 @@ console.log('\n=== The answer is the builder\'s, at the same moment ===')
 
   const yes = body.requests.find((x) => x.id === 'r-yes')
   ok(yes?.verdict?.ok === true && yes.verdict.text === VERDICT_TEXT.yes, 'every video done, the ads never ticked: the verdict says yes', show(yes?.verdict))
-  ok(yes?.facts.videosDone === 61 && yes?.facts.videosTotal === 61, 'with its count, 61 of 61', `${yes?.facts.videosDone} of ${yes?.facts.videosTotal}`)
+  ok(yes?.facts.videosDone === 61 && yes?.facts.videosTotal === 61 && yes?.facts.videosNeeded === 49, 'with its count, 61 of 61, and the 49 the 80% needs', `${yes?.facts.videosDone} of ${yes?.facts.videosTotal}, ${yes?.facts.videosNeeded} needed`)
   ok(yes?.student.username === 'ana.example' && yes?.student.status === 'active' && yes !== undefined && !('plan' in yes.student) && !('adsVerified' in yes.student),
      'the student brief: @username and the membership; no plan, no ads tick', show(yes?.student))
   ok(yes !== undefined && !('answers' in yes) && !('submissions' in yes) && yes.coupon === null, 'no survey answers and no action items on the row (D4); no coupon stored', show(yes && Object.keys(yes)))
@@ -203,8 +203,8 @@ console.log('\n=== The answer is the builder\'s, at the same moment ===')
   ok(old?.verdict?.ok === false && old.verdict.reason === 'before-launch', 'a first payment before 1 October: the verdict says no, and why', show(old?.verdict))
 
   const bo = body.requests.find((x) => x.id === 'r-earn')
-  ok(bo?.verdict?.reason === 'locked' && bo.facts.videosDone === 50 && bo.facts.videosTotal === 61,
-     'Bo, 50 of 61: the verdict says not yet, with the count', show({ v: bo?.verdict, done: bo?.facts.videosDone }))
+  ok(bo?.verdict?.reason === 'locked' && bo.facts.videosDone === 45 && bo.facts.videosTotal === 61 && bo.facts.videosNeeded === 49,
+     'Bo, 45 of 61: the verdict says not yet, with the count and the 49 the 80% needs', show({ v: bo?.verdict, done: bo?.facts.videosDone }))
   ok(bo?.student.whopPulled === false && yes?.student.whopPulled === true,
      'the switch is read from admin_config: a Whop backfill before it is "not pulled yet", one after it is', show({ bo: bo?.student.whopPulled, ana: yes?.student.whopPulled }))
   ok(!body.requests.some((x) => x.student.id === 's-student'), 'a member with no request is on no tab (Can still earn went with D4)')

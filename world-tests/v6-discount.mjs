@@ -29,13 +29,15 @@
  *      not at Video Ads II)
  *   3  the marker opens the panel (a real mouse click on the plaque): the
  *      camera parks at the cache, the panel says the deadline, the rule in
- *      one line ("Finish every video through Video Ads II within 2 weeks of
- *      joining to apply.", Lovro, 2026-10-20), the videos watched and left (no
- *      time estimate and no
- *      Watch row since Lovro's review of 2026-10-15), and shows Apply greyed
- *      out: aria-disabled, still in the keyboard's path, no fill, its reason
- *      ("Watch all 61 videos to apply" on the real course since 19 October) its title and its description in the
- *      accessibility tree
+ *      one line ("Watch 80% of the videos through Video Ads II within 2 weeks
+ *      of joining to apply.", the owner's 80% of 2026-10-26; "Finish every
+ *      video" from the owner's one line of 2026-10-20), the videos watched and
+ *      what the 80% needs ("0 watched", "49 of 61 needed"; no time estimate
+ *      and no Watch row since the owner's review of 2026-10-15), and shows Apply
+ *      greyed out: aria-disabled, still in the keyboard's path, no fill, its
+ *      reason ("Watch 49 of 61 videos to apply" on the real course since
+ *      2026-10-26, "Watch all 61" until then) its title and its description
+ *      in the accessibility tree
  *   4  Esc comes home: the panel goes, the camera is back on the rail where it
  *      was, the page scrolls again
  *   5  the timeline's tag opens the panel (and names the offer and its days
@@ -52,8 +54,11 @@
  *      application's questions (2026-10-14: WorldDiscountForm.tsx, the six
  *      the stand-in serves); answered and sent (in memory), the form closes,
  *      the panel turns to "in review", the chip too, the cache is claimed
- *   9  pending and approved say so; a student in Video Ads II (locked, ?p=mid)
- *      sees the cache's lantern lit (near)
+ *   9  pending and approved say so; a student in Video Ads II who is still
+ *      locked (?discount=almost: a1 to a3 and a4l01 to a4l04, 48 of 61) sees
+ *      the cache's lantern lit (near); since the 80% rule (2026-10-26) ?p=mid
+ *      (a1 to a3 and a4l01 to a4l09, 53 of 61), the locked student this row
+ *      used until then, is past it, and the cache is ready
  *  10  closed for the student (expired, a first payment before 1 October:
  *      T-080, 9 September until 2026-10-19) and no first payment on record: since Lovro's second Loom (2026-10-16, "clickable
  *      at all times") the tag and the marker show, grey when closed, and a
@@ -166,6 +171,14 @@
  *      already have a discount applied to your account." and nothing about
  *      videos, days or a deadline, "Closed" in its eyebrow, no Apply, grey.
  *      At 1440x900, and the phone's sheet at 390x844 says the same
+ *  29  the 80% (the owner, 2026-10-26: 49 of the real course's 61). One
+ *      short (?discount=almost, the first 48 watched): locked, the lantern
+ *      lit, the panel "48 watched" and "49 of 61 needed", the bar a hair
+ *      short of full, Apply greyed with "Watch 49 of 61 videos to apply".
+ *      One more (?discount=eighty, 49): the chip says to apply, the cache
+ *      ready, the panel "You've watched at least 80% of the videos through
+ *      Video Ads II." with Apply on. At 1440x900, and the phone's sheets at
+ *      390x844 say the same
  *  Rows 24 to 27 load their pages in Europe/Zagreb (page.emulateTimezone),
  *  so they read the same on any machine.
  *
@@ -203,6 +216,8 @@
  *   panel-september.png   the panel parked at the cache, in Croatia (rows 24 to 27)
  *   phone-sheet-october*.png, phone-sheet-september.png  their sheets at 390x844 (rows 24 to 27)
  *   panel-has-discount-1440.png, phone-sheet-has-discount.png  a discount already on the membership (row 28)
+ *   panel-almost-1440.png, panel-eighty-1440.png, phone-sheet-almost.png,
+ *   phone-sheet-eighty.png  one short of the 80%, and at it (row 29)
  *
  * What a row reads:
  *   hooks      window.__worldReady, __worldFrame, __worldScrollFor(depth),
@@ -698,15 +713,18 @@ try {
     r.check('the panel is up, titled 30% off your next month', s.panel?.title === '30% off your next month' && s.panel.opacity > 0.99, s.panel?.title)
     // T-080: the deadline carries its hour, in the student's own time zone ("Apply by Wed 28 Oct, 05:39").
     r.check('it says the deadline with its hour, and the days left', /Apply by \w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}/.test(s.panel?.text ?? '') && /11 days left/i.test(s.panel?.text ?? ''), s.panel?.text)
-    r.check('it counts the videos watched and to go (0 of N, N to go)', /0 of (\d+) videos/.test(s.panel?.text ?? '') && /(\d+) to go/.test(s.panel?.text ?? ''), s.panel?.text)
-    const total = Number(/0 of (\d+) videos/.exec(s.panel?.text ?? '')?.[1])
+    // The owner, 2026-10-26: 80% of the videos, and every count says what is needed ("0 of N videos" and "N to go" until then).
+    const counts = /(\d+) of (\d+) needed/.exec(s.panel?.text ?? '')
+    const needed = Number(counts?.[1])
+    const total = Number(counts?.[2])
+    r.check('it counts the videos watched and what the 80% needs (0 watched, N of M needed, N the 80% of M rounded up)', /\b0 watched/.test(s.panel?.text ?? '') && total > 0 && needed === Math.ceil(total * 0.8) && !/to go/.test(s.panel?.text ?? ''), s.panel?.text)
     // Lovro, 2026-10-20: the rule in one line (checkpointView.ts discountRule); until then "Watch all N videos through Video Ads II, then apply here."
-    r.check('it says the rule in one line, every video through Video Ads II within 2 weeks of joining', total > 0 && /Finish every video through Video Ads II within 2 weeks of joining to apply\./.test(s.panel?.text ?? '') && !/then apply here/.test(s.panel?.text ?? ''), s.panel?.text)
+    r.check('it says the rule in one line, 80% of the videos through Video Ads II within 2 weeks of joining', /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\./.test(s.panel?.text ?? '') && !/then apply here|Finish every video/.test(s.panel?.text ?? ''), s.panel?.text)
     const watchButtons = await page.evaluate(() => [...document.querySelectorAll('main section[aria-labelledby="cp-panel-title"] button')].filter((b) => /^Watch\b/.test(b.textContent.trim()) || /^Watch /.test(b.getAttribute('aria-label') ?? '')).length)
     r.check('no time estimate and no Watch row (Lovro, 2026-10-15)', !/about \d+ (hours?|min)/i.test(s.panel?.text ?? '') && (await page.evaluate(FIND.watch)) === null && watchButtons === 0, { text: s.panel?.text, watchButtons })
     const a = await page.evaluate(APPLY)
     r.check('Apply is there and greyed out: aria-disabled, still in the keyboard path, no fill, not-allowed', a?.text === 'Apply for 30% off' && a.ariaDisabled === 'true' && a.disabled === false && a.tabIndex >= 0 && !a.filled && a.cursor === 'not-allowed', a)
-    const why = `Watch all ${total} videos to apply`
+    const why = `Watch ${needed} of ${total} videos to apply`
     const ax = await applyAx(page)
     r.check(`its reason "${why}" is its title (the hover's tip) and, with it disabled, what a screen reader is told`, a?.title === why && ax?.role === 'button' && ax.name === 'Apply for 30% off' && ax.disabled === true && ax.description === why, { title: a?.title, ax })
     r.check('the page scroll is locked while parked', s.locked === true, s.locked)
@@ -819,7 +837,7 @@ try {
     await page.evaluate(() => window.__worldPark('checkpoint'))
     await parked(page, 'row 8')
     s = await page.evaluate(SNAP)
-    r.check('the panel says every video is watched, and offers Apply', /Every video through Video Ads II is watched/.test(s.panel?.text ?? '') && (await page.evaluate(FIND.apply)) !== null, s.panel?.text)
+    r.check('the panel says at least 80% of the videos are watched, and offers Apply', /You've watched at least 80% of the videos through Video Ads II\. Apply now and the team confirms within 48 hours\./.test(s.panel?.text ?? '') && (await page.evaluate(FIND.apply)) !== null, s.panel?.text)
     const on = await page.evaluate(APPLY)
     r.check('ready, Apply is on: not aria-disabled, no reason, filled, a pointer', on?.ariaDisabled === null && on.disabled === false && on.title === null && on.filled && on.cursor === 'pointer', on)
     await page.screenshot({ path: path.join(OUT, 'panel-ready.png') })
@@ -873,19 +891,25 @@ try {
       r.check(`${preset}: the panel says so`, words.test(s.panel?.text ?? ''), s.panel?.text)
       await page.close()
     }
-    const page = await r.open({ discount: 'locked', p: 'mid' })
-    const s = await page.evaluate(SNAP)
-    r.check('locked at Video Ads II (?p=mid): the lantern is lit (near)', s.cp?.look === 'near', s.cp)
+    // Since the 80% rule (2026-10-26) a student in Video Ads II may be past it: ?p=mid has 53 of the 61.
+    let page = await r.open({ discount: 'locked', p: 'mid' })
+    let s = await page.evaluate(SNAP)
+    r.check('?p=mid, 53 of 61 (a1 to a3 and nine of Video Ads II): past the 80%, the cache ready', s.cp?.look === 'ready' && s.tag?.state === 'ready', { look: s.cp?.look, tag: s.tag?.state })
+    await page.close()
+    page = await r.open({ discount: 'almost' })
+    s = await page.evaluate(SNAP)
+    r.check('locked in Video Ads II (?discount=almost, 48 of 61): the lantern is lit (near)', s.cp?.look === 'near' && s.tag?.state === 'locked', s.cp)
   })
 
   await runRow(10, 'closed for the student (expired, a first payment before 1 October) and no first payment: no chip in the header; the tag and the marker show and open the panel, which says why, with no Apply', async (r) => {
     for (const [preset, word, look, why] of [
       // T-080: the date carries its hour (deadlineAt); before-launch is a first payment before 1 October now (9 September until 2026-10-19).
       // Since 2026-10-20 each says the rule in one line after the fact (checkpointView.ts discountRule).
-      ['expired', 'Closed', 'closed', /This closed on \w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}\. The 30% is for finishing every video through Video Ads II within 2 weeks of joining\./],
-      ['before-launch', 'Closed', 'closed', /Your 2 weeks have passed\. The 30% is for finishing every video through Video Ads II within 2 weeks of joining\./],
+      // Since 2026-10-26 the rule is 80% of the videos ("finishing every video" until then).
+      ['expired', 'Closed', 'closed', /This closed on \w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./],
+      ['before-launch', 'Closed', 'closed', /Your 2 weeks have passed\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./],
       // Maybe a new student whose payment has not reached the app: the word is what the panel asks, in the open look.
-      ['no-payment', 'Ask the team', 'locked', /Finish every video through Video Ads II within 2 weeks of joining to apply\. We can't see your first payment yet\. Tell the team and they'll sort it out\./],
+      ['no-payment', 'Ask the team', 'locked', /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\. We can't see your first payment yet\. Tell the team and they'll sort it out\./],
     ]) {
       const page = await r.open({ discount: preset })
       let s = await page.evaluate(SNAP)
@@ -1135,9 +1159,10 @@ try {
       return
     }
     let a = await page.evaluate(APPLY)
-    r.check('locked: 0 of 3 videos, Apply greyed out with its reason', /0 of 3 videos/.test(s.panel?.text ?? '') && a?.ariaDisabled === 'true' && a.title === 'Watch all 3 videos to apply', { text: s.panel?.text, apply: a })
+    // 80% of 3 is all 3 (2.4 rounded up).
+    r.check('locked: 0 watched, 3 of 3 needed, Apply greyed out with its reason', /\b0 watched/.test(s.panel?.text ?? '') && /3 of 3 needed/.test(s.panel?.text ?? '') && a?.ariaDisabled === 'true' && a.title === 'Watch 3 of 3 videos to apply', { text: s.panel?.text, apply: a })
     await page.evaluate(() => ['a2l01', 'a2l02', 'a2l03'].forEach((id) => window.__fixture.complete(id)))
-    await waitFor(page, () => /Every video through Video Ads II is watched/.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 5000, what: 'row 18: the panel did not turn ready' })
+    await waitFor(page, () => /You've watched at least 80% of the videos through Video Ads II/.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 5000, what: 'row 18: the panel did not turn ready' })
     await sleep(400)
     a = await page.evaluate(APPLY)
     s = await page.evaluate(SNAP)
@@ -1147,7 +1172,7 @@ try {
 
   await runRow(19, "phone (390x844): the 30% is a row under Video Ads II's, locked and with no first payment, and opens the checkpoint's sheet", async (r) => {
     for (const [preset, state, says] of [
-      ['locked', /11 days left/i, /Finish every video through Video Ads II within 2 weeks of joining to apply\./],
+      ['locked', /11 days left/i, /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\./],
       ['no-payment', /Ask the team/, /We can't see your first payment yet/],
     ]) {
       const ctx = await browser.createBrowserContext()
@@ -1510,11 +1535,12 @@ try {
     s = await page.evaluate(SNAP)
     const text = s.panel?.text ?? ''
     r.check('in Croatia the panel says "Apply by Fri 23 Oct, 23:59" and "5 days left"', /Apply by Fri 23 Oct, 23:59/.test(text) && /5 days left/.test(text), text)
-    const total = Number(/0 of (\d+) videos/.exec(text)?.[1])
+    const counts = /(\d+) of (\d+) needed/.exec(text)
+    const [needed, total] = [Number(counts?.[1]), Number(counts?.[2])]
     // Until 2026-10-20 it also said "Everyone who joined from 1 October until the new course opened has this same deadline."
-    r.check('it says the rule in the one line every student reads, with no sentence about the shared group', total > 0 && /Finish every video through Video Ads II within 2 weeks of joining to apply\./.test(text) && !/Everyone who joined|same deadline|until the new course opened/.test(text), text)
+    r.check('it says the rule in the one line every student reads, with no sentence about the shared group', total > 0 && /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\./.test(text) && !/Everyone who joined|same deadline|until the new course opened/.test(text), text)
     const a = await page.evaluate(APPLY)
-    r.check('Apply is there, greyed out with its reason', a?.ariaDisabled === 'true' && a.title === `Watch all ${total} videos to apply`, a)
+    r.check('Apply is there, greyed out with its reason', a?.ariaDisabled === 'true' && a.title === `Watch ${needed} of ${total} videos to apply` && needed === Math.ceil(total * 0.8), a)
     await page.screenshot({ path: path.join(OUT, 'panel-october.png') })
     await page.close()
     // The same deadline in other time zones, on the phone's sheet: the date and the hour are the student's own (east of
@@ -1525,12 +1551,12 @@ try {
       ['Asia/Manila', 'Sat 24 Oct, 05:59', null],
     ]) {
       const p = await phoneSheet(r, 'october', tz, file)
-      r.check(`phone, ${tz}: "Apply by ${when}", 5 days left, the rule's one line, Apply greyed out`, p.text?.includes(`Apply by ${when}`) && /5 days left/.test(p.text) && /Finish every video through Video Ads II within 2 weeks of joining to apply\./.test(p.text) && p.apply?.ariaDisabled === 'true', p)
+      r.check(`phone, ${tz}: "Apply by ${when}", 5 days left, the rule's one line, Apply greyed out`, p.text?.includes(`Apply by ${when}`) && /5 days left/.test(p.text) && /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\./.test(p.text) && p.apply?.ariaDisabled === 'true', p)
     }
   })
 
   await runRow(25, "october-expired: the shared deadline passed: no chip; the tag and the marker closed; the panel says when it closed, then the rule; no Apply", async (r) => {
-    const WORDS = /This closed on Fri 23 Oct, 23:59\. The 30% is for finishing every video through Video Ads II within 2 weeks of joining\./
+    const WORDS = /This closed on Fri 23 Oct, 23:59\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./
     const page = await r.open({ discount: 'october-expired' }, '', DESKTOP, ZAGREB)
     let s = await page.evaluate(SNAP)
     r.check('no chip in the header', s.chip === null && s.chipState === null, { chip: s.chip, chipState: s.chipState })
@@ -1581,7 +1607,7 @@ try {
   // Lovro's preview review (2026-10-19): the first date moved from 9 September to 1 October, so a September joiner,
   // who had the shared deadline until then, is now outside the offer.
   await runRow(27, "september (a first payment on 15 September): outside the offer since the first date moved to 1 October; no chip; the tag and the marker closed; the panel says the student's 2 weeks have passed, then the rule; no Apply", async (r) => {
-    const WORDS = /Your 2 weeks have passed\. The 30% is for finishing every video through Video Ads II within 2 weeks of joining\./
+    const WORDS = /Your 2 weeks have passed\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./
     const page = await r.open({ discount: 'september' }, '', DESKTOP, ZAGREB)
     let s = await page.evaluate(SNAP)
     r.check('no chip in the header', s.chip === null && s.chipState === null, { chip: s.chip, chipState: s.chipState })
@@ -1616,7 +1642,7 @@ try {
     await parked(page, 'row 28')
     s = await page.evaluate(SNAP)
     r.check('a real click on the tag opens the panel, the camera parked at the cache', via === 'mouse' && s.panel?.title === '30% off your next month' && s.park?.id === 'checkpoint', { via, panel: s.panel?.title, park: s.park })
-    r.check('it says the line, and nothing about videos to watch, days left or a deadline', (s.panel?.text ?? '').includes(LINE) && !/Apply by|days left|\bvideos\b|Finish every video/.test(s.panel?.text ?? ''), s.panel?.text)
+    r.check('it says the line, and nothing about videos to watch, days left or a deadline', (s.panel?.text ?? '').includes(LINE) && !/Apply by|days left|\bvideos\b|Watch 80%/.test(s.panel?.text ?? ''), s.panel?.text)
     const eyebrow = await page.evaluate(EYEBROW)
     r.check('its eyebrow ends "Closed"', eyebrow?.at(-1) === 'Closed', eyebrow)
     r.check('no Apply', (await page.evaluate(FIND.apply)) === null)
@@ -1626,6 +1652,54 @@ try {
     await page.close()
     const p = await phoneSheet(r, 'has-discount', null, 'phone-sheet-has-discount.png')
     r.check('phone (390x844): the sheet says the same, no Apply', (p.text ?? '').includes(LINE) && p.apply === null, p)
+  })
+
+  // The owner, 2026-10-26: "They have to watch 80% of the 61 videos ... until the end of video ads 2." 49 of the 61.
+  await runRow(29, "the 80%: one short (?discount=almost, 48 of 61) locked, the lantern lit, \"48 watched\" and \"49 of 61 needed\", Apply greyed with its reason; one more (?discount=eighty, 49) ready, Apply on; 1440x900 and the phone's sheets at 390x844", async (r) => {
+    const WIDE = { width: 1440, height: 900 }
+    const RULE = /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\./
+    const READY = /You've watched at least 80% of the videos through Video Ads II\. Apply now and the team confirms within 48 hours\./
+    /** The bar under the rule: how full its fill is drawn (scaleX), 0 to 1. */
+    const BAR = () => {
+      const i = [...(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.querySelectorAll('i') ?? [])].find((x) => /scaleX/.test(x.getAttribute('style') ?? ''))
+      const m = /scaleX\(([\d.]+)\)/.exec(i?.getAttribute('style') ?? '')
+      return m ? Number(m[1]) : null
+    }
+    {
+      const page = await r.open({ discount: 'almost' }, '', WIDE)
+      let s = await page.evaluate(SNAP)
+      r.check('almost: the chip counts the days, locked; the tag locked', /days? left/i.test(s.chip?.text ?? '') && s.chipState === 'locked' && s.tag?.state === 'locked', { chip: s.chip, tag: s.tag?.state })
+      r.check('almost: the cache\'s lantern is lit, one video from the 80%', s.cp?.look === 'near', s.cp?.look)
+      await page.evaluate(() => window.__worldPark('checkpoint'))
+      await parked(page, 'row 29 (almost)')
+      s = await page.evaluate(SNAP)
+      const text = s.panel?.text ?? ''
+      r.check('almost: the rule\'s one line, "48 watched" and "49 of 61 needed"', RULE.test(text) && /\b48 watched/.test(text) && /49 of 61 needed/.test(text) && !/to go/.test(text), text)
+      const bar = await page.evaluate(BAR)
+      r.check('almost: the bar a hair short of full (48 of the 49)', bar !== null && Math.abs(bar - 48 / 49) < 1e-6, bar)
+      const a = await page.evaluate(APPLY)
+      r.check('almost: Apply greyed out, its reason "Watch 49 of 61 videos to apply"', a?.ariaDisabled === 'true' && a.title === 'Watch 49 of 61 videos to apply' && !a.filled, a)
+      await page.screenshot({ path: path.join(OUT, 'panel-almost-1440.png') })
+      await page.close()
+      const p = await phoneSheet(r, 'almost', null, 'phone-sheet-almost.png')
+      r.check('almost, phone (390x844): the same line and counts, Apply greyed', RULE.test(p.text ?? '') && /\b48 watched/.test(p.text ?? '') && /49 of 61 needed/.test(p.text ?? '') && p.apply?.ariaDisabled === 'true', p)
+    }
+    {
+      const page = await r.open({ discount: 'eighty' }, '', WIDE)
+      let s = await page.evaluate(SNAP)
+      r.check('eighty: the chip says to apply, the tag and the cache ready', /Apply/.test(s.chip?.text ?? '') && s.tag?.state === 'ready' && s.cp?.look === 'ready', { chip: s.chip, tag: s.tag?.state, look: s.cp?.look })
+      await page.evaluate(() => window.__worldPark('checkpoint'))
+      await parked(page, 'row 29 (eighty)')
+      s = await page.evaluate(SNAP)
+      const text = s.panel?.text ?? ''
+      r.check('eighty: "You\'ve watched at least 80% of the videos through Video Ads II." and no count', READY.test(text) && !/needed|watched,|\bof 61\b/.test(text), text)
+      const on = await page.evaluate(APPLY)
+      r.check('eighty: Apply is on (no aria-disabled, no reason, filled)', on?.ariaDisabled === null && on.title === null && on.filled, on)
+      await page.screenshot({ path: path.join(OUT, 'panel-eighty-1440.png') })
+      await page.close()
+      const p = await phoneSheet(r, 'eighty', null, 'phone-sheet-eighty.png')
+      r.check('eighty, phone (390x844): the same words, Apply on', READY.test(p.text ?? '') && p.apply?.ariaDisabled === null, p)
+    }
   })
 } finally {
   await browser.close()

@@ -24,7 +24,7 @@ import { adminTransport } from "@/lib/admin/admin-transport";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { DISCOUNT_STATUS } from "@/lib/admin/discount-status";
-import { COUPON_REJECT_REASON, anywaySkip, approveAnywayText, couponWarns } from "@/lib/admin/thirty-view";
+import { COUPON_REJECT_REASON, anywaySkip, approveAnywayText, couponWarns, discordCopies, videoLine } from "@/lib/admin/thirty-view";
 import type {
   StudentBrief,
   TeamRef,
@@ -50,6 +50,19 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * line (meets the rule, or why not), the coupon, and the actions, on the
  * right from 768px wide and under the words on a phone (RowSplit): Approve
  * and Reject (with a reason) on Applied, Mark code applied on Approved.
+ *
+ * The verdict line's count (the 80% rule, the owner's of 2026-10-26): how
+ * many of the videos up to the checkpoint were watched (by the deadline, once
+ * it has passed) and what the 80% needs, "48 of 61 videos by the deadline ·
+ * 49 needed for 80%"; the verdict says yes from there (thirty-view.ts).
+ *
+ * COPY @ AND COPY ID (the owner, 2026-10-26: "We have 'Copy the code,' which
+ * is very good, and then 'Copy Discord username' or 'their ID'"): on every
+ * Applied row, and beside "Copy code" on every row that has a code, two
+ * buttons copy the student's Discord username, with one "@" in front
+ * whether or not the stored one has it, and their Discord user id. Each is
+ * greyed, with a plain tip, when the student has none on file. The code's
+ * button says "Copy code" since then (it said "Copy").
  *
  * APPROVE ANYWAY (the owner's review, 2026-10-21: approving past any check).
  * A founder or an admin (`canApproveAnyway`; the
@@ -691,13 +704,19 @@ function verdictColor(v: Verdict): string {
   return "var(--color-danger)";
 }
 
-/** "57 of 61 videos" (and "by the deadline" once it has passed), and when Whop progress is not in yet. */
-function verdictDetail(row: ThirtyRequestRow, v: Verdict): string[] {
-  const f = row.facts;
-  if (v.reason === "has-discount" || !f || f.videosDone == null || f.videosTotal == null) return [];
-  const out = [`${f.videosDone} of ${f.videosTotal} videos${f.countedByDeadline ? " by the deadline" : ""}`];
-  if (v.reason === "locked" && !row.student.whopPulled) out.push("Whop progress not pulled since the switch");
-  return out;
+/**
+ * Copy @ and Copy ID (thirty-view.ts discordCopies): the student's Discord
+ * username with one "@" in front, and their Discord user id; each greyed,
+ * its tip saying what is missing, when the student has none on file.
+ */
+function DiscordCopies({ student }: { student: StudentBrief }) {
+  const { at, id } = discordCopies(student);
+  return (
+    <>
+      <CopyButton text={at.text} label="Copy @" unavailable={at.unavailable ?? undefined} />
+      <CopyButton text={id.text} label="Copy ID" unavailable={id.unavailable ?? undefined} />
+    </>
+  );
 }
 
 /**
@@ -748,7 +767,8 @@ function PendingRow({
   const [error, setError] = useState<string | null>(null);
   const reasonId = useId();
   const off = busy !== null || locked;
-  const detail = verdictDetail(row, verdict);
+  // The count and what the 80% needs (thirty-view.ts videoLine).
+  const detail = videoLine(row, verdict);
 
   async function run(what: NonNullable<typeof busy>, fn: () => RowResult) {
     setBusy(what);
@@ -859,6 +879,10 @@ function PendingRow({
                 <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>Coupon not checked yet. Approve asks Whop first.</span>
               </p>
             )}
+            {/* Copy @ and Copy ID, to find the student on Discord (the owner, 2026-10-26). */}
+            <span className="flex flex-wrap items-center" style={{ gap: 8 }} data-discord-copies="">
+              <DiscordCopies student={row.student} />
+            </span>
             {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
           </>
         }
@@ -902,7 +926,7 @@ function PendingRow({
             }}
             maxLength={500}
             autoFocus
-            placeholder="For example: not every video was done by the deadline"
+            placeholder="For example: fewer than 80% of the videos were watched by the deadline"
             style={{
               width: "100%",
               height: TAP,
@@ -948,10 +972,10 @@ function PendingRow({
   );
 }
 
-/** The 30% code, and a button that copies it. */
-function CodeWithCopy({ code }: { code: string }) {
+/** The 30% code, the button that copies it, and beside it Copy @ and Copy ID (2026-10-26). */
+function CodeWithCopy({ code, student }: { code: string; student: StudentBrief }) {
   return (
-    <span className="flex flex-wrap items-center" style={{ gap: 8 }}>
+    <span className="flex flex-wrap items-center" style={{ gap: 8 }} data-discord-copies="">
       <code
         style={{
           fontFamily: "var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace",
@@ -966,7 +990,8 @@ function CodeWithCopy({ code }: { code: string }) {
       >
         {code}
       </code>
-      <CopyButton text={code} label="Copy" />
+      <CopyButton text={code} label="Copy code" />
+      <DiscordCopies student={student} />
     </span>
   );
 }
@@ -1046,7 +1071,7 @@ function DecidedRow({
               </p>
             )}
 
-            {row.promoCode && row.status !== "rejected" && <CodeWithCopy code={row.promoCode} />}
+            {row.promoCode && row.status !== "rejected" && <CodeWithCopy code={row.promoCode} student={row.student} />}
             {/* The tab's note says what to do with a code; a row says it only when there is none. */}
             {approved && !row.promoCode && (
               <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>

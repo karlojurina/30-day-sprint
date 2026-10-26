@@ -25,8 +25,15 @@
  *
  * The numbers on a pending row are the ones Approve judged: the videos
  * loaded after the request (after the switch, for one made before it) are
- * not asked for, only videos done by the deadline count, and once the
- * deadline has passed the count says so (`countedByDeadline`).
+ * not counted, only videos done by the deadline count, and once the
+ * deadline has passed the count says so (`countedByDeadline`). Since the 80%
+ * rule (the owner, 2026-10-26) the row also says what the 80% needs
+ * (`videosNeeded`, discount.ts videosNeeded of the videos counted), and the
+ * verdict says yes exactly when the count reaches it.
+ *
+ * Each row carries the student's Discord username and id (the owner,
+ * 2026-10-26: "Copy Discord username or their ID"), for the page's Copy @
+ * and Copy ID.
  *
  * The coupon of a decided row (the render review's fix round): once the team
  * adds the 30% code in Whop, Whop shows it on the membership as a discount on
@@ -44,11 +51,13 @@
 import {
   DISCOUNT_ELIGIBLE_FROM,
   DISCOUNT_SHARED_DEADLINE,
+  DISCOUNT_VIDEO_SHARE,
   MEMBERSHIP_DISCOUNT_LINE,
   discountEndsAt,
   discountState,
   discountWindow,
   requiredLessons,
+  videosNeeded,
 } from "./discount.ts";
 import type { DiscountLesson, DiscountState, DiscountWindow } from "./discount.ts";
 import {
@@ -62,6 +71,7 @@ import {
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "./discount-server.ts";
 import { isMembershipId, storedRowApplies } from "./membership-discount.ts";
 import { dayLabel } from "./croatia-dates.ts";
+import { bareUsername } from "./people-common.ts";
 import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data.ts";
 
 /** A team member as a row names them. `name` is null when the id is no longer a team member. */
@@ -74,8 +84,10 @@ export interface StudentBrief {
   id: string;
   name: string | null;
   email: string | null;
-  /** students.discord_username, shown as @username (it can hold a Whop username). */
+  /** students.discord_username, shown as @username (it can hold a Whop username). Copy @ copies it. */
   username: string | null;
+  /** students.discord_user_id, the student's Discord user id. Copy ID copies it. */
+  discordId: string | null;
   /** membership_status: active, past_due, canceled or expired. */
   status: string;
   /** A Whop backfill ran since the switch (student_whop_sync.last_sync_at at or after curriculum_reset_at). */
@@ -95,9 +107,15 @@ export interface Facts {
   deadlinePassed: boolean;
   videosDone: number | null;
   videosTotal: number | null;
+  /** What the 80% needs of videosTotal (discount.ts videosNeeded): the verdict says yes from there. */
+  videosNeeded: number | null;
   /** Only videos done by the deadline are counted, and the deadline has passed: show the count as "done by the deadline". */
   countedByDeadline: boolean;
-  /** The length of the videos still to watch, in seconds. */
+  /**
+   * The length of the videos the 80% still needs, the next ones in course
+   * order, in seconds; 0 once it is met (discount.ts's secondsLeft; every
+   * video not watched until 2026-10-26).
+   */
   secondsLeft: number | null;
 }
 
@@ -202,13 +220,22 @@ export interface ThirtyView {
 
 const ELIGIBLE_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
 
-/** The sentences the page shows for a verdict. Plain words, no em dash: the team reads them as they are. */
+const SHARE = `${DISCOUNT_VIDEO_SHARE}%`;
+
+/**
+ * The sentences the page shows for a verdict. Plain words, no em dash: the
+ * team reads them as they are. Since the 80% rule (2026-10-26) the yes and the
+ * not yet name the 80% ("Every video up to the checkpoint" until then), and no
+ * first payment on file is a no: since the first-paid fix it means no real
+ * payment, and the owner's rule gives no 30% without one (it said "the rule
+ * cannot judge this request").
+ */
 export const VERDICT_TEXT = {
-  yes: "Every video up to the checkpoint was done in time.",
-  lockedOpen: "Not every video up to the checkpoint is done yet.",
-  lockedClosed: "Not every video up to the checkpoint was done by the deadline.",
+  yes: `At least ${SHARE} of the videos up to the checkpoint were watched in time.`,
+  lockedOpen: `Fewer than ${SHARE} of the videos up to the checkpoint are watched so far.`,
+  lockedClosed: `Fewer than ${SHARE} of the videos up to the checkpoint were watched by the deadline.`,
   beforeLaunch: `The first payment was before ${ELIGIBLE_DAY}, so this student cannot earn the 30%.`,
-  noPayment: "There is no first payment on file for this student, so the rule cannot judge this request.",
+  noPayment: "There is no real payment on file for this student, and the 30% needs one.",
   noGate: "The course has no checkpoint lesson with a video, so nobody can earn the 30% right now.",
   oldCourse: "Asked on the old course, before the switch.",
   oldCourseNoGate:
@@ -218,6 +245,49 @@ export const VERDICT_TEXT = {
   readFailed: "Couldn't read this student's progress, so there is no verdict. Press Refresh to try again.",
   unknown: "The rule could not judge this request. Judge it by hand.",
 } as const;
+
+/**
+ * A pending row's video line (the 80% rule, 2026-10-26): how many of the
+ * videos up to the checkpoint were watched ("48 of 61 videos", with "by the
+ * deadline" once it has passed), what the 80% needs ("49 needed for 80%",
+ * what the verdict judged against), and, when the rule says not yet, that the
+ * student's Whop progress is not in since the switch. Empty beside the
+ * coupon's verdict and when the progress could not be read.
+ */
+export function videoLine(row: Pick<ThirtyRequestRow, "facts" | "student">, verdict: Pick<Verdict, "reason">): string[] {
+  const f = row.facts;
+  if (verdict.reason === "has-discount" || !f || f.videosDone == null || f.videosTotal == null) return [];
+  const out = [`${f.videosDone} of ${f.videosTotal} videos${f.countedByDeadline ? " by the deadline" : ""}`];
+  if (f.videosNeeded != null) out.push(`${f.videosNeeded} needed for ${SHARE}`);
+  if (verdict.reason === "locked" && !row.student.whopPulled) out.push("Whop progress not pulled since the switch");
+  return out;
+}
+
+/** The tips of a greyed Copy @ and Copy ID: what is missing, in plain words. */
+export const NO_DISCORD_USERNAME = "No Discord username on file for this student.";
+export const NO_DISCORD_ID = "No Discord ID on file for this student.";
+
+/** What a copy button copies, or (`unavailable`) why it has nothing to copy. */
+export interface CopyTarget {
+  text: string;
+  unavailable: string | null;
+}
+
+/**
+ * Copy @ and Copy ID on the 30% page (the owner, 2026-10-26: "Copy Discord
+ * username or their ID"). Copy @ copies the student's Discord username with
+ * one "@" in front, whether or not the stored one starts with it
+ * (bareUsername); Copy ID their Discord user id. With none on file the
+ * button is greyed and its tip says so.
+ */
+export function discordCopies(student: Pick<StudentBrief, "username" | "discordId">): { at: CopyTarget; id: CopyTarget } {
+  const handle = bareUsername(student.username);
+  const id = student.discordId?.trim() || null;
+  return {
+    at: handle ? { text: `@${handle}`, unavailable: null } : { text: "", unavailable: NO_DISCORD_USERNAME },
+    id: id ? { text: id, unavailable: null } : { text: "", unavailable: NO_DISCORD_ID },
+  };
+}
 
 /** A Whop backfill ran since the switch. Before the switch any backfill counts. */
 export function whopPulled(lastSyncAt: string | null | undefined, resetAt: string | null): boolean {
@@ -342,12 +412,17 @@ function factsWithoutProgress(firstPaidAt: string | null, now: Date): Facts {
     deadlinePassed: deadline != null && now.getTime() > Date.parse(deadline),
     videosDone: null,
     videosTotal: null,
+    videosNeeded: null,
     countedByDeadline: false,
     secondsLeft: null,
   };
 }
 
-/** The counts over the lessons the offer asks for (`lessons`, as discount.ts reads them) and the videos `done`. */
+/**
+ * The counts over the lessons the offer counts (`lessons`, as discount.ts
+ * reads them) and the videos `done`, with what the 80% needs of them
+ * (videosNeeded, the rule's own number).
+ */
 function countFacts(
   firstPaidAt: string | null,
   lessons: readonly DiscountLesson[],
@@ -357,12 +432,15 @@ function countFacts(
 ): Facts {
   const required = requiredLessons(lessons);
   const left = required.filter((l) => !done.has(l.id));
+  const needed = videosNeeded(required.length);
+  const short = Math.max(0, needed - (required.length - left.length));
   return {
     ...factsWithoutProgress(firstPaidAt, now),
     videosDone: required.length - left.length,
     videosTotal: required.length,
+    videosNeeded: needed,
     countedByDeadline,
-    secondsLeft: left.reduce((sum, l) => sum + (l.duration_seconds ?? 0), 0),
+    secondsLeft: left.slice(0, short).reduce((sum, l) => sum + (l.duration_seconds ?? 0), 0),
   };
 }
 
@@ -388,7 +466,7 @@ export function studentAppView(reads: DiscountReads, now: Date): { state: Discou
  * a request made before it) left out, and the videos done by the deadline.
  * These lines repeat approvalVerdict's own (discount-server.ts); the test
  * fails if the two ever part, because the verdict must say yes exactly when
- * this count is full.
+ * this count reaches what the 80% needs (videosNeeded).
  */
 function judgedFacts(f: DiscountFacts, videos: readonly VideoRow[], now: Date, askedAt: string, resetAt: string | null): Facts {
   const asked = Date.parse(askedAt);
@@ -493,6 +571,7 @@ export function buildThirtyView(
     name: s.name ?? null,
     email: s.email ?? null,
     username: s.discord_username ?? null,
+    discordId: s.discord_user_id ?? null,
     status: s.membership_status,
     whopPulled: whopPulled(data.lastSyncAt.get(s.id), resetAt),
   });

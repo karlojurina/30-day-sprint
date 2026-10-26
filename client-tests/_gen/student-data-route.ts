@@ -183,7 +183,7 @@ export async function GET(request: NextRequest) {
 
   // A failed read must never answer as a believable empty state (progress-1,
   // map-1, 2026-10-20): no lessons read as "There are no lessons here yet.",
-  // no completions as every lantern out and all 61 videos left for the 30%, no
+  // no completions as every lantern out and none of the 49 videos the 30% needs watched, no
   // streak row as a streak of 0. Both callers keep what they already show on a
   // non-OK answer. A student who never applied for the 30% has no
   // discount_requests row, which .single() answers with PGRST116: that is the

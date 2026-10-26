@@ -40,11 +40,11 @@
  *                 them to tell the team, so it never reads "Closed".
  * Closed, rejected and the other not eligible take the grey look (tag "closed").
  */
-import { DISCOUNT_PERCENT, type DiscountState } from "./discount.ts";
+import { DISCOUNT_PERCENT, DISCOUNT_VIDEO_SHARE, type DiscountState } from "./discount.ts";
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 86_400_000;
-/** A student this many videos away (or in Video Ads II itself) sees the cache's lantern lit. */
+/** A student this many videos from the 80% (or in Video Ads II itself) sees the cache's lantern lit. */
 export const NEAR_LESSONS = 3;
 
 export type CheckpointTag = "locked" | "ready" | "pending" | "done" | "closed";
@@ -100,26 +100,56 @@ export function deadlineAt(iso: string): string {
 /**
  * The 30%'s rule as the panel says it, in one line (Lovro, 2026-10-20: "I see
  * there's a lot of confusion for the 30% off. Just write complete until video
- * ads 2 within 2 weeks of joining to apply. That's it."). `after` is the name
- * of the place the checkpoint follows (CHECKPOINT.after), as the course names
- * it: Video Ads II on the real course.
+ * ads 2 within 2 weeks of joining to apply. That's it."). Since 2026-10-26
+ * the owner's 80% (discount.ts DISCOUNT_VIDEO_SHARE): "Watch 80% of the
+ * videos through Video Ads II within 2 weeks of joining to apply.", where it
+ * said "Finish every video". `after` is the name of the place the checkpoint
+ * follows (CHECKPOINT.after), as the course names it: Video Ads II on the
+ * real course.
  *   open          while it can still be earned: locked, and with no first
  *                 payment on record.
  *   closed        the same rule once the student's deadline has passed.
  *   beforeLaunch  a first payment before 1 October.
- * "Every video": an action item counts by its video alone. "Through": Video
- * Ads II's own videos are asked for. The 2 weeks are DISCOUNT_WINDOW_DAYS,
+ *   ready         above Apply, once the student has met it ("at least": a
+ *                 student who watched them all reads it too).
+ * "The videos": an action item counts by its video alone. "Through": Video
+ * Ads II's own videos are counted. The 2 weeks are DISCOUNT_WINDOW_DAYS,
  * written as words, so client-tests/discount.test.mjs fails if that is ever
  * not 14. A first payment from 1 October until the launch has until the end
  * of 23 October (discount.ts DISCOUNT_SHARED_DEADLINE), more than 2 weeks:
  * the line does not name that group, and their "Apply by" row shows their date.
  */
-export function discountRule(after: string): { open: string; closed: string; beforeLaunch: string } {
-  const closed = `The ${DISCOUNT_PERCENT}% is for finishing every video through ${after} within 2 weeks of joining.`;
+export function discountRule(after: string): { open: string; closed: string; beforeLaunch: string; ready: string } {
+  const share = `${DISCOUNT_VIDEO_SHARE}%`;
+  const closed = `The ${DISCOUNT_PERCENT}% is for watching ${share} of the videos through ${after} within 2 weeks of joining.`;
   return {
-    open: `Finish every video through ${after} within 2 weeks of joining to apply.`,
+    open: `Watch ${share} of the videos through ${after} within 2 weeks of joining to apply.`,
     closed,
     beforeLaunch: `Your 2 weeks have passed. ${closed}`,
+    ready: `You've watched at least ${share} of the videos through ${after}. Apply now and the team confirms within 48 hours.`,
+  };
+}
+
+/**
+ * The counts the locked panel shows (the 80% rule, 2026-10-26), each saying
+ * what is needed: `why`, Apply's reason, its title and its description
+ * ("Watch 49 of 61 videos to apply"; "Watch all 61 videos to apply" until
+ * then); `done` and `needed`, the line under the bar ("12 watched",
+ * "49 of 61 needed"; "12 of 61 videos", "49 to go" until then); `fill`, the
+ * bar, 0 to 1, full at the 80%.
+ */
+export function checkpointCounts(state: Extract<DiscountState, { kind: "locked" }>): {
+  why: string;
+  done: number;
+  needed: string;
+  fill: number;
+} {
+  const { lessonsDone: done, lessonsNeeded: needed, lessonsTotal: total } = state;
+  return {
+    why: `Watch ${needed} of ${total} videos to apply`,
+    done,
+    needed: `${needed} of ${total} needed`,
+    fill: needed > 0 ? Math.min(1, done / needed) : 0,
   };
 }
 

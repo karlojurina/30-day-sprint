@@ -25,7 +25,8 @@
 //                     and handed in none of the four: ready on the map
 //                     (discountState), granted by the request route's rule
 //                     (decideDiscountRequest), approved by the approve
-//                     route's (approvalVerdict), the same before v114
+//                     route's (approvalVerdict), the same before v114; the
+//                     four's videos still count toward the 80% (2026-10-26)
 //   5. the map        none of the four holds a student once its video is
 //                     watched (buildMapModel, isPassed); Video Ads II reads
 //                     done only with the four handed in
@@ -72,7 +73,7 @@ const { completedLessonIdsFor, isLessonComplete } = await import('./_gen/progres
 const { POST: markShipped } = await import('./_gen/mark-action-shipped-route.ts')
 const { POST: saveLink } = await import('./_gen/save-action-link-route.ts')
 const { useDb: openDb, FakeDb, setCatalog, steps } = await import('./_gen/stub-server.ts')
-const { discountState, requiredLessons } = await import('./_gen/discount.ts')
+const { discountState, requiredLessons, videosNeeded } = await import('./_gen/discount.ts')
 const { approvalVerdict, decideDiscountRequest, toDiscountLessons, videoDoneIds } = await import('./_gen/discount-server.ts')
 const { buildWorldCatalog } = await import('./_gen/catalog.ts')
 const { buildMapModel, isPassed, MAP_PLACES } = await import('./_gen/map-model.ts')
@@ -273,11 +274,15 @@ const readsOf = (lessons, completions, requests = []) => ({
      'the request route\'s rule (decideDiscountRequest): granted')
   const verdict = approvalVerdict(readsOf(AFTER, watchedAll, [{ id: 'req-1', status: 'pending', created_at: REQUEST_AT }]), NOW, REQUEST_AT, 'req-1', RESET)
   ok(same(verdict, { ok: true }), 'the approve route\'s rule (approvalVerdict): approved', show(verdict))
-  // The four's videos are still asked for: without them the 30% is locked on them.
-  const noFour = watchedAll.filter((c) => !FOUR.includes(c.lesson_id))
+  // The four's videos still count. Since the 80% rule (2026-10-26) a student needs 49 of the 61, so the four make the
+  // difference only at the edge: the first 49 in course order, the four among them, meet it; without the four, 45 do not.
+  const first = watchedAll.slice(0, videosNeeded(asked.length))
+  ok(first.length === 49 && FOUR.every((id) => first.some((c) => c.lesson_id === id)) && state(AFTER, first).kind === 'ready',
+     'the first 49 videos in course order, the four among them, none handed in: ready (the 80% of 61)', show({ n: first.length, kind: state(AFTER, first).kind }))
+  const noFour = first.filter((c) => !FOUR.includes(c.lesson_id))
   const locked = state(AFTER, noFour)
-  ok(locked.kind === 'locked' && locked.lessonsLeft === 4 && locked.nextLessonId === 'a4l02',
-     'their videos are still asked for: with the four not watched it is locked, 4 left, a4l02 next', show({ kind: locked.kind, left: locked.lessonsLeft, next: locked.nextLessonId }))
+  ok(locked.kind === 'locked' && locked.lessonsDone === 45 && locked.lessonsLeft === 4 && locked.nextLessonId === 'a4l02',
+     'their videos still count: without the four it is 45, locked, 4 more needed, a4l02 next', show({ kind: locked.kind, done: locked.lessonsDone, left: locked.lessonsLeft, next: locked.nextLessonId }))
 }
 
 console.log('\n=== 5. The map: none of the four holds a student once its video is watched ===')

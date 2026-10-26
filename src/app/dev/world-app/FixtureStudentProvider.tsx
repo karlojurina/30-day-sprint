@@ -374,7 +374,7 @@ export function FixtureStudentProvider({
     const name = new URLSearchParams(search).get("p");
     // The real course has its own presets: the others count placeholder lessons.
     const ids = modeOf(search) === "course" ? coursePresetIds(name) : presetIds(name);
-    // ?discount=ready and after: every video the offer asks for is watched too (fixtureDiscount.tsx).
+    // ?discount=ready and after: every video the offer counts is watched too; almost and eighty: 48 and 49 of the 61 (fixtureDiscount.tsx).
     return [...ids, ...discountPresetIds(search, modeOf(search) === "course" ? COURSE.lessons : FULL.lessons)];
   }, [search]);
   /** Lessons marked watched since the page loaded, on top of the preset. */

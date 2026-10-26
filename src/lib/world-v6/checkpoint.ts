@@ -8,8 +8,8 @@
  * them, so nothing climbs up), its door facing the trail, a lantern on a
  * bracket by the door, a ladder, a pennant on the gable and a tag-shaped
  * board hanging under the deck. Hikers leave supplies in it for the ones who
- * come after. Here it holds the 30%: the student who has watched every video
- * up to it gets what is inside.
+ * come after. Here it holds the 30%: the student who has watched 80% of the
+ * videos up to it (every one until 2026-10-26) gets what is inside.
  *
  * Where: 20 east of the trail on the saddle's crest (the ground is flat there,
  * 647 to 649), between Static Ads' lanterns (west of the trail) and the

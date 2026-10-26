@@ -1,11 +1,15 @@
 /**
  * The early-finish discount: where a student stands, in one pure function.
  *
- * The offer (Lovro, 2026-10-14): 30% off when the student has watched every
- * video up to the discount checkpoint, which sits between Video Ads II (the
- * Trail Hut) and Static Ads (the Boathouse), in time. Who can earn it, and by
- * when (Lovro, 2026-10-16, T-080; the first date moved from 9 September to
- * 1 October by Lovro on 2026-10-19; every date from midnight in Croatia):
+ * The offer (the owner, 2026-10-14): 30% off when the student has watched the
+ * videos up to the discount checkpoint, which sits between Video Ads II (the
+ * Trail Hut) and Static Ads (the Boathouse), in time. Since 2026-10-26 (the
+ * owner: "They have to watch 80% of the 61 videos, or whatever amount of
+ * videos we have, until the end of video ads 2.") that is 80% of them,
+ * rounded up (videosNeeded: 49 of 61); until then it was every one. Who can
+ * earn it, and by when (the owner, 2026-10-16, T-080; the first date moved from
+ * 9 September to 1 October by the owner on 2026-10-19; every date from midnight
+ * in Croatia):
  *   - a first payment on or after the launch (9 October 2026): 14 days from
  *     that payment;
  *   - a first payment from 1 October 2026 until the launch: until the end
@@ -20,17 +24,40 @@
  *
  * "The videos up to the checkpoint" are the counting watch lessons, in course
  * order, up to and including the gate lesson (`is_gate`), that have a video.
- * A lesson with no video yet cannot be watched, so it is not asked for. An
+ * A lesson with no video yet cannot be watched, so it is not asked for, and
+ * the 80% is of the videos there are (the count follows the catalog). An
  * action item with a video counts once its video is done; its link half is
- * not asked for here.
+ * not asked for here. Which 80% does not matter: any of them count.
  *
- * Shared by the map (what the student sees) and the request route (what the
- * server allows), so the two can never disagree about who is ready.
+ * Shared by the map (what the student sees), both request routes and the
+ * approval (what the server allows, discount-server.ts), so they can never
+ * disagree about who is ready.
  */
 
 import { DISCOUNT_WINDOW_DAYS } from "@/lib/constants";
 
 export const DISCOUNT_PERCENT = 30;
+
+/**
+ * The share of the videos up to the checkpoint the 30% asks for, in percent
+ * (the owner, 2026-10-26). The words students read say it from here
+ * (checkpointView.ts discountRule), and so does the 30% page.
+ */
+export const DISCOUNT_VIDEO_SHARE = 80;
+
+/**
+ * How many of `total` videos meet the 30%: DISCOUNT_VIDEO_SHARE of them,
+ * rounded up, so never less than 80% (61 videos: 49; 3: 3; 10: 8). The one
+ * place the number is worked out: discountState reads it, and through it the
+ * map, POST /api/discounts/request, POST /api/discounts/submit-feedback and
+ * the approval (discount-server.ts); the 30% page's count reads it too
+ * (thirty-view.ts). 0 for no videos, or a count that is not a whole number.
+ */
+export function videosNeeded(total: number): number {
+  if (!Number.isInteger(total) || total <= 0) return 0;
+  // ceil(total * 80 / 100) in whole numbers, so no rounding of 0.8 can move the edge.
+  return Math.floor((total * DISCOUNT_VIDEO_SHARE + 99) / 100);
+}
 /** The 14 days. One source: constants.ts, re-exported here for the map. */
 export { DISCOUNT_WINDOW_DAYS };
 /**
@@ -103,6 +130,12 @@ export type DiscountState =
    * (1 October); the name is from when the launch was the cutoff.
    * "has-discount": the student's Whop membership already has a discount on
    * its next renewal (DiscountInput.membershipDiscounted, D5).
+   *
+   * The counts (since the 80% rule, 2026-10-26): `lessonsTotal` is the videos
+   * up to the checkpoint, `lessonsNeeded` videosNeeded of them, `lessonsDone`
+   * how many of them are watched, and `lessonsLeft` how many more the 80%
+   * still needs (lessonsNeeded less lessonsDone, never below 0). Until then
+   * `lessonsLeft` was every video not watched.
    */
   | { kind: "not-eligible"; reason: "no-payment" | "before-launch" | "no-gate" | "has-discount" }
   | { kind: "expired"; endsAt: string; window: DiscountWindow; lessonsLeft: number }
@@ -111,11 +144,22 @@ export type DiscountState =
       endsAt: string;
       window: DiscountWindow;
       lessonsLeft: number;
+      lessonsDone: number;
+      lessonsNeeded: number;
       lessonsTotal: number;
+      /** The length of the next `lessonsLeft` videos not watched, in course order. */
       secondsLeft: number;
+      /** The first video not watched, in course order. */
       nextLessonId: string | null;
     }
-  | { kind: "ready"; endsAt: string; window: DiscountWindow; lessonsTotal: number }
+  | {
+      kind: "ready";
+      endsAt: string;
+      window: DiscountWindow;
+      lessonsDone: number;
+      lessonsNeeded: number;
+      lessonsTotal: number;
+    }
   | {
       kind: "pending" | "approved" | "applied" | "rejected";
       requestId: string;
@@ -155,7 +199,7 @@ export function gateLessonId(lessons: readonly DiscountLesson[]): string | null 
   return lessons.find((l) => l.is_gate)?.id ?? null;
 }
 
-/** The lessons the offer asks for, in course order. Empty when there is no gate. */
+/** The lessons the offer counts, in course order: the 80% is of these (videosNeeded). Empty when there is no gate. */
 export function requiredLessons(lessons: readonly DiscountLesson[]): DiscountLesson[] {
   const gate = lessons.findIndex((l) => l.is_gate);
   if (gate < 0) return [];
@@ -280,21 +324,28 @@ export function discountState(input: DiscountInput): DiscountState {
   // "ready" on day one. Nothing to reach is the same as no checkpoint.
   if (required.length === 0) return { kind: "not-eligible", reason: "no-gate" };
   const left = required.filter((l) => !videoDoneIds.has(l.id));
+  const done = required.length - left.length;
+  // The 80% (videosNeeded): how many more the student still has to watch.
+  const needed = videosNeeded(required.length);
+  const short = Math.max(0, needed - done);
 
   const endsAt = open.endsAt.toISOString();
   if (now.getTime() > open.endsAt.getTime()) {
-    return { kind: "expired", endsAt, window: open.window, lessonsLeft: left.length };
+    return { kind: "expired", endsAt, window: open.window, lessonsLeft: short };
   }
-  if (left.length === 0) {
-    return { kind: "ready", endsAt, window: open.window, lessonsTotal: required.length };
+  if (short === 0) {
+    return { kind: "ready", endsAt, window: open.window, lessonsDone: done, lessonsNeeded: needed, lessonsTotal: required.length };
   }
   return {
     kind: "locked",
     endsAt,
     window: open.window,
-    lessonsLeft: left.length,
+    lessonsLeft: short,
+    lessonsDone: done,
+    lessonsNeeded: needed,
     lessonsTotal: required.length,
-    secondsLeft: left.reduce((sum, l) => sum + (l.duration_seconds ?? 0), 0),
+    // The videos still needed, taken in course order: the way the student goes.
+    secondsLeft: left.slice(0, short).reduce((sum, l) => sum + (l.duration_seconds ?? 0), 0),
     nextLessonId: left[0]?.id ?? null,
   };
 }

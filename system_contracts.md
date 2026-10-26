@@ -1241,9 +1241,10 @@ When adding a new table, append it here. When deleting a field, scan
   newest until the fourth), and no real payment at all is none. Since the
   owner's answers of 2026-10-26 a no coupon needs both a real course
   payment and a course membership on a paid plan: the paid membership
-  settled on answers, else, where the plan is not known (a renewal price
-  that does not read, v2's list answering a 4xx), the first real payment;
-  every other no coupon is unpaid ("The paid plan and the payment"
+  settled on answers, else, where the plan is not known (a membership that
+  grants access whose renewal price does not read and whose plan renews
+  above 0 or does not read, v2's list answering a 4xx), the first real
+  payment; every other no coupon is unpaid ("The paid plan and the payment"
   below). Until the
   fourth fix round a membership that no longer grants access was never
   read, the price judged every real course payment, the name of the
@@ -1286,8 +1287,11 @@ When adding a new table, append it here. When deleting a field, scan
   the stamp with a new `checked_at` (an upsert whose payload leaves a
   column out keeps it), and the row reads as written over; a row with no
   source (production's cron has written them every 2 hours since
-  2026-10-21 11:37, by the rule before, and since the fifth fix round a
-  no coupon judged without the user's list is stored so) answers nothing,
+  2026-10-21 11:37, by the rule before, since the fifth fix round a no
+  coupon judged without the user's list is stored so, an unpaid answer
+  excepted since 2026-10-26, which is stamped and answers, and since the
+  review of that day every row written while the database's copy of v113
+  refuses this rule's stamp, `refusesThisStamp`) answers nothing,
   and on a database without v113 the read naming the stamp's columns is
   refused (42703), made again without them, and no stored no coupon
   answers. It gives no answer only when Whop does not answer (no
@@ -1372,9 +1376,12 @@ When adding a new table, append it here. When deleting a field, scan
   them so there's no point." `checkMembershipDiscount`'s answer carries
   `unpaid` (it was `noRealPayment`): with no coupon, Whop does not show
   both a real course payment (paid, above 0, not refunded in full or lost
-  in a dispute) and a course membership on a paid plan (one renewing above
-  0 the check settles on: the one on file whatever its status, or one
-  found through the Whop user that grants access). `judgeStudentDiscount`
+  in a dispute) and a course membership on a paid plan (one that grants
+  access, active, trialing or past_due, renewing above 0, that the check
+  settles on: the one on file or one found through the Whop user; since
+  the review of the same day the membership read's `status` is read, so a
+  canceled or expired one on file is never it, and a past_due one is
+  past_due whatever v2's `valid` says, `accessOf`). `judgeStudentDiscount`
   answers `noRealPayment` (no real course payment, whatever the
   memberships) or `noPaidPlan` (a real course payment and no paid plan,
   every renewal price read and the user's list answered); the stored
@@ -1384,7 +1391,14 @@ When adding a new table, append it here. When deleting a field, scan
   the course's free plan with or without a real payment beside it, a
   trial whose checkout was $0, a past_due membership whose only charge
   failed, a canceled or expired membership after a full refund, no course
-  membership that grants access. Both request routes write nothing and
+  membership that grants access; and since the review of the same day,
+  each let in until then, a canceled or expired course membership on file
+  renewing above 0 or giving no renewal price beside a real payment never
+  refunded, the free plan whose membership gives no renewal price (its
+  plan read, `readPlan`: one-time, or renewing at 0, is free), and the
+  free plan on file beside a listed membership v1 answers a 404 or another
+  4xx for (passed over) or beside a second free one giving no renewal
+  price. Both request routes write nothing and
   answer 400 `{ error: "The 30% needs a paid course plan and a payment
   that went through.", state: "not-eligible" }` (`unpaidRefusal`,
   `PAID_PLAN_LINE`; an empty `first_paid_at` keeps "We can't see your
@@ -1398,23 +1412,31 @@ When adding a new table, append it here. When deleting a field, scan
   real course payer on a paid plan (a membership id on file; a payment's
   id with the membership found through the Whop user; a partial refund;
   canceled and joined again; a $0 first payment then 97.00; past_due after
-  a failed renewal, the first payment real), and where the plan is not
-  known (a membership whose renewal price does not read, v2's list
-  answering a 404 or another 4xx) any real course payment. An unpaid
+  a failed renewal, the first payment real, found through v2 too since the
+  review of the same day), and where the plan is not known (a membership
+  that grants access whose renewal price does not read and whose plan
+  renews above 0 or does not read, v2's list answering a 404 or another
+  4xx) any real course payment. An unpaid
   answer's row holds no coupon, no code and no price, names the
   membership on file when it is one, and carries the stamp even with the
   user's list unread; every other answer holds a price. The stamp's
   version is `r6`: an `r5-` row (production's build) never answers a no
-  coupon, and v113's check takes both. `GET /api/student/data` answers
+  coupon, and v113's check takes both; on a copy of v113 taking `r5-`
+  alone the rows are written without the stamp since the review of the
+  same day (`refusesThisStamp`; the cron's answer carries
+  `stamp_refused: true`), where every write failed. `GET /api/student/data` answers
   `membershipUnpaid` from the stored row read with no stamp (no row, a row
   with a price, one of another membership or a failed read: `false`), and
-  the map's `discountState` answers `not-eligible`, `unpaid`, right after
-  `has-discount`, so the 30% panel says the sentence with no Apply. The
-  cron counts `no_real_payment` and `no_paid_plan`. Not decided: a
-  canceled or expired membership on file renewing above 0, beside a real
-  course payment, passes (the status is not read); once v2's list is
-  gone (13 November 2026, until T-113) the payment decides wherever the
-  membership on file shows no paid plan.
+  the map's `discountState` answers `not-eligible`, `unpaid` while the
+  window is open (after the deadline since the review of the same day, so
+  a closed window keeps "This closed on ...", as the request routes say;
+  right after `has-discount` until then), so the 30% panel says the
+  sentence with no Apply. The cron counts `no_real_payment` and
+  `no_paid_plan`. Not decided: once v2's list is gone (13 November 2026,
+  until T-113) the payment decides wherever no paid membership is settled
+  on; a membership set to cancel at the end of its period still grants
+  access and passes; a converted trial whose $0 checkout Whop states at
+  97.00 is refused by its subtotal as a coupon.
 - **Required questions are enforced on the server (the owner's review,
   2026-10-21; branch `night/admin3`, not on production):** before
   anything is written, `POST /api/discounts/request` and
@@ -1556,7 +1578,9 @@ When adding a new table, append it here. When deleting a field, scan
   when the price judged it a coupon, its membership named, or when it names
   none the membership the check settled on; with no coupon and no
   membership that answered, the first real one, the newest until the
-  fourth fix round. `renewal_price` holds its price after discounts, the
+  fourth fix round, and since the owner's answers of 2026-10-26 only where
+  the plan cannot be known, every other such answer being the unpaid row
+  below. `renewal_price` holds its price after discounts, the
   total less a tax added on top, in its own currency (null when its total
   does not read), and `plan_renewal_price` its subtotal when it names a
   code or shows a discount naming none, 97.00 when the price judged it,
@@ -1576,7 +1600,12 @@ When adding a new table, append it here. When deleting a field, scan
   one); and `source_checked_at`, the `checked_at` of the write that set
   `source`. Both null on rows written before, and since the fifth on a no
   coupon judged without the user's list (a 404 or another 4xx for it, a
-  410 once v2 is gone). A `membership` or `user` row holds the
+  410 once v2 is gone), an unpaid answer (no coupon, no code and no price)
+  excepted, which is stamped all the same since 2026-10-26 and answered by
+  the fallback; and since the review of that day both null on every row
+  written while the database's copy of v113 refuses this rule's stamp (the
+  copy in production's tree takes `r5-` alone: 23514, `refusesThisStamp`,
+  the row written again without them). A `membership` or `user` row holds the
   membership's renewal price and its plan's, each null when it did not
   read, the plan's always null on one naming no code since the fourth fix
   round. Since T-122's third fix round the request and approve routes'
@@ -2718,7 +2747,11 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   this rule's stamp from one write and the student's row read (since the
   fifth). The answer it stores carries the stamp, `source` and
   `source_checked_at` (v113), but a no coupon judged without the user's
-  list, stored with no source.
+  list, stored with no source (an unpaid answer is stamped all the same
+  since 2026-10-26); and on a database whose copy of v113 refuses this
+  rule's stamp, since the review of that day, every answer is stored
+  without it, so the route still answers 200 there (it answered 500, the
+  answer not stored).
 - **Produces:**
   - 200 `{ discounted, code, unpaid }`: Whop answered now and its
     answer is stored; `code` is the code's name, or its promo id, or

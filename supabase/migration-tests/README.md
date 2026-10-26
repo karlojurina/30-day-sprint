@@ -37,8 +37,11 @@ made as PostgREST makes them, an earlier round's refused whole and one from
 before T-122 keeping the stamp with a new `checked_at`, the `r5` build's
 write over the `r6` build's row and the `r6` build's next write over it, the
 undo dropping both columns and keeping every row, this copy pasted over the
-copy taking the `r5-` values alone (the `r6` write refused there before it
-and taken after it, the `r5-` row kept), and v113 on a database without
+copy taking the `r5-` values alone (the `r6` write refused there before it,
+23514 with Postgres's message naming `student_membership_discounts_source_check`,
+which the build reads to write the row again without the stamp since the
+review of 2026-10-26, that write taken with no source; the `r6` write taken
+after it, the `r5-` row kept), and v113 on a database without
 v111), then `v114.test.mjs` (below), with
 `--experimental-strip-types` because it imports `src/lib/progress.ts`, then
 `eighty-closed-windows.test.mjs` (below, since 2026-10-26). On
@@ -52,6 +55,8 @@ two, then `PASS 65 FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`,
 same day: `PASS 702`, `PASS 22`, `PASS 65`, `PASS 34`, then `PASS 86`, each
 with `FAIL 0`. On `night/eighty2` (2026-10-26, the owner's paid plan and
 payment): `PASS 702`, `PASS 22`, `PASS 65`, `PASS 41`, `PASS 86`, then
+`PASS 32`, each with `FAIL 0`; after the review of that build (the same
+day): `PASS 702`, `PASS 22`, `PASS 65`, `PASS 42`, `PASS 86`, then
 `PASS 32`, each with `FAIL 0`.
 
 `v114.test.mjs` (2026-10-23, Video Ads II's four editing breakdowns,

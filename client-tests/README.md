@@ -1095,6 +1095,43 @@ stored rows carry the `r6-` stamp, the unpaid words and the reason `unpaid`
 replace the no-real-payment ones, and `admin-review`'s stand-in pays the
 97.00 checkout.
 
+The review of that build (the same day): `membership-discount` (816, +57).
+Nine more refused cases, each through the judge, both request routes, the
+normal Approve with the 30% page's row read again, and Approve anyway: a
+canceled course membership on file renewing at 97.00 beside a real 97.00
+never refunded, an expired one on file (N2's Whop), a canceled one on file
+with no renewal price, the free one-time plan on file with no renewal price
+or naming none at all, a renewal plan at 0.00 whose membership gives no
+renewal price, the free plan on file beside a listed membership v1 answers
+404 or 422 for, and beside a second free membership with no renewal price;
+each was let in until the fixes (the membership on file's status was not
+read, a membership with no renewal price never had its plan read, a listed
+one v1 does not know left the plan unknown). Two more real payers let in:
+the free plan on file beside a second membership on the 97.00 plan with no
+renewal price (its plan renews above 0, so the payment decides), and a
+payment's id on file with the membership found through v2 past_due and
+marked not valid (it was never settled on, where the same one on file was).
+A converted trial whose $0 checkout is stated at 97.00 is refused with the
+coupon's line, by its subtotal (the case the dry run's `refused_by_subtotal`
+is to show the owner). On the copy of v113 taking the `r5-` values alone (a
+`failWhen` answering an `r6-` stamp with Postgres's 23514 and words): the
+trial refused with its row stored without the stamp and the map's flag from
+it, a real payer let in, Whop down then the 503, Check Whop again 200, and
+the cron 200 with `stamp_refused` true (each stored nothing, or answered 500,
+until then), beside the control on this tree's v113. A window that closed
+with the stored row unpaid reads `expired` and "This closed on ...", never
+the unpaid sentence, end to end: the cron stores the trial unpaid in the
+window, the trial pays after it, the cron reads it no more, the data route
+still sends the flag, and the map's state and the request route both say the
+window closed. `/api/student/data` is held to send nothing of two stored rows
+holding a code and a price (the check before could not fail: its row held
+none, and a mutation that sends the row now fails it). The read order of a
+membership with no renewal price includes its plan, and the agreement sweep's
+floor of answers that are not unpaid is 85 (92 of 140), where it was 40.
+On `night/eighty2` at 96c4095, 52 of the new checks fail, among them every
+refused case above, the past_due payer, the r5-only routes and cron, and the
+closed window.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

@@ -8,7 +8,7 @@ import {
   REGIONS_TABLE,
 } from "./stub-server.ts";
 import { currentStreakAsOf, getTodayUtc } from "./streak.ts";
-import { storedRowApplies } from "./membership-discount.ts";
+import { rowShowsUnpaid, storedRowApplies } from "./membership-discount.ts";
 
 export async function GET(request: NextRequest) {
   const authHeader = request.headers.get("authorization");
@@ -64,7 +64,7 @@ export async function GET(request: NextRequest) {
     watchProgressRes,
     // v100 — which lessons have a video. Lesson ids only, see below.
     lessonVideosRes,
-    // v111 — a discount already on the student's next Whop renewal (D5).
+    // v111 — a discount already on the student's next Whop renewal (D5), and since 2026-10-26 no paid plan and payment.
     membershipDiscountRes,
   ] = await Promise.all([
     supabase.from(REGIONS_TABLE).select("*").order("order_num"),
@@ -171,12 +171,13 @@ export async function GET(request: NextRequest) {
     // 150 for the whole course, under Supabase's 1000-row cap.
     supabase.from("lesson_videos").select("lesson_id"),
     // v111 (admin rebuild 2, D5) — the stored answer to "does this student's
-    // Whop membership already have a discount on its next renewal". The
-    // flag and the membership it was read from only, never the code or the
-    // prices.
+    // Whop membership already have a discount on its next renewal", and since
+    // 2026-10-26 whether Whop shows a paid course plan and a payment that went
+    // through (rowShowsUnpaid reads the code's id and the price as present or
+    // empty). Two flags reach the browser, never the code or the prices.
     supabase
       .from("student_membership_discounts")
-      .select("whop_membership_id, discounted")
+      .select("whop_membership_id, discounted, promo_code_id, renewal_price")
       .eq("student_id", student.id)
       .maybeSingle(),
   ]);
@@ -215,24 +216,36 @@ export async function GET(request: NextRequest) {
     (lessonVideosRes.data ?? []).map((v) => v.lesson_id as string),
   );
 
-  // The map's 30% panel reads this (discount.ts membershipDiscounted). A
-  // stored row counts only for the membership it was read from, or, when the
-  // Whop id on file is not a membership's, as the row the check wrote for
-  // this student through their Whop user or a payment (T-122):
-  // membership-discount.ts storedRowApplies. A failed read, or a
-  // database without v111, is no flag: the request routes ask Whop
-  // themselves before anything is written, so nothing is lost but the
-  // panel's early line.
+  // The map's 30% panel reads these (discount.ts membershipDiscounted and
+  // membershipUnpaid). A stored row counts only for the membership it was
+  // read from, or, when the Whop id on file is not a membership's, as the row
+  // the check wrote for this student through their Whop user or a payment
+  // (T-122): membership-discount.ts storedRowApplies. membershipUnpaid
+  // (2026-10-26): the row is the check's unpaid answer, no coupon, no code and
+  // no price (rowShowsUnpaid; the owner: "If they don't have a payment and a
+  // paid plan - no applying to 30% off"), which every rule that stored it meant
+  // as unpaid, so it is read with no stamp. A row that cannot tell (none, one
+  // with a price, a failed read, a database without v111) is no flag: the map
+  // offers what the rule says and the request routes ask Whop themselves
+  // before anything is written, so nothing is lost but the panel's early
+  // line. A student refused earlier who has paid since gets Apply back at the
+  // first load after the row is read again: the coupon cron reads every
+  // student whose 30% window is open, active or past_due, every 2 hours (at
+  // :40), and a membership put on file since leaves the old row out at once.
   if (membershipDiscountRes.error) {
     console.error(`[student/data] student_membership_discounts read failed: ${membershipDiscountRes.error.message}`);
   }
   const storedDiscount = membershipDiscountRes.error
     ? null
-    : (membershipDiscountRes.data as { whop_membership_id: string | null; discounted: boolean } | null);
-  const membershipDiscounted =
-    !!storedDiscount &&
-    storedRowApplies(storedDiscount, student.whop_membership_id) &&
-    storedDiscount.discounted === true;
+    : (membershipDiscountRes.data as {
+        whop_membership_id: string | null;
+        discounted: boolean;
+        promo_code_id: string | null;
+        renewal_price: number | string | null;
+      } | null);
+  const applying = storedDiscount && storedRowApplies(storedDiscount, student.whop_membership_id) ? storedDiscount : null;
+  const membershipDiscounted = applying !== null && applying.discounted === true;
+  const membershipUnpaid = applying !== null && rowShowsUnpaid(applying);
   // The client learns THAT a lesson has a video, never which one.
   const lessons = (lessonsRes.data ?? []).map((lesson) => ({
     ...lesson,
@@ -265,6 +278,7 @@ export async function GET(request: NextRequest) {
     completions: completionsRes.data ?? [],
     discountRequest: discountRes.data ?? null,
     membershipDiscounted,
+    membershipUnpaid,
     quizzes: quizzesRes.data ?? [],
     quizQuestions: quizQuestionsRes.data ?? [],
     quizAttempts: quizAttemptsRes.data ?? [],

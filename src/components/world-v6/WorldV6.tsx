@@ -31,7 +31,7 @@ import { areaShare, type WorldProgress } from "@/lib/world-v6/progress";
 import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
-import { DISCOUNT_PERCENT, MEMBERSHIP_DISCOUNT_LINE } from "@/lib/world/discount";
+import { DISCOUNT_PERCENT, MEMBERSHIP_DISCOUNT_LINE, PAID_PLAN_LINE } from "@/lib/world/discount";
 import { renewalStillAhead } from "@/lib/world/celebrations";
 import { checkpointCounts, checkpointView, discountRule, expiredRuleLine, liveRuleLine, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
@@ -4411,6 +4411,7 @@ function CheckpointBody({
     body = <p className={s.desc}>{`This closed on ${cv.deadline}. ${expiredRuleLine(st.endsAt, after)}`}</p>;
   } else if (st.kind === "not-eligible") {
     // "has-discount" (admin rebuild 2, D5): a discount already on the next Whop renewal, the owner's line, no Apply.
+    // "unpaid" (the owner's rule of 2026-10-26): no paid course plan and payment that went through, one sentence, no Apply.
     body = (
       <p className={s.desc}>
         {st.reason === "before-launch"
@@ -4419,7 +4420,9 @@ function CheckpointBody({
             ? `${rule.open} We can't see your first payment yet. Tell the team and they'll sort it out.`
             : st.reason === "has-discount"
               ? MEMBERSHIP_DISCOUNT_LINE
-              : "This offer isn't open yet."}
+              : st.reason === "unpaid"
+                ? PAID_PLAN_LINE
+                : "This offer isn't open yet."}
       </p>
     );
   }

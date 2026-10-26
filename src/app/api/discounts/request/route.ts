@@ -12,8 +12,8 @@ import {
   loadDiscountReads,
   membershipDiscountRefusal,
   membershipUncheckedRefusal,
-  noRealPaymentRefusal,
   secondPendingRequest,
+  unpaidRefusal,
 } from "@/lib/world/discount-server";
 
 /**
@@ -46,12 +46,19 @@ import {
  * written and the student reads "We couldn't check your membership just now.
  * Try again in a minute." (membershipUncheckedRefusal, a 503); the request
  * used to go through and leave the coupon to the approve route.
- * Since 2026-10-26 a no coupon that says Whop shows no real payment from the
- * student (the check's noRealPayment: no course membership renewing above 0
- * and no real course payment, the owner's applicant who "never paid") is refused
- * too, nothing written, in the map's sentence for no first payment
- * (noRealPaymentRefusal, a 400): their first_paid_at can be filled from
- * before the first-paid fix, so the rule's own "no-payment" missed them.
+ * Since 2026-10-26 a no coupon is refused too, nothing written, when Whop
+ * does not show both a real course payment and a course membership on a paid
+ * plan (the check's unpaid; the owner: "If they don't have a payment and a
+ * paid plan - no applying to 30% off. Can't even give it to them so there's no
+ * point."): a payment for another product alone, a free plan, a trial with no
+ * charge, a past_due membership whose only charge failed, a full refund, no
+ * course membership. The student reads one sentence for all of them, "The 30%
+ * needs a paid course plan and a payment that went through." (unpaidRefusal,
+ * a 400, state not-eligible): their first_paid_at can be filled from before
+ * the first-paid fix, by another product's payment or by a payment refunded
+ * since, so the rule's own "no-payment" missed them. Until the owner's answers
+ * of that day only no real payment beside no membership renewing above 0 was
+ * refused, in the map's sentence for no first payment.
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */
@@ -78,9 +85,11 @@ async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string
     const refusal = membershipUncheckedRefusal();
     return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
   }
-  if (coupon.noRealPayment) {
-    console.warn(`[discounts/request] student ${studentId}: nothing written, Whop shows no real payment (${coupon.source} answer)`);
-    const refusal = noRealPaymentRefusal();
+  if (coupon.unpaid) {
+    console.warn(
+      `[discounts/request] student ${studentId}: nothing written, Whop does not show both a paid course plan and a course payment that went through (${coupon.source} answer)`,
+    );
+    const refusal = unpaidRefusal();
     return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
   }
 

@@ -73,6 +73,14 @@ export interface StudentContextType {
    * panel then says so and offers no Apply. False until known.
    */
   membershipDiscounted: boolean;
+  /**
+   * Whop does not show both a paid course plan and a course payment that went
+   * through for the student (the coupon check's unpaid row, the owner's rule
+   * of 2026-10-26), as /api/student/data stores it: the 30% panel then says
+   * so and offers no Apply. False until known, and whenever nothing stored
+   * tells (the server then decides live).
+   */
+  membershipUnpaid: boolean;
   quizzes: Quiz[];
   quizQuestions: Record<string, QuizQuestion[]>;
   quizAttempts: StudentQuizAttempt[];
@@ -330,6 +338,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   const [completions, setCompletions] = useState<StudentLessonCompletion[]>([]);
   const [discountRequest, setDiscountRequest] = useState<DiscountRequest | null>(null);
   const [membershipDiscounted, setMembershipDiscounted] = useState(false);
+  const [membershipUnpaid, setMembershipUnpaid] = useState(false);
   // v46 — per-function student state, split from the students row into
   // their own tables. Each is one row per student (or null if the row
   // doesn't exist yet — treated as "all fields default").
@@ -633,6 +642,8 @@ export function StudentProvider({ children }: { children: ReactNode }) {
     setDiscountRequest(fresh.discountRequest ?? null);
     // D5: a discount already on the student's next Whop renewal (the stored row's flag).
     setMembershipDiscounted(fresh.membershipDiscounted === true);
+    // 2026-10-26: no paid course plan and payment that went through (the stored row's unpaid answer).
+    setMembershipUnpaid(fresh.membershipUnpaid === true);
     // v46 — push the fresh student row up to AuthContext (identity
     // changes are rare but possible — name, avatar, membership status)
     // AND refresh the per-function sibling tables so admin-side state
@@ -1858,6 +1869,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
         completions,
         discountRequest,
         membershipDiscounted,
+        membershipUnpaid,
         quizzes,
         quizQuestions,
         quizAttempts,

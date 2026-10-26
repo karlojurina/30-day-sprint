@@ -46,9 +46,12 @@
  *           the same day), the coupon and the actions, with no plan, Open in
  *           Discord, survey, Can still earn, last contact or Mark messaged;
  *           Copy code, Copy Discord ID and Copy username on every row with a
- *           code, none on a rejected one; ?state=nopayment, Whop showing no
- *           real payment (the verdict, no Approve, a plain Approve refused
- *           and the row turning, Approve anyway, a csm's row); then its
+ *           code, none on a rejected one; ?state=unpaid, Whop showing no
+ *           paid course plan and payment that went through (the owner's rule
+ *           of 2026-10-26; ?state=nopayment, no real payment, until then:
+ *           the verdict in the page's own words, no Approve, a plain Approve
+ *           refused and the row turning, Check Whop again, Approve anyway, a
+ *           csm's row); then its
  *           paths by clicks: Approve on the rule's yes, Approve refused for a
  *           coupon Whop names only then (its row turns to the coupon, no
  *           Approve anyway after it), the Approve anyway link and its confirm,
@@ -685,8 +688,9 @@ if (wanted('thirty')) {
   const NO_LINE = 'No Discord ID or username on file.'
   // Beside the buttons with a username and no Discord ID: a phone shows no tip (the review of 2026-10-26).
   const USERNAME_NOTE = 'This username may be their Whop one.'
-  // The verdict for a student Whop shows no real payment from (the same review).
-  const NO_PAYMENT = 'Whop shows no real payment from this student, and the 30% needs one.'
+  // The verdict for a student Whop shows no paid course plan and payment that went through for (the owner's rule of
+  // 2026-10-26; "Whop shows no real payment from this student, and the 30% needs one." from the review of that day).
+  const NO_PAYMENT = 'The 30% needs a paid course plan and a payment that went through, and Whop doesn\'t show both for this student.'
   /** The map's sentence for a discount already on the account: since the render review's second round, the reason a coupon row's Reject starts with. */
   const MAP_LINE = "You can't apply for this discount because you already have a discount applied to your account."
   const open = (query, size) => go(`/dev/admin/discounts${query}`, size)
@@ -962,29 +966,30 @@ if (wanted('thirty')) {
   }
 
   // The review of 2026-10-26, the owner's applicant: "he never had a membership. I see one payment, but it has failed
-  // ... he watched the course even though he never paid." ?state=nopayment: Jonah's stored row says Whop shows no real
-  // payment; Maya's stored row is a clean one and Whop says it only now.
-  console.log('\n30% off: Whop showing no real payment (?state=nopayment): the verdict, no Approve, a plain Approve refused, Approve anyway')
+  // ... he watched the course even though he never paid." Since the owner's answers of the same day, one rule: "If they
+  // don't have a payment and a paid plan - no applying to 30% off." ?state=unpaid: Jonah's stored row says Whop does not
+  // show both a paid course plan and a payment that went through; Maya's stored row is a clean one and Whop says it only now.
+  console.log('\n30% off: Whop showing no paid course plan and payment (?state=unpaid): the verdict, no Approve, a plain Approve refused, Approve anyway')
   {
     for (const size of SIZES) {
-      await open('?state=nopayment', size)
+      await open('?state=unpaid', size)
       await waitReady()
       const jonah = await row('Jonah Pereira')
       const t = await rowText(jonah)
       const dot = await jonah.evaluate((r) => r.querySelector('[data-verdict]')?.getAttribute('data-verdict') ?? null)
-      expect(t.includes(`${NO_PAYMENT} · 49 of 61 videos · 49 needed for 80%`) && dot === 'no-real-payment' && !t.includes(YES)
+      expect(t.includes(`${NO_PAYMENT} · 49 of 61 videos · 49 needed for 80%`) && dot === 'unpaid' && !t.includes(YES)
           && (await isNull(await buttonIn(jonah, 'Approve'))) && !(await isNull(await linkIn(jonah))) && !(await isNull(await buttonIn(jonah, 'Reject'))),
-        `${size.join('x')}: Jonah, 49 of 61 and Whop showing no real payment: the verdict says so with the count, no Approve, Approve anyway for an admin, Reject`, t)
-      await check(`30% off, no real payment, ${size.join('x')}`, `thirty-nopayment-${size[0]}`)
+        `${size.join('x')}: Jonah, 49 of 61 and Whop showing no paid course plan and payment: the verdict says so in the page's own words with the count, no Approve, Approve anyway for an admin, Reject`, t)
+      await check(`30% off, unpaid, ${size.join('x')}`, `thirty-unpaid-${size[0]}`)
     }
     await viewport([1280, 720])
-    // Check Whop again on the no-real-payment row too (the review of 2026-10-26): Whop still shows none, so it stays.
+    // Check Whop again on the unpaid row too (the review of 2026-10-26): Whop still shows the student so, so it stays.
     expect(!(await isNull(await buttonIn(await row('Jonah Pereira'), 'Check Whop again'))), 'Jonah\'s row has Check Whop again, as the coupon\'s row does')
     await press(await buttonIn(await row('Jonah Pereira'), 'Check Whop again'))
-    await page.waitForFunction(() => document.body.innerText.includes('Whop still shows no real payment from Jonah Pereira.'), { timeout: 10000 })
+    await page.waitForFunction(() => document.body.innerText.includes("Whop still doesn't show both a paid course plan and a payment that went through for Jonah Pereira."), { timeout: 10000 })
     await settled()
     expect((await rowText(await row('Jonah Pereira'))).includes(NO_PAYMENT) && (await calls()).some((c) => c.name === 'checkCoupon' && c.args[0] === 'r-jonah'),
-      'Check Whop again: the notice says Whop still shows no real payment, and the row read again says the same', await rowText(await row('Jonah Pereira')))
+      'Check Whop again: the notice says Whop still does not show both, and the row read again says the same', await rowText(await row('Jonah Pereira')))
     // Maya: the stored row is clean, so her row says yes until Approve asks Whop.
     const loads = (await calls()).filter((c) => c.name === 'loadThirty').length
     expect((await rowText(await row('Maya Lindqvist'))).includes(YES_EVERY), 'Maya: her stored row is a clean one, so the verdict is the rule\'s yes')
@@ -997,14 +1002,14 @@ if (wanted('thirty')) {
     const alert = await maya.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
     expect(alert === REFUSED && m.includes(NO_PAYMENT) && (await isNull(await buttonIn(maya, 'Approve'))) && !(await isNull(await linkIn(maya)))
         && (await calls()).filter((c) => c.name === 'loadThirty').length === loads + 1 && JSON.stringify((await calls()).filter((c) => c.name === 'approve').map((c) => c.args)) === JSON.stringify([['r-maya', false, false]]),
-      'Maya\'s Approve: refused with code "rule", the page\'s own sentence on her row, the list read again, and her verdict now says Whop shows no real payment; Approve anyway in Approve\'s place', JSON.stringify({ alert, m }))
+      'Maya\'s Approve: refused with code "rule", the page\'s own sentence on her row, the list read again, and her verdict now says the paid plan and the payment; Approve anyway in Approve\'s place', JSON.stringify({ alert, m }))
     expect(JSON.stringify(await tabCounts()) === JSON.stringify(['Applied 8', 'Approved 2', 'Rejected 3', 'Code Applied 2']), 'nothing approved', (await tabCounts()).join(' | '))
     await press(await linkIn(await row('Jonah Pereira')))
     await page.waitForSelector('[data-approve-anyway-confirm]')
     const confirmText = await page.evaluate(() => document.querySelector('[data-approve-anyway-confirm]')?.textContent ?? null)
     expect(confirmText === `Approve anyway skips the 30% rule, and creates the student's Whop code now. The rule says: ${NO_PAYMENT} A discount already on the membership is still checked first.`,
       'Jonah\'s Approve anyway asks once, naming why the rule says no', confirmText)
-    await check('30% off, Approve anyway past no real payment, 1280x720', 'thirty-nopayment-anyway-1280')
+    await check('30% off, Approve anyway past an unpaid student, 1280x720', 'thirty-unpaid-anyway-1280')
     await press(await buttonIn(await row('Jonah Pereira'), 'Yes, create the code'))
     await page.waitForFunction(() => document.body.innerText.includes('Approved Jonah Pereira.'), { timeout: 10000 })
     await settled()
@@ -1012,7 +1017,7 @@ if (wanted('thirty')) {
     expect(JSON.stringify(sent.at(-1)) === JSON.stringify(['r-jonah', true, false]) && (await tabCounts())[1] === 'Approved 3',
       'Approve anyway: one approve call with override, the code made past it, Jonah on Approved', JSON.stringify(sent))
     // A csm: no Approve anyway, so Jonah's row has Check Whop again and Reject.
-    await open('?state=nopayment&role=csm')
+    await open('?state=unpaid&role=csm')
     await waitReady()
     const csm = await (await row('Jonah Pereira')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)))
     expect(JSON.stringify(csm) === JSON.stringify(['Check Whop again', 'Reject']), 'a csm: Jonah\'s row has Check Whop again and Reject (Reject alone until the review of 2026-10-26)', JSON.stringify(csm))

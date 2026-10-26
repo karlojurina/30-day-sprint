@@ -48,10 +48,12 @@ export interface ThirtyTransport {
   markApplied(requestId: string): Promise<Answer<null>>;
   /**
    * POST /api/admin/thirty/check-coupon ("Check Whop again" on a pending
-   * row the stored coupon refuses): Whop now for that one student, stored.
-   * `code` names the code on the membership, when there is one.
+   * row the stored coupon refuses, or the stored row says the student is
+   * unpaid): Whop now for that one student, stored. `code` names the code on
+   * the membership, when there is one; `unpaid`, no coupon and no paid course
+   * plan with a payment that went through (2026-10-26).
    */
-  checkCoupon(requestId: string): Promise<Answer<{ discounted: boolean; code: string | null; noRealPayment: boolean }>>;
+  checkCoupon(requestId: string): Promise<Answer<{ discounted: boolean; code: string | null; unpaid: boolean }>>;
 }
 
 const NO_SERVER = "Couldn't reach the server. Check the connection and try again.";
@@ -140,14 +142,14 @@ export const adminTransport: ThirtyTransport = {
   },
 
   async checkCoupon(requestId) {
-    const r = await send<{ discounted?: unknown; code?: unknown; noRealPayment?: unknown }>("POST", "/api/admin/thirty/check-coupon", () => ({ requestId }));
+    const r = await send<{ discounted?: unknown; code?: unknown; unpaid?: unknown }>("POST", "/api/admin/thirty/check-coupon", () => ({ requestId }));
     return r.ok
       ? {
           ...r,
           data: {
             discounted: r.data?.discounted === true,
             code: typeof r.data?.code === "string" ? r.data.code : null,
-            noRealPayment: r.data?.noRealPayment === true,
+            unpaid: r.data?.unpaid === true,
           },
         }
       : r;

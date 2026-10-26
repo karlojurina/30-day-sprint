@@ -37,14 +37,17 @@
  *                     still offers only Reject, and Check Whop again finds no
  *                     discount, so the rule decides her row and Approve is
  *                     back (the render review's second round)
- *          nopayment  full, with Whop showing no real payment from two
- *                     students who watched enough (the review of 2026-10-26,
- *                     the owner's applicant who "never paid"): Jonah's stored
- *                     row says so, so his verdict does and he has no Approve;
- *                     Maya's stored row is a clean one and Whop says so only
- *                     now, so her Approve is refused with code "rule", the
- *                     answer stored, and her row then reads the same. Approve
- *                     anyway passes both
+ *          unpaid     full, with Whop showing no paid course plan and
+ *                     payment that went through for two students who watched
+ *                     enough (the owner's rule of 2026-10-26: "If they don't
+ *                     have a payment and a paid plan - no applying to 30%
+ *                     off"; ?state=nopayment, Whop showing no real payment,
+ *                     from the review of that day until his answers): Jonah's
+ *                     stored row says so, so his verdict does and he has no
+ *                     Approve; Maya's stored row is a clean one and Whop says
+ *                     so only now, so her Approve is refused with code
+ *                     "rule", the answer stored, and her row then reads the
+ *                     same. Approve anyway passes both
  *
  * The Approved rows' coupon is what Whop says now (liveCoupons, as
  * GET /api/admin/thirty asks it): Ethan was approved before the coupon rule
@@ -79,8 +82,8 @@ import type { ThirtyView } from "@/lib/admin/thirty-view";
 import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyRequest, ThirtyStudent } from "@/lib/admin/thirty-data";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
-import { NO_REAL_PAYMENT_APPROVAL, couponApprovalRefusal } from "@/lib/world/discount-server";
-import { rowShowsNoRealPayment } from "@/lib/membership-discount";
+import { UNPAID_APPROVAL, couponApprovalRefusal } from "@/lib/world/discount-server";
+import { rowShowsUnpaid } from "@/lib/membership-discount";
 import type { CatalogLessonRow, CompletionRow, DiscountReads, VideoRow } from "@/lib/world/discount-server";
 
 /** Tue 20 Oct 2026, 10:30 in Croatia: the moment every dev load is read at. */
@@ -115,7 +118,7 @@ const VIDEOS: VideoRow[] = REQUIRED.map((lesson_id) => ({ lesson_id, created_at:
 // ── The made-up database ────────────────────────────────────────────────────
 /**
  * A Whop membership as the coupon rule reads it: a code, the next renewal's price and the plan's. No prices and no
- * code: the rule's "no real payment" answer (NO_PAYMENT).
+ * code: the rule's unpaid answer (UNPAID).
  */
 interface Membership {
   /** The code's name; null with no code, or when its name could not be read (then `promoId` is the code). */
@@ -179,11 +182,11 @@ const USED_UP: Membership = { code: "welcome50", renewal: 97, plan: 97 };
 /** No code: the cron read the membership and found nothing. */
 const CLEAN: Membership = { code: null, renewal: 97, plan: 97 };
 /**
- * Whop shows no real payment (the review of 2026-10-26): no course membership renewing above 0 and no paid course
- * payment, which the rule stores as a row with no code and no price (membership-discount.ts rowShowsNoRealPayment),
- * naming the membership on file, so it counts while that stays on file (storedRowApplies), as couponRow stores it.
+ * Unpaid (the owner's rule of 2026-10-26): Whop does not show both a paid course plan and a course payment that went
+ * through, which the rule stores as a row with no code and no price (membership-discount.ts rowShowsUnpaid), naming
+ * the membership on file, so it counts while that stays on file (storedRowApplies), as couponRow stores it.
  */
-const NO_PAYMENT: Membership = { code: null, renewal: null, plan: null };
+const UNPAID: Membership = { code: null, renewal: null, plan: null };
 
 function fullDb(): FixtureDb {
   return {
@@ -295,14 +298,14 @@ function staleCouponDb(): FixtureDb {
 }
 
 /**
- * The full fixture, with Whop showing no real payment from Jonah (stored) and
- * from Maya (only now, so her stored row is still a clean one): the review of
- * 2026-10-26.
+ * The full fixture, with Whop showing no paid course plan and payment that
+ * went through for Jonah (stored) and for Maya (only now, so her stored row is
+ * still a clean one): the owner's rule of 2026-10-26.
  */
-function noPaymentDb(): FixtureDb {
+function unpaidDb(): FixtureDb {
   const db = fullDb();
-  db.people.find((p) => p.id === "p-jonah")!.stored = NO_PAYMENT;
-  db.people.find((p) => p.id === "p-maya")!.live = NO_PAYMENT;
+  db.people.find((p) => p.id === "p-jonah")!.stored = UNPAID;
+  db.people.find((p) => p.id === "p-maya")!.live = UNPAID;
   return db;
 }
 
@@ -439,9 +442,9 @@ export type FixtureState =
   | "nocoupons"
   | "owncode"
   | "stalecoupon"
-  | "nopayment";
+  | "unpaid";
 
-const STATES: FixtureState[] = ["full", "empty", "loading", "error", "partial", "novideos", "nocoupons", "owncode", "stalecoupon", "nopayment"];
+const STATES: FixtureState[] = ["full", "empty", "loading", "error", "partial", "novideos", "nocoupons", "owncode", "stalecoupon", "unpaid"];
 
 export function parseFixtureState(value: string | null): FixtureState {
   return STATES.find((s) => s === value) ?? "full";
@@ -494,8 +497,8 @@ export function fixtureThirtyTransport(opts: {
           ? ownCodeDb()
           : opts.state === "stalecoupon"
             ? staleCouponDb()
-            : opts.state === "nopayment"
-              ? noPaymentDb()
+            : opts.state === "unpaid"
+              ? unpaidDb()
               : fullDb();
   const calls: FixtureCall[] = [];
   let minute = 0;
@@ -556,7 +559,7 @@ export function fixtureThirtyTransport(opts: {
       if (a.status !== "pending") return later<{ promoCode: string | null }>({ ok: false, status: 400, error: "Request already processed" });
       // D5, as the route: Whop now (the stored row when Whop says nothing new), stored, then refused, with `override`
       // too. Approve anyway on the coupon's row (`overrideCoupon`) does not ask Whop at all. Then, as the route since
-      // 2026-10-26, Whop showing no real payment refuses the normal Approve with code "rule".
+      // 2026-10-26, no paid course plan and payment that went through refuses the normal Approve with code "rule".
       const p = person(a.studentId);
       const now = p?.live ?? p?.stored;
       if (p && now && !overrideCoupon) {
@@ -570,8 +573,8 @@ export function fixtureThirtyTransport(opts: {
             code: "has-discount",
           });
         }
-        if (rowShowsNoRealPayment(row) && !override) {
-          return later<{ promoCode: string | null }>({ ok: false, status: 400, error: NO_REAL_PAYMENT_APPROVAL, code: "rule" });
+        if (rowShowsUnpaid(row) && !override) {
+          return later<{ promoCode: string | null }>({ ok: false, status: 400, error: UNPAID_APPROVAL, code: "rule" });
         }
       }
       if (!override) {
@@ -618,7 +621,7 @@ export function fixtureThirtyTransport(opts: {
 
     checkCoupon(id) {
       calls.push({ name: "checkCoupon", args: [id] });
-      type Checked = { discounted: boolean; code: string | null; noRealPayment: boolean };
+      type Checked = { discounted: boolean; code: string | null; unpaid: boolean };
       const a = ask(id);
       const p = a ? person(a.studentId) : undefined;
       if (!a || !p) return later<Checked>(notFound);
@@ -633,7 +636,7 @@ export function fixtureThirtyTransport(opts: {
       return later<Checked>({
         ok: true,
         status: 200,
-        data: { discounted: row.discounted, code: row.promo_code ?? row.promo_code_id, noRealPayment: !row.discounted && rowShowsNoRealPayment(row) },
+        data: { discounted: row.discounted, code: row.promo_code ?? row.promo_code_id, unpaid: rowShowsUnpaid(row) },
       });
     },
   };

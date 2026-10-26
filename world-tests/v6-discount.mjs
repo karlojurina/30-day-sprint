@@ -188,6 +188,14 @@
  *      ready, the panel "You've watched at least 80% of the videos through
  *      Video Ads II." with Apply on. At 1440x900, and the phone's sheets at
  *      390x844 say the same
+ *  30  the owner's paid plan and payment (2026-10-26, ?discount=unpaid):
+ *      every video watched, and the stored coupon answer says Whop does not
+ *      show both a paid course plan and a payment that went through. No
+ *      chip, the tag and the marker closed; a real click on the tag opens the
+ *      panel, which says "The 30% needs a paid course plan and a payment that
+ *      went through." and nothing about videos, days or a deadline, "Closed"
+ *      in its eyebrow, no Apply, grey; Esc closes it with nothing sent. At
+ *      1440x900, and the phone's sheet at 390x844 says the same
  *  Rows 24 to 27 load their pages in Europe/Zagreb (page.emulateTimezone),
  *  so they read the same on any machine.
  *
@@ -227,6 +235,8 @@
  *   panel-has-discount-1440.png, phone-sheet-has-discount.png  a discount already on the membership (row 28)
  *   panel-almost-1440.png, panel-eighty-1440.png, phone-sheet-almost.png,
  *   phone-sheet-eighty.png  one short of the 80%, and at it (row 29)
+ *   panel-unpaid-1440.png, phone-sheet-unpaid.png  no paid course plan and
+ *                         payment that went through (row 30)
  *
  * What a row reads:
  *   hooks      window.__worldReady, __worldFrame, __worldScrollFor(depth),
@@ -1715,6 +1725,37 @@ try {
       const p = await phoneSheet(r, 'eighty', null, 'phone-sheet-eighty.png')
       r.check('eighty, phone (390x844): the same words, Apply on', READY.test(p.text ?? '') && p.apply?.ariaDisabled === null, p)
     }
+  })
+
+  // The owner, 2026-10-26: "If they don't have a payment and a paid plan - no applying to 30% off. Can't even give it to
+  // them so there's no point." The stored coupon answer (/api/student/data's membershipUnpaid) closes the panel. Every
+  // video is watched, so without it the panel would offer Apply.
+  await runRow(30, "unpaid (every video watched, Whop showing no paid course plan and payment that went through): no chip; the tag and the marker closed; the panel says the one sentence, with no Apply; 1440x900 and the phone's sheet at 390x844", async (r) => {
+    const LINE = 'The 30% needs a paid course plan and a payment that went through.'
+    const page = await r.open({ discount: 'unpaid' }, '', { width: 1440, height: 900 })
+    let s = await page.evaluate(SNAP)
+    r.check('no chip in the header', s.chip === null && s.chipState === null, { chip: s.chip, chipState: s.chipState })
+    r.check('the tag is closed and tells a screen reader "Closed"', s.tag?.state === 'closed' && s.tag.label === 'Discount checkpoint, 30% off, Closed', s.tag)
+    r.check('the cache stands closed, its marker in the closed look', s.cp?.shown === true && s.cp.look === 'closed' && s.marker?.state === 'closed', { cp: s.cp, marker: s.marker })
+    const via = await click(page, FIND.tag, 'row 30: the tag')
+    await parked(page, 'row 30')
+    s = await page.evaluate(SNAP)
+    r.check('a real click on the tag opens the panel, the camera parked at the cache', via === 'mouse' && s.panel?.title === '30% off your next month' && s.park?.id === 'checkpoint', { via, panel: s.panel?.title, park: s.park })
+    r.check('it says the one sentence, and nothing about videos to watch, days left, a deadline or a first payment', (s.panel?.text ?? '').includes(LINE)
+      && !/Apply by|days left|\bvideos\b|Watch 80%|first payment|already have a discount/.test(s.panel?.text ?? ''), s.panel?.text)
+    const eyebrow = await page.evaluate(EYEBROW)
+    r.check('its eyebrow ends "Closed"', eyebrow?.at(-1) === 'Closed', eyebrow)
+    r.check('no Apply', (await page.evaluate(FIND.apply)) === null)
+    const lk = await page.evaluate(LOOK)
+    r.check('its tag and "Closed" are grey (closed)', lk.glyph === GREY && lk.word?.text === 'Closed' && lk.word.color === GREY, lk)
+    await page.screenshot({ path: path.join(OUT, 'panel-unpaid-1440.png') })
+    await page.keyboard.press('Escape')
+    await home(page, 'row 30')
+    const sent = await page.evaluate(() => ({ requests: window.__fixtureDiscount?.requests().length ?? null, plain: window.__fixtureDiscount?.plain() ?? null }))
+    r.check('Esc closes it and the camera comes home, nothing sent (no application, no plain request)', sent.requests === 0 && sent.plain === 0, sent)
+    await page.close()
+    const p = await phoneSheet(r, 'unpaid', null, 'phone-sheet-unpaid.png')
+    r.check('phone (390x844): the sheet says the same, no Apply', (p.text ?? '').includes(LINE) && !/Apply by|days left|Watch 80%/.test(p.text ?? '') && p.apply === null, p)
   })
 } finally {
   await browser.close()

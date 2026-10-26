@@ -23,13 +23,15 @@
  * pending request too, so a stale answer also heals by itself within 2 hours.
  *
  * Since the review of 2026-10-26 the page offers it on a row whose stored
- * answer says Whop shows no real payment from the student too, and the answer
- * says whether Whop still does (`noRealPayment`, the check's own).
+ * answer says the student is unpaid too, and the answer says whether Whop
+ * still shows them so (`unpaid`, the check's own: since the owner's answers
+ * of that day, Whop not showing both a paid course plan and a course payment
+ * that went through; until then `noRealPayment`).
  *
  * Body: { requestId }. Auth: any team role (founder, admin, csm), as the
  * discount routes the page calls.
  *
- *   200 { discounted, code, noRealPayment }   Whop answered now, and its answer is stored
+ *   200 { discounted, code, unpaid }   Whop answered now, and its answer is stored
  *   400   no requestId
  *   404   no such request
  *   409   the request is no longer pending (the page reads its list again)
@@ -83,7 +85,7 @@ export async function POST(request: NextRequest) {
     if (!coupon.saved) {
       return fail("Whop answered, but its answer couldn't be saved, so the list still shows the old one. Try again.", 500);
     }
-    return NextResponse.json({ discounted: coupon.discounted, code: coupon.code, noRealPayment: coupon.noRealPayment });
+    return NextResponse.json({ discounted: coupon.discounted, code: coupon.code, unpaid: coupon.unpaid });
   }
 
   // Whop gave no answer now: the stored row stays as it was. checkMembershipDiscount has logged a failed Whop read.

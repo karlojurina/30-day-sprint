@@ -300,12 +300,13 @@ async function bothWays(db, nowIso, { load = loadThirtyData, skip = new Set(), r
     // The page's verdict is that answer alone: no ads check since 2026-10-20 (Lovro).
     const rule = jp.said
     const reason = rule.ok ? null : rule.status === 500 ? 'read-failed' : (rule.reason ?? 'unknown')
-    // The coupon decides first (D5), then a stored row saying Whop shows no real payment (the review of 2026-10-26);
-    // with neither stored, the page's verdict is the rule's.
+    // The coupon decides first (D5), then a stored row saying the student is unpaid (the review of 2026-10-26: no real
+    // payment; since the owner's answers of that day no paid course plan and payment that went through); with neither
+    // stored, the page's verdict is the rule's.
     const coupon = r.coupon?.discounted === true
-    const noPayment = !coupon && r.coupon?.noRealPayment === true
+    const unpaid = !coupon && r.coupon?.unpaid === true
     if (coupon ? r.verdict.reason !== 'has-discount' || r.verdict.ok
-        : noPayment ? r.verdict.reason !== 'no-real-payment' || r.verdict.ok
+        : unpaid ? r.verdict.reason !== 'unpaid' || r.verdict.ok
         : r.verdict.ok !== rule.ok || r.verdict.reason !== reason || r.verdict.oldCourse !== (!jp.raw.ok && rule.error !== jp.raw.error)) {
       differences.push(`${r.id} the page's verdict`)
     }
@@ -758,8 +759,9 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
   // C1: every video done, evolve10 on the membership. C2: the same, its row read from a membership it no longer has.
   // C3: a used-up code (not discounted). C4: evolve10 and 20 videos left. C5: approved before the rule, evolve10 on it.
   // C6: evolve10 whose name Whop would not give. C7 (the review of 2026-10-26): every video done, and the stored row is
-  // the rule's "no real payment" answer (no code, no price, no membership), the owner's applicant who "never paid".
-  // C8: the same with a first real payment of 97.00 stored (a price, so a real payment).
+  // the rule's "no real payment" answer (no code, no price, no membership), the owner's applicant who "never paid"; its
+  // unpaid answer since the owner's answers of the same day (no paid course plan and payment that went through).
+  // C8: the same with a first real payment of 97.00 stored (a price, so a real payment the rule let in).
   for (const [id, done] of [['s-c1', 61], ['s-c2', 61], ['s-c3', 61], ['s-c4', 41], ['s-c5', 61], ['s-c6', 61], ['s-c7', 61], ['s-c8', 61]]) {
     // C7 and C8 have no membership on file, as a student who never had one (so their row counts, storedRowApplies).
     // A first payment on 15 October: its 14 days end on the 29th, so the window has the 80%.
@@ -783,7 +785,7 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
   const c1 = request(C.view, 'r-c1')
   ok(!c1.verdict.ok && c1.verdict.reason === 'has-discount' && c1.verdict.text === 'This student already has a discount on their membership (evolve10).' && !c1.verdict.oldCourse,
      'C1: every video done, evolve10 on the membership: no, in the approve route\'s own words', show(c1.verdict))
-  ok(show(c1.coupon) === show({ code: 'evolve10', promoCodeId: 'promo_devEvolve', discounted: true, noRealPayment: false, ours: false, renewalPrice: 87.3, planRenewalPrice: 97, checkedAt: '2026-10-21T06:40:00.000Z' }),
+  ok(show(c1.coupon) === show({ code: 'evolve10', promoCodeId: 'promo_devEvolve', discounted: true, unpaid: false, ours: false, renewalPrice: 87.3, planRenewalPrice: 97, checkedAt: '2026-10-21T06:40:00.000Z' }),
      'C1: the coupon on the row, its code\'s id, not the team\'s own code, its prices as numbers (Postgres numeric reaches the route as a string)', show(c1.coupon))
   ok(approve(C.per.get('s-c1'), new Date(WED), c1).said.ok, 'C1: (the rule alone would have said yes: the coupon is what refuses)')
   ok(request(C.view, 'r-c2').verdict.ok && request(C.view, 'r-c2').coupon === null, 'C2: a row read from another membership says nothing: the rule\'s yes, no coupon')
@@ -796,14 +798,14 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
   ok(request(C.view, 'r-c6').verdict.text === couponApprovalRefusal('promo_devYear10') && request(C.view, 'r-c6').verdict.text.endsWith('(promo_devYear10).'),
      'C6: no name from Whop: the verdict names the code\'s id')
   const c7 = request(C.view, 'r-c7')
-  ok(!c7.verdict.ok && c7.verdict.reason === 'no-real-payment' && c7.verdict.text === 'Whop shows no real payment from this student, and the 30% needs one.'
-       && c7.verdict.text === VERDICT_TEXT.noRealPayment && c7.coupon?.noRealPayment === true && c7.coupon?.discounted === false
+  ok(!c7.verdict.ok && c7.verdict.reason === 'unpaid' && c7.verdict.text === 'The 30% needs a paid course plan and a payment that went through, and Whop doesn\'t show both for this student.'
+       && c7.verdict.text === VERDICT_TEXT.unpaid && c7.coupon?.unpaid === true && c7.coupon?.discounted === false
        && c7.facts.videosDone === 61 && c7.facts.window === 'own' && anywaySkip(c7.verdict, null) === 'rule'
        && show(videoLine(c7, c7.verdict)) === show(['61 of 61 videos', '49 needed for 80%']),
-     'C7: every video done, a first_paid_at on file, the stored row saying Whop shows no real payment: the verdict says so (the approve route refuses it), the count still on the line, Approve anyway skipping it as it skips the rule', show({ verdict: c7.verdict, coupon: c7.coupon }))
-  ok(approve(C.per.get('s-c7'), new Date(WED), c7).said.ok, 'C7: (the rule alone would have said yes: Whop showing no real payment is what refuses)')
+     'C7: every video done, a first_paid_at on file, the stored row saying the student is unpaid: the verdict says so in the page\'s own words, "The 30% needs a paid course plan and a payment that went through, and Whop doesn\'t show both for this student." (the approve route refuses it), the count still on the line, Approve anyway skipping it as it skips the rule (it said "Whop shows no real payment" until the owner\'s answers of 2026-10-26)', show({ verdict: c7.verdict, coupon: c7.coupon }))
+  ok(approve(C.per.get('s-c7'), new Date(WED), c7).said.ok, 'C7: (the rule alone would have said yes: the unpaid row is what refuses)')
   const c8 = request(C.view, 'r-c8')
-  ok(c8.verdict.ok && c8.coupon?.noRealPayment === false && c8.coupon?.discounted === false,
+  ok(c8.verdict.ok && c8.coupon?.unpaid === false && c8.coupon?.discounted === false,
      'C8: the same row with a 97.00 first payment stored: a real payment, the rule\'s yes', show({ verdict: c8.verdict, coupon: c8.coupon }))
   ok(couponOf(undefined, { whop_membership_id: 'mem_x' }) === null && couponOf(stored('s'), { whop_membership_id: 'mem_devOther' }) === null
        && couponOf(stored('s'), { whop_membership_id: null })?.discounted === true && couponOf(stored('s'), { whop_membership_id: 'pay_devX' })?.code === 'evolve10',

@@ -22,7 +22,11 @@
  * one made on the old dashboard still does, unless it was rejected, for a
  * student who first paid from 1 October until the launch (requestCounts).
  * A student whose Whop membership already has a discount on its next renewal
- * cannot earn it (admin rebuild 2, D5: membershipDiscounted, "has-discount").
+ * cannot earn it (admin rebuild 2, D5: membershipDiscounted, "has-discount"),
+ * and since 2026-10-26 neither can one for whom Whop does not show both a
+ * paid course plan and a course payment that went through (the owner: "If
+ * they don't have a payment and a paid plan - no applying to 30% off. Can't
+ * even give it to them so there's no point."; membershipUnpaid, "unpaid").
  *
  * "The videos up to the checkpoint" are the counting watch lessons, in course
  * order, up to and including the gate lesson (`is_gate`), that have a video.
@@ -171,6 +175,21 @@ export const DISCOUNT_SHARED_DEADLINE = "2026-10-23T21:59:59.999Z";
 export const MEMBERSHIP_DISCOUNT_LINE =
   "You can't apply for this discount because you already have a discount applied to your account.";
 
+/**
+ * What a student reads when Whop does not show both a paid course plan and a
+ * course payment that went through (the owner, 2026-10-26, his reason being
+ * "Can't even give it to them so there's no point": the 30% comes off a paid
+ * plan's next renewal), one true sentence for every case: a payment for
+ * another product alone, a free plan, a trial with no charge, a past_due
+ * membership whose only charge failed, a full refund, no course membership.
+ * The map's panel says it with no Apply (DiscountInput.membershipUnpaid,
+ * "unpaid"), and both request routes refuse with it (discount-server.ts
+ * unpaidRefusal). The coupon check decides it (src/lib/membership-discount.ts,
+ * THE PAID PLAN AND THE PAYMENT). An empty first_paid_at keeps its own
+ * sentence ("no-payment").
+ */
+export const PAID_PLAN_LINE = `The ${DISCOUNT_PERCENT}% needs a paid course plan and a payment that went through.`;
+
 const DAY_MS = 86_400_000;
 
 /**
@@ -203,7 +222,9 @@ export type DiscountState =
    * reach. "before-launch" is a first payment before DISCOUNT_ELIGIBLE_FROM
    * (1 October); the name is from when the launch was the cutoff.
    * "has-discount": the student's Whop membership already has a discount on
-   * its next renewal (DiscountInput.membershipDiscounted, D5).
+   * its next renewal (DiscountInput.membershipDiscounted, D5). "unpaid": Whop
+   * does not show both a paid course plan and a course payment that went
+   * through (DiscountInput.membershipUnpaid, 2026-10-26).
    *
    * The counts (since the 80% rule, 2026-10-26): `lessonsTotal` is the videos
    * up to the checkpoint, `lessonsNeeded` what the window asks of them
@@ -213,7 +234,7 @@ export type DiscountState =
    * lessonsDone, never below 0). Until then `lessonsLeft` was every video not
    * watched.
    */
-  | { kind: "not-eligible"; reason: "no-payment" | "before-launch" | "no-gate" | "has-discount" }
+  | { kind: "not-eligible"; reason: "no-payment" | "before-launch" | "no-gate" | "has-discount" | "unpaid" }
   | { kind: "expired"; endsAt: string; window: DiscountWindow; lessonsLeft: number }
   | {
       kind: "locked";
@@ -272,6 +293,15 @@ export interface DiscountInput {
    * already made still decides, and a closed window keeps its own words.
    */
   membershipDiscounted?: boolean;
+  /**
+   * Whop does not show both a paid course plan and a course payment that went
+   * through, as stored in student_membership_discounts (the coupon check's
+   * unpaid row, membership-discount.ts rowShowsUnpaid; /api/student/data
+   * carries it to the map, 2026-10-26). Left out or false: nothing stored
+   * tells, so the map offers what the rule says and the server decides live.
+   * It closes the offer as membershipDiscounted does, right after it.
+   */
+  membershipUnpaid?: boolean;
 }
 
 /** The gate lesson's id, or null when the catalog has none (the offer is then closed). */
@@ -396,6 +426,8 @@ export function discountState(input: DiscountInput): DiscountState {
   if ("closed" in open) return { kind: "not-eligible", reason: open.closed };
   // A discount already on the next renewal: no 30% on top, however many videos are done (D5).
   if (input.membershipDiscounted === true) return { kind: "not-eligible", reason: "has-discount" };
+  // No paid course plan and payment that went through (the owner, 2026-10-26): nothing to take the 30% off.
+  if (input.membershipUnpaid === true) return { kind: "not-eligible", reason: "unpaid" };
   if (!gateLessonId(lessons)) return { kind: "not-eligible", reason: "no-gate" };
 
   const required = requiredLessons(lessons);

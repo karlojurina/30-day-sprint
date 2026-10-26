@@ -180,9 +180,10 @@ function tab(source, routes, { answer = null, teamMember = { id: 'team-1' } } = 
  * Since T-122's fourth fix round a check with no answer refuses the normal
  * Approve, so without the row every Approve below would be that 503. Since
  * its fifth the row carries the rule's stamp: `source` with the rule's
- * version, and `source_checked_at` its checked_at. Since 2026-10-26 it holds
- * the first real payment's price (97.00): a row with no code and no price is
- * the rule's "no real payment" answer, which refuses the normal Approve.
+ * version, and `source_checked_at` its checked_at; the version r6 since the
+ * owner's paid plan and payment (2026-10-26). Since 2026-10-26 it holds the
+ * first real payment's price (97.00): a row with no code and no price is the
+ * rule's unpaid answer, which refuses the normal Approve.
  */
 function freshDb(requests) {
   const db = new FakeDb({
@@ -197,7 +198,7 @@ function freshDb(requests) {
     student_membership_discounts: [{
       student_id: 'a1b2c3d4-0000-4000-8000-000000000001', whop_membership_id: null, promo_code_id: null, promo_code: null,
       renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-05T09:40:00.000Z',
-      source: 'r5-payment', source_checked_at: '2026-10-05T09:40:00.000Z',
+      source: 'r6-payment', source_checked_at: '2026-10-05T09:40:00.000Z',
     }],
   })
   installDb(db)

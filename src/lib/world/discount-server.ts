@@ -24,10 +24,12 @@
  *   membershipUncheckedRefusal
  *                          the request routes' refusal when that check could
  *                          not run (the owner's review, 2026-10-21)
- *   noRealPaymentRefusal, NO_REAL_PAYMENT_APPROVAL
- *                          Whop shows no real payment from the student (the
- *                          coupon check's noRealPayment, 2026-10-26): the
- *                          request routes' refusal and the approve route's
+ *   unpaidRefusal, UNPAID_APPROVAL
+ *                          Whop does not show both a paid course plan and a
+ *                          course payment that went through (the coupon
+ *                          check's unpaid, the owner's rule of 2026-10-26):
+ *                          the request routes' refusal and the approve
+ *                          route's
  *
  * Everything fails closed. A read that errors, or comes back empty where a
  * row must exist, means no request and no approval: a believable "you're not
@@ -47,6 +49,7 @@ import {
   DISCOUNT_VIDEO_SHARE,
   DISCOUNT_WINDOW_DAYS,
   MEMBERSHIP_DISCOUNT_LINE,
+  PAID_PLAN_LINE,
   closedBeforeEighty,
   discountEndsAt,
   discountState,
@@ -314,6 +317,7 @@ export function discountRefusalMessage(state: DiscountState): string {
       if (state.reason === "before-launch") return `Your 2 weeks for the ${DISCOUNT_PERCENT}% have passed.`;
       if (state.reason === "no-payment") return "We can't see your first payment yet. Tell the team and they'll sort it out.";
       if (state.reason === "has-discount") return MEMBERSHIP_DISCOUNT_LINE;
+      if (state.reason === "unpaid") return PAID_PLAN_LINE;
       return "The discount can't be applied for right now. Contact support and we'll sort it out.";
     case "pending":
       return ALREADY_APPLIED;
@@ -415,19 +419,26 @@ export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: 
 
 /**
  * Both request routes on the new course, once decideDiscountRequest has
- * granted and the coupon check found no coupon: Whop shows no real payment
- * from the student (checkMembershipDiscount's noRealPayment: no course
- * membership renewing above 0 answered and no real course payment, Whop's
- * answer now or the one this rule stored). The owner, 2026-10-26, of an applicant: "by his
- * username, he never had a membership. I see one payment, but it has failed
- * ... he watched the course even though he never paid." Such a student can
- * still have a first_paid_at, a date written before the first-paid fix from
- * a membership's creation, which the repair never empties, so the rule's own
- * "no-payment" never caught them. Nothing is written, and the student reads
- * the map's sentence for no first payment on record.
+ * granted and the coupon check found no coupon: Whop does not show both a
+ * real course payment and a course membership on a paid plan
+ * (checkMembershipDiscount's unpaid, Whop's answer now or the one this rule
+ * stored; membership-discount.ts, THE PAID PLAN AND THE PAYMENT). The owner,
+ * 2026-10-26: "They shouldn't be able to apply. If they don't have a payment
+ * and a paid plan - no applying to 30% off. Can't even give it to them so
+ * there's no point." Such a student can still have a first_paid_at: one
+ * written before the first-paid fix from a membership's creation (the repair
+ * never empties it), one a payment for another product set (ETfB), or one a
+ * payment refunded since set, so the rule's own "no-payment" never caught
+ * them. Nothing is written, and the student reads the map's sentence for it,
+ * one sentence for every case ("The 30% needs a paid course plan and a payment
+ * that went through.", state not-eligible). Until that day the state was
+ * "no-payment" and the sentence "We can't see your first payment yet. Tell
+ * the team and they'll sort it out.", which was not true for a student who
+ * had paid for another product; that sentence stays for an empty
+ * first_paid_at alone.
  */
-export function noRealPaymentRefusal(): Extract<RequestDecision, { grant: false }> {
-  const state: DiscountState = { kind: "not-eligible", reason: "no-payment" };
+export function unpaidRefusal(): Extract<RequestDecision, { grant: false }> {
+  const state: DiscountState = { kind: "not-eligible", reason: "unpaid" };
   return { grant: false, status: 400, state: state.kind, error: discountRefusalMessage(state) };
 }
 
@@ -435,9 +446,11 @@ export function noRealPaymentRefusal(): Extract<RequestDecision, { grant: false 
  * The approve route's refusal of the normal Approve for that student, code
  * "rule", so a founder's or an admin's Approve anyway still passes it (the
  * route's `override`). The 30% page shows its own words for it and the row's
- * verdict says why (thirty-view.ts, "no-real-payment").
+ * verdict says why (thirty-view.ts, "unpaid"). It said "Whop shows no real
+ * payment from this student" until the owner's answers of 2026-10-26.
  */
-export const NO_REAL_PAYMENT_APPROVAL = "Cannot approve: Whop shows no real payment from this student, and the 30% needs one.";
+export const UNPAID_APPROVAL =
+  "Cannot approve: the 30% needs a paid course plan and a payment that went through, and Whop doesn't show both for this student.";
 
 /**
  * The approve route's refusal for a student whose membership already has a

@@ -42,8 +42,11 @@
 //                      first_paid_at filled (from before the first-paid fix)
 //                      while Whop shows no real payment, the coupon check's
 //                      stored row saying so (membership-discount.test.mjs runs
-//                      Whop's live answer): the same refusals, and the 30%
-//                      page's verdict says it
+//                      Whop's live answer): refused too, nothing written,
+//                      since the owner's answers of the same day in the one
+//                      sentence for no paid course plan and payment ("The 30%
+//                      needs a paid course plan and a payment that went
+//                      through."), and the 30% page's verdict says it
 //   7. the map's words discountRule and checkpointCounts: the one line, "49 of
 //                      61 needed", Apply's reason; no em dash, no "unlock"; a
 //                      window that closed before the 80% rule reads the rule it
@@ -73,7 +76,7 @@ import {
   DISCOUNT_EIGHTY_FROM, DISCOUNT_SHARED_DEADLINE, DISCOUNT_VIDEO_SHARE, DISCOUNT_WINDOW_DAYS, discountState, discountWindow,
   requiredLessons, videosNeeded, videosNeededFor,
 } from './_gen/discount.ts'
-import { NO_REAL_PAYMENT_APPROVAL, approvalVerdict, decideDiscountRequest, discountRefusalMessage, toDiscountLessons, videoDoneIds } from './_gen/discount-server.ts'
+import { UNPAID_APPROVAL, approvalVerdict, decideDiscountRequest, discountRefusalMessage, toDiscountLessons, videoDoneIds } from './_gen/discount-server.ts'
 import { checkpointCounts, checkpointView, discountRule, expiredRuleLine, liveRuleLine } from './_gen/checkpointView.ts'
 import {
   NO_DISCORD_ID, NO_DISCORD_LINE, NO_USERNAME, USERNAME_NOTE, USERNAME_TIP, VERDICT_TEXT, anywaySkip, buildThirtyView, judgeRequest, studentCopies, videoLine,
@@ -359,9 +362,10 @@ console.log('\n=== 5. The real routes: request, submit-feedback and approve agre
  * `doneAt`, their Whop membership checked with no coupon by the rule's own
  * stamp (with no Whop key here, the stored row answers), and `requests`.
  * `whop` "no-payment" (the review of 2026-10-26): no membership on file, and
- * the stored row is the check's "no real payment" answer, no code and no
- * price (the owner's applicant: "he never had a membership. I see one
- * payment, but it has failed").
+ * the stored row is the check's unpaid answer, no code and no price (the
+ * owner's applicant: "he never had a membership. I see one payment, but it
+ * has failed"). Both rows carry the stamp of the rule since the owner's paid
+ * plan and payment (2026-10-26, r6): an r5 row is an older rule's.
  */
 /** The course switch (v104) as admin_config holds it: a request made before it is judged by the videos loaded by then. */
 const SWITCH = '2026-10-17T10:00:00.000Z'
@@ -377,12 +381,12 @@ function freshDb(paid, done = [], doneAt = WATCHED, requests = [], whop = 'clean
       ? {
           student_id: 's1', whop_membership_id: null, promo_code_id: null, promo_code: null,
           renewal_price: null, plan_renewal_price: null, discounted: false, checked_at: '2026-10-14T08:00:00.000Z',
-          source: 'r5-payment', source_checked_at: '2026-10-14T08:00:00.000Z',
+          source: 'r6-payment', source_checked_at: '2026-10-14T08:00:00.000Z',
         }
       : {
           student_id: 's1', whop_membership_id: 'mem_devEighty', promo_code_id: null, promo_code: null,
           renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-14T08:00:00.000Z',
-          source: 'r5-membership', source_checked_at: '2026-10-14T08:00:00.000Z',
+          source: 'r6-membership', source_checked_at: '2026-10-14T08:00:00.000Z',
         }],
     lessons: LESSONS,
     lesson_videos: Object.keys(lengths).map((lesson_id) => ({ lesson_id, created_at: '2026-10-12T00:00:00.000Z' })),
@@ -543,21 +547,26 @@ console.log('\n=== 6. No 30% without a real payment (first_paid_at empty) ===')
   // The gap the review of 2026-10-26 closed: first_paid_at filled (a date written before the first-paid fix from a
   // membership's creation, which the repair never empties) while Whop shows no real payment. The rule alone says
   // ready, so until the review both request routes wrote the request and the normal Approve approved it at 49 of 61.
+  // Since the owner's answers of the same day the refusal says the paid plan and the payment, one sentence for every
+  // unpaid student; the empty first_paid_at above keeps its own.
+  const unpaidWords = discountRefusalMessage({ kind: 'not-eligible', reason: 'unpaid' })
+  ok(unpaidWords === 'The 30% needs a paid course plan and a payment that went through.' && unpaidWords !== words && !BANNED.test(unpaidWords),
+     'the unpaid student\'s sentence, plain, and not the one for an empty first_paid_at', unpaidWords)
   for (const [way, send] of [['the plain request', apply], ['the questions form', submit]]) {
     for (const n of [49, 61]) {
       const db = freshDb(PAID, REQUIRED.slice(0, n), WATCHED, [], 'no-payment')
       const r = await at(SENT, send)
-      ok(r.status === 400 && r.body.state === 'not-eligible' && r.body.error === words && db.rows('discount_requests').length === 0
+      ok(r.status === 400 && r.body.state === 'not-eligible' && r.body.error === unpaidWords && db.rows('discount_requests').length === 0
            && db.calls('submit_discount_with_feedback', 'rpc').length === 0 && !steps.some((s) => s.step === 'discount-requested'),
-         `a first payment on file but Whop showing none, ${n} of 61 watched, ${way}: refused in the same sentence, nothing written, no team task (it went in until the review)`, show(r.body))
+         `a first payment on file but Whop showing none, ${n} of 61 watched, ${way}: refused in the unpaid sentence, nothing written, no team task (it went in until the review)`, show(r.body))
     }
   }
   const gap = () => freshDb(PAID, REQUIRED.slice(0, 49), WATCHED, [{ id: 'gp', status: 'pending', created_at: SENT }], 'no-payment')
   {
     const db = gap()
     const r = await at('2026-10-23T09:00:00.000Z', () => press(db, 'gp', 'csm'))
-    ok(r.status === 400 && r.body.code === 'rule' && r.body.error === NO_REAL_PAYMENT_APPROVAL
-         && r.body.error === 'Cannot approve: Whop shows no real payment from this student, and the 30% needs one.' && r.codes === 0 && r.row.status === 'pending',
+    ok(r.status === 400 && r.body.code === 'rule' && r.body.error === UNPAID_APPROVAL
+         && r.body.error === 'Cannot approve: the 30% needs a paid course plan and a payment that went through, and Whop doesn\'t show both for this student.' && r.codes === 0 && r.row.status === 'pending',
        'its request (made before the review): the normal Approve refused, code "rule", the team\'s sentence, no code, still pending (approved at 49 until the review)', show(r.body))
   }
   for (const role of ['admin', 'founder']) {
@@ -575,11 +584,11 @@ console.log('\n=== 6. No 30% without a real payment (first_paid_at empty) ===')
     const db = gap()
     const load = await loadThirtyData(fakeClient(db))
     const row = load.ok ? buildThirtyView(load.data, new RealDate('2026-10-23T09:00:00.000Z'), null).requests.find((x) => x.id === 'gp') : null
-    ok(row && !row.verdict.ok && row.verdict.reason === 'no-real-payment' && row.verdict.text === 'Whop shows no real payment from this student, and the 30% needs one.'
-         && row.verdict.text === VERDICT_TEXT.noRealPayment && anywaySkip(row.verdict, null) === 'rule' && row.coupon?.noRealPayment === true
+    ok(row && !row.verdict.ok && row.verdict.reason === 'unpaid' && row.verdict.text === 'The 30% needs a paid course plan and a payment that went through, and Whop doesn\'t show both for this student.'
+         && row.verdict.text === VERDICT_TEXT.unpaid && anywaySkip(row.verdict, null) === 'rule' && row.coupon?.unpaid === true
          && show(videoLine(row, row.verdict)) === show(['49 of 61 videos', '49 needed for 80%']),
-       'the 30% page: "Whop shows no real payment from this student, and the 30% needs one.", the count beside it, no Approve, Approve anyway skips it', show(row?.verdict))
-    ok(!BANNED.test(NO_REAL_PAYMENT_APPROVAL + VERDICT_TEXT.noRealPayment), 'its words plain: no em dash, no "unlock"')
+       'the 30% page: "The 30% needs a paid course plan and a payment that went through, and Whop doesn\'t show both for this student.", the count beside it, no Approve, Approve anyway skips it', show(row?.verdict))
+    ok(!BANNED.test(UNPAID_APPROVAL + VERDICT_TEXT.unpaid), 'its words plain: no em dash, no "unlock"')
   }
 }
 

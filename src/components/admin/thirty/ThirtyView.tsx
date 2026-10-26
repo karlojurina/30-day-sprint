@@ -73,13 +73,17 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * their place, since a phone shows no tip (thirty-view.ts studentCopies).
  * The code's button says "Copy code" since then (it said "Copy").
  *
- * A row whose stored coupon row says Whop shows no real payment from the
- * student gets that as its verdict, with no Approve (the review of
- * 2026-10-26; Approve anyway skips it as it skips the rule) and with "Check
- * Whop again", as the coupon's row has it. A plain Approve the route refuses
- * for it shows the page's own sentence, and the list read again shows the
- * verdict, the route having stored what Whop said (naming the membership on
- * file, so it counts for it: membership-discount.ts).
+ * A row whose stored coupon row says Whop does not show both a paid course
+ * plan and a course payment that went through for the student (the owner's
+ * rule of 2026-10-26; Whop showing no real payment from the review of that
+ * day until his answers) gets that as its verdict in the page's own words
+ * ("The 30% needs a paid course plan and a payment that went through, and Whop
+ * doesn't show both for this student."), with no Approve (Approve anyway skips
+ * it as it skips the rule) and with "Check Whop again", as the coupon's row
+ * has it. A plain Approve the route refuses for it shows the page's own
+ * sentence, and the list read again shows the verdict, the route having
+ * stored what Whop said (naming the membership on file, so it counts for it:
+ * membership-discount.ts).
  *
  * APPROVE ANYWAY (the owner's review, 2026-10-21: approving past any check).
  * A founder or an admin (`canApproveAnyway`; the
@@ -395,10 +399,12 @@ export function ThirtyView({
 
   /**
    * Check Whop again, on a row the stored coupon refuses, and since the review
-   * of 2026-10-26 on one whose stored row says Whop shows no real payment:
-   * Whop now for that student, stored by the route, then the list read again,
-   * which judges the row by what was stored. Nothing is decided, so the row is
-   * not locked. Whop giving no answer is the route's sentence on the row.
+   * of 2026-10-26 on one whose stored row says the student is unpaid (since
+   * the owner's answers of that day: no paid course plan and payment that
+   * went through; no real payment until then): Whop now for that student,
+   * stored by the route, then the list read again, which judges the row by
+   * what was stored. Nothing is decided, so the row is not locked. Whop giving
+   * no answer is the route's sentence on the row.
    */
   async function checkCoupon(row: ThirtyRequestRow): RowResult {
     const r = await transport.checkCoupon(row.id);
@@ -410,13 +416,13 @@ export function ThirtyView({
       tone: "success",
       text: r.data.discounted
         ? `Whop ${wasCoupon ? "still shows" : "shows"} a discount on ${name}'s membership${code}.`
-        : r.data.noRealPayment
+        : r.data.unpaid
           ? wasCoupon
-            ? `Whop shows no discount on ${name}'s membership now, and no real payment from them.`
-            : `Whop still shows no real payment from ${name}.`
+            ? `Whop shows no discount on ${name}'s membership now, and doesn't show both a paid course plan and a payment that went through.`
+            : `Whop still doesn't show both a paid course plan and a payment that went through for ${name}.`
           : wasCoupon
             ? `Whop shows no discount on ${name}'s membership now. The 30% rule decides this request again.`
-            : `Whop shows a real payment from ${name} now. The 30% rule decides this request again.`,
+            : `Whop shows a paid course plan and a payment that went through for ${name} now. The 30% rule decides this request again.`,
     });
     await reload();
     return null;
@@ -801,8 +807,8 @@ function PendingRow({
   };
   // D5: no Approve beside the coupon's verdict. Approve anyway passes it (the owner's review), naming it.
   const coupon = verdict.reason === "has-discount";
-  // Check Whop again on the coupon's row and, since the review of 2026-10-26, on one Whop showed no real payment for.
-  const recheck = coupon || verdict.reason === "no-real-payment";
+  // Check Whop again on the coupon's row and, since the review of 2026-10-26, on an unpaid one.
+  const recheck = coupon || verdict.reason === "unpaid";
   const skip = anywaySkip(verdict, refusal);
   const canOverride = canApproveAnyway && skip !== null;
   const [busy, setBusy] = useState<null | "approve" | "override" | "reject" | "check">(null);
@@ -828,7 +834,7 @@ function PendingRow({
 
   const actions = (
     <>
-      {/* Small links, as tall as Reject: "Check Whop again" on the coupon's row and on the no-real-payment one, then,
+      {/* Small links, as tall as Reject: "Check Whop again" on the coupon's row and on the unpaid one, then,
           for a founder or an admin, "Approve anyway" wherever a check refuses (the coupon's row too). Approve is on
           where the verdict says yes and no Approve anyway stands in its place. */}
       {recheck && (

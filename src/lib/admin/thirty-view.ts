@@ -42,10 +42,13 @@
  * and their Discord username only once the 2-hour sync has written it since,
  * so the page never calls it Discord (the review of the same day).
  *
- * No real payment (the same review): a pending row whose stored coupon row
- * says Whop shows no real payment from the student (rowShowsNoRealPayment)
- * gets that as its verdict, after the coupon and before the rule, as the
- * approve route refuses it (NO_REAL_PAYMENT_APPROVAL).
+ * Unpaid (the owner's rule of 2026-10-26: "If they don't have a payment and a
+ * paid plan - no applying to 30% off"): a pending row whose stored coupon row
+ * says Whop does not show both a paid course plan and a course payment that
+ * went through (rowShowsUnpaid) gets that as its verdict, in the page's own
+ * words (VERDICT_TEXT.unpaid), after the coupon and before the rule, as the
+ * approve route refuses it (UNPAID_APPROVAL). It was the no-real-payment
+ * verdict from the review of the same day until the owner's answers.
  *
  * The coupon of a decided row (the render review's fix round): once the team
  * adds the 30% code in Whop, Whop shows it on the membership as a discount on
@@ -85,7 +88,7 @@ import {
   videoDoneIds,
 } from "@/lib/world/discount-server";
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "@/lib/world/discount-server";
-import { isMembershipId, rowShowsNoRealPayment, storedRowApplies } from "@/lib/membership-discount";
+import { isMembershipId, rowShowsUnpaid, storedRowApplies } from "@/lib/membership-discount";
 import { dayLabel } from "./croatia-dates";
 import { bareUsername } from "./people-common";
 import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data";
@@ -151,12 +154,14 @@ export interface Facts {
  * Why a request may not be approved. ApprovalRefusal's reasons are the
  * rule's; "has-discount": a discount is already on the student's next Whop
  * renewal (D5; only a founder's or an admin's Approve anyway passes it);
- * "no-real-payment": the stored coupon row says Whop shows no real payment
- * from the student (2026-10-26; Approve anyway passes it, as it passes the
- * rule); "read-failed": the student's progress could not
+ * "unpaid": the stored coupon row says Whop does not show both a paid course
+ * plan and a course payment that went through (the owner's rule of
+ * 2026-10-26; "no-real-payment" from the review of that day until his
+ * answers; Approve anyway passes it, as it passes the rule); "read-failed":
+ * the student's progress could not
  * be read; "unknown": the rule gave no reason (it cannot, today).
  */
-export type VerdictReason = ApprovalRefusal | "has-discount" | "no-real-payment" | "read-failed" | "unknown";
+export type VerdictReason = ApprovalRefusal | "has-discount" | "unpaid" | "read-failed" | "unknown";
 
 export interface Verdict {
   /** Approve would approve it now. */
@@ -181,11 +186,12 @@ export interface Coupon {
   /** A discount is on the next renewal: no 30% (D5). */
   discounted: boolean;
   /**
-   * No coupon, and Whop showed no real payment from the student
-   * (membership-discount.ts rowShowsNoRealPayment, 2026-10-26): no 30%
-   * either, unless Approve anyway skips it.
+   * No coupon, and Whop showed no paid course plan with a course payment
+   * that went through for the student (membership-discount.ts rowShowsUnpaid,
+   * the owner's rule of 2026-10-26): no 30% either, unless Approve anyway
+   * skips it.
    */
-  noRealPayment: boolean;
+  unpaid: boolean;
   /**
    * The code is the request's own 30% code (isThirtyCode): the team added it
    * in Whop. An Approved or Code Applied row never warns about it. Always
@@ -279,8 +285,9 @@ export const VERDICT_TEXT = {
   lockedClosedEvery: "Not every video up to the checkpoint was watched by the deadline.",
   beforeLaunch: `The first payment was before ${ELIGIBLE_DAY}, so this student cannot earn the 30%.`,
   noPayment: "There is no real payment on file for this student, and the 30% needs one.",
-  // The stored coupon row: Whop shows no real payment, though first_paid_at may be filled (the review of 2026-10-26).
-  noRealPayment: "Whop shows no real payment from this student, and the 30% needs one.",
+  // The stored coupon row: no paid course plan and payment that went through, though first_paid_at may be filled (the
+  // owner's rule of 2026-10-26; "Whop shows no real payment from this student, and the 30% needs one." until then).
+  unpaid: "The 30% needs a paid course plan and a payment that went through, and Whop doesn't show both for this student.",
   noGate: "The course has no checkpoint lesson with a video, so nobody can earn the 30% right now.",
   oldCourse: "Asked on the old course, before the switch.",
   oldCourseNoGate:
@@ -401,7 +408,7 @@ export function couponOf(row: ThirtyCouponRow | undefined, student: Pick<ThirtyS
     code: row.promo_code ?? row.promo_code_id ?? null,
     promoCodeId: row.promo_code_id ?? null,
     discounted: row.discounted === true,
-    noRealPayment: rowShowsNoRealPayment(row),
+    unpaid: rowShowsUnpaid(row),
     ours: false,
     renewalPrice: priceOf(row.renewal_price),
     planRenewalPrice: priceOf(row.plan_renewal_price),
@@ -644,13 +651,14 @@ export function couponVerdict(coupon: Coupon): Verdict {
 }
 
 /**
- * The verdict for a student whose stored coupon row says Whop shows no real
- * payment from them (Coupon.noRealPayment, 2026-10-26): the approve route
- * refuses their normal Approve (NO_REAL_PAYMENT_APPROVAL, code "rule"), and
- * Approve anyway skips it as it skips the rule (anywaySkip "rule").
+ * The verdict for a student whose stored coupon row says Whop does not show
+ * both a paid course plan and a course payment that went through for them
+ * (Coupon.unpaid, the owner's rule of 2026-10-26): the approve route refuses
+ * their normal Approve (UNPAID_APPROVAL, code "rule"), and Approve anyway
+ * skips it as it skips the rule (anywaySkip "rule").
  */
-export function noRealPaymentVerdict(): Verdict {
-  return { ok: false, reason: "no-real-payment", text: VERDICT_TEXT.noRealPayment, oldCourse: false };
+export function unpaidVerdict(): Verdict {
+  return { ok: false, reason: "unpaid", text: VERDICT_TEXT.unpaid, oldCourse: false };
 }
 
 const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -709,9 +717,9 @@ export function buildThirtyView(
       if (r.status === "pending") {
         const judged = judgeRequest(data.reads.get(s.id)!, now, r, resetAt);
         facts = judged.facts;
-        // D5 first: a discount on the next renewal decides, whatever the rule says. Then Whop showing no real
-        // payment (2026-10-26), as the approve route refuses it before the rule.
-        verdict = coupon?.discounted ? couponVerdict(coupon) : coupon?.noRealPayment ? noRealPaymentVerdict() : judged.verdict;
+        // D5 first: a discount on the next renewal decides, whatever the rule says. Then no paid course plan and
+        // payment that went through (2026-10-26), as the approve route refuses it before the rule.
+        verdict = coupon?.discounted ? couponVerdict(coupon) : coupon?.unpaid ? unpaidVerdict() : judged.verdict;
       }
       return {
         id: r.id,

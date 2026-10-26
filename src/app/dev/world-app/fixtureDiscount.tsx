@@ -92,6 +92,14 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            discount because you already have a discount
  *                            applied to your account." with no Apply, the
  *                            word "Closed", no chip in the header
+ *   ?discount=unpaid         as ready (first payment 5 days ago, every video
+ *                            watched), and the stored coupon answer says Whop
+ *                            does not show both a paid course plan and a
+ *                            payment that went through (the owner's rule of
+ *                            2026-10-26): the panel says "The 30% needs a
+ *                            paid course plan and a payment that went
+ *                            through." with no Apply, the word "Closed", no
+ *                            chip in the header
  *   no ?discount             as locked: a first payment 3 days ago, videos as
  *                            ?p= has them, so the 30% shows with no parameter
  *                            (2026-10-16, Lovro's second Loom: he reviewed
@@ -139,11 +147,12 @@ export type DiscountPreset =
   | "october-old-course-pending"
   | "october-old-course-approved"
   | "no-payment"
-  | "has-discount";
+  | "has-discount"
+  | "unpaid";
 const PRESETS: readonly DiscountPreset[] = [
   "locked", "ready", "almost", "eighty", "pending", "approved", "applied", "applied-after-renewal", "rejected", "expired",
   "before-launch", "september", "october", "october-expired", "october-old-course",
-  "october-old-course-pending", "october-old-course-approved", "no-payment", "has-discount",
+  "october-old-course-pending", "october-old-course-approved", "no-payment", "has-discount", "unpaid",
 ];
 /** The presets with an application in, and its status. Their student has watched every video the offer asks for. */
 const APPLIED: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
@@ -242,16 +251,18 @@ export function discountPresetOf(search: string | null): DiscountPreset | null {
 }
 
 /**
- * The videos a preset needs watched on top of ?p=: for ready and every preset
- * with an application in, every lesson the offer counts (discount.ts
- * requiredLessons), so the map's lanterns and counts agree with the panel;
+ * The videos a preset needs watched on top of ?p=: for ready, has-discount,
+ * unpaid and every preset with an application in, every lesson the offer
+ * counts (discount.ts requiredLessons), so the map's lanterns and counts agree
+ * with the panel;
  * for eighty the first videosNeeded of them in course order, the least the
  * 80% takes, and for almost one fewer.
  */
 export function discountPresetIds(search: string | null, lessons: readonly CatalogLessonLike[]): string[] {
   const preset = discountPresetOf(search);
   const edge = preset === "almost" || preset === "eighty";
-  if (preset === null || (!edge && preset !== "ready" && preset !== "applied-after-renewal" && preset !== "has-discount" && !APPLIED[preset])) return [];
+  const everyVideo = preset === "ready" || preset === "applied-after-renewal" || preset === "has-discount" || preset === "unpaid";
+  if (preset === null || (!edge && !everyVideo && !APPLIED[preset])) return [];
   const course: DiscountLesson[] = [...lessons]
     .sort((a, b) => a.sort_order - b.sort_order)
     .map((l) => ({
@@ -317,6 +328,7 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
       case "almost":
       case "eighty":
       case "has-discount":
+      case "unpaid":
         return new Date(boot - 5 * DAY_MS).toISOString();
       case "pending":
       case "approved":
@@ -379,9 +391,10 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   );
 
   const membershipDiscounted = preset === "has-discount";
+  const membershipUnpaid = preset === "unpaid";
   const value = useMemo<DiscountStandIn>(
-    () => ({ firstPaidAt, membershipDiscounted, now, requests, apply, questions, submit }),
-    [firstPaidAt, membershipDiscounted, now, requests, apply, questions, submit],
+    () => ({ firstPaidAt, membershipDiscounted, membershipUnpaid, now, requests, apply, questions, submit }),
+    [firstPaidAt, membershipDiscounted, membershipUnpaid, now, requests, apply, questions, submit],
   );
 
   useEffect(() => {

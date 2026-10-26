@@ -78,7 +78,8 @@ async function heard(fn) {
  * source: since T-122's third fix round a stored "no coupon" answers only
  * when the rule of that round wrote it (v113's source set), and since its
  * fifth only with the rule's stamp (`source` with the rule's version,
- * `source_checked_at` its checked_at).
+ * `source_checked_at` its checked_at), the version r6 since the owner's paid
+ * plan and payment (2026-10-26): the row holds a price, a real payer's.
  */
 function newCourseDb() {
   setCatalog({ v2: true, lessonsTable: 'lessons_next' })
@@ -87,7 +88,7 @@ function newCourseDb() {
     student_membership_discounts: [{
       student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null,
       renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: iso(NOW - DAY),
-      source: 'r5-membership', source_checked_at: iso(NOW - DAY),
+      source: 'r6-membership', source_checked_at: iso(NOW - DAY),
     }],
     lessons_next: [
       { id: 'a1l01', type: 'watch', sort_order: 1, duration_seconds: 300 },

@@ -284,7 +284,8 @@ console.log('\n=== Apply: the coupon check that cannot run writes nothing ===')
  * A student ready to apply on the new course, the coupon `coupon` ('clean' stored, or none), and the team's
  * questions. The clean row holds its source: since T-122's third fix round a stored "no coupon" answers only when the
  * rule of that round wrote it (v113's source set), and since its fifth only with the rule's stamp (`source` with the
- * rule's version, `source_checked_at` its checked_at).
+ * rule's version, `source_checked_at` its checked_at), the version r6 since the owner's paid plan and payment
+ * (2026-10-26).
  */
 function applyDb({ coupon = 'clean', questions = [] } = {}) {
   setCatalog({ v2: true, lessonsTable: 'lessons_next' })
@@ -302,7 +303,7 @@ function applyDb({ coupon = 'clean', questions = [] } = {}) {
     discount_requests: [],
     discount_feedback_questions: questions,
     student_membership_discounts: coupon === 'clean'
-      ? [{ student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: PAID, source: 'r5-membership', source_checked_at: PAID }]
+      ? [{ student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: PAID, source: 'r6-membership', source_checked_at: PAID }]
       : [],
   }, { 'tok-1': 'auth-1' })
   db.functions.submit_discount_with_feedback = async (args, client) => {

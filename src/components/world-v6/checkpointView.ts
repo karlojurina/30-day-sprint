@@ -31,9 +31,14 @@
  *   applied       "Yours".
  *   rejected      "Not approved".
  *   expired       "Closed": the student's deadline passed with no application.
- *   not eligible  "Closed": a first payment before 1 October, or a discount
+ *   not eligible  "Closed": a first payment before 1 October, a discount
  *                 already on the student's next Whop renewal (admin rebuild 2,
- *                 D5: "has-discount"). "Not open yet" when
+ *                 D5: "has-discount"), or no paid course plan and payment
+ *                 that went through ("unpaid", the owner's rule of
+ *                 2026-10-26: the panel says "The 30% needs a paid course
+ *                 plan and a payment that went through." with no Apply; it
+ *                 opens again once the stored answer says otherwise). "Not
+ *                 open yet" when
  *                 the course has no gate. "Ask the team" with no first payment
  *                 on record, in the open (locked) look: it may be a new student
  *                 whose payment has not reached the app, and the panel asks
@@ -259,6 +264,8 @@ export function checkpointView(state: DiscountState, now: number, place: number,
       if (state.reason === "no-payment") return noClock(lead, "Ask the team", "locked", "closed");
       // A discount already on the next renewal (D5): closed to them for good, as a first payment before 1 October.
       if (state.reason === "has-discount") return noClock(lead, "Closed", "closed", "closed");
+      // No paid course plan and payment that went through (2026-10-26): closed to them while Whop shows them so.
+      if (state.reason === "unpaid") return noClock(lead, "Closed", "closed", "closed");
       return noClock(lead, state.reason === "no-gate" ? "Not open yet" : "Closed", "closed", "closed");
   }
 }

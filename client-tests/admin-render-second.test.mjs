@@ -107,8 +107,9 @@ const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/
 // ── The 30%: Check Whop again ───────────────────────────────────────────────
 {
   // Since the owner's review (2026-10-21) a founder's or an admin's Approve anyway stands beside it (admin-owner-review.test.mjs).
-  // Since the review of 2026-10-26 it stands on the no-real-payment row too (`recheck`, the coupon's row among it).
-  ok(/const recheck = coupon \|\| verdict\.reason === "no-real-payment";/.test(pending)
+  // Since the review of 2026-10-26 it stands on the no-real-payment row too (`recheck`, the coupon's row among it), the
+  // unpaid row since the owner's answers of that day.
+  ok(/const recheck = coupon \|\| verdict\.reason === "unpaid";/.test(pending)
        && /\{recheck && \(\s*<button[\s\S]*?data-check-whop=""[\s\S]*?onCheck\(row\)[\s\S]*?\{busy === "check" \? "Checking Whop" : "Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
        && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button/.test(pending),
      'the coupon\'s row: "Check Whop again" in Approve\'s place ("Checking Whop" while Whop is asked), and still no Approve')

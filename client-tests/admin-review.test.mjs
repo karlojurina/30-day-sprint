@@ -454,9 +454,9 @@ console.log("\n=== The 30% page: every row's coupon check ===")
   // Since the render review's second round "Check Whop again" stands on the coupon's row. Since the owner's review
   // (2026-10-21) a founder's or an admin's Approve anyway stands in Approve's place wherever a check refuses, the
   // coupon's row too (admin-owner-review.test.mjs holds that round's rules). Since the review of 2026-10-26 Check Whop
-  // again stands on the no-real-payment row as well (`recheck`).
+  // again stands on the no-real-payment row as well (`recheck`), the unpaid row since the owner's answers of that day.
   ok(/disabled=\{locked \|\| \(busy !== null && busy !== "approve"\)\}/.test(pending) && !/disabled=\{!verdict\.ok/.test(pending)
-       && /const recheck = coupon \|\| verdict\.reason === "no-real-payment";/.test(pending)
+       && /const recheck = coupon \|\| verdict\.reason === "unpaid";/.test(pending)
        && /\{recheck && \(\s*<button[\s\S]*?"Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
        && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button/.test(pending),
      'Approve is on wherever it can approve, and gone beside the coupon\'s verdict')
@@ -495,8 +495,17 @@ console.log('\n=== The coupon rule: a stored id that is not a membership, and a 
     if (u.pathname === '/api/v2/memberships') return json({ data: [{ id: 'mem_devPay', user: 'user_devPay', product: 'prod_devCourse', status: 'active', valid: true }], pagination: { current_page: 1, total_page: 1 } })
     if (u.pathname === '/api/v1/memberships/mem_devPay') return json({ id: 'mem_devPay', promo_code_id: null, plan_id: 'plan_m', renewal_price: '97.00' })
     if (u.pathname === '/api/v1/plans/plan_m') return json({ id: 'plan_m', renewal_price: '97.00' })
-    // Since T-122's second fix round a membership with no discount is followed by the user's real payments: none here.
-    if (u.pathname === '/api/v1/payments') return json({ data: [], page_info: { has_next_page: false, end_cursor: null } })
+    // Since T-122's second fix round a membership with no discount is followed by the user's real payments; since the
+    // owner's paid plan and payment (2026-10-26) the student needs one beside the paid plan: the 97.00 checkout.
+    const money = (amount) => ({ amount, currency: 'usd' })
+    if (u.pathname === '/api/v1/payments') {
+      return json({
+        data: [{ id: 'pay_devPay1', status: 'paid', substatus: 'succeeded', paid_at: '2026-10-10T08:00:00.000Z', created_at: '2026-10-10T08:00:00.000Z',
+          total: money('97.00'), subtotal: money('97.00'), tax_amount: null, tax_behavior: null, refunded_amount: money('0.00'),
+          user: { id: 'user_devPay' }, product_id: 'prod_devCourse', membership_id: 'mem_devPay', promo_code_id: null }],
+        page_info: { has_next_page: false, end_cursor: null },
+      })
+    }
     return new Response('{}', { status: 404 })
   }
   const warned = []

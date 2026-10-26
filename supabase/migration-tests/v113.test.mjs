@@ -1,8 +1,9 @@
 // v113 and its undo (T-122, 2026-10-21: the coupon check answers every
 // student and records which step answered; since its fifth fix round,
 // 2026-10-22, THE RULE STAMP: the rule's version in `source`, and
-// `source_checked_at`) on a real Postgres (PGlite), in a file of its own as
-// v111.test.mjs is.
+// `source_checked_at`; since the owner's paid plan and payment, 2026-10-26,
+// the r6 values beside the r5 ones) on a real Postgres (PGlite), in a file of
+// its own as v111.test.mjs is.
 //
 //   cd supabase/migration-tests && npm install && node v113.test.mjs
 //
@@ -12,8 +13,9 @@
 // are written and read as each role; the writes of the older builds are
 // made as PostgREST makes them (an upsert setting the payload's columns
 // alone); the undo is pasted twice; then v113 once more. v113 is also pasted
-// on a database that holds an earlier copy of it, and on a database without
-// v111. Every student here is made up.
+// on a database that holds an earlier copy of it, on one that holds the copy
+// taking the r5 values alone (production's tree until the paid plan and
+// payment), and on a database without v111. Every student here is made up.
 import { PGlite } from '@electric-sql/pglite'
 import fs from 'node:fs'
 
@@ -26,6 +28,12 @@ const V113_EARLIER = `
   alter table public.student_membership_discounts add column if not exists source text;
   alter table public.student_membership_discounts add constraint student_membership_discounts_source_check
     check (source is null or source in ('membership', 'user', 'payment'));`
+// The copy of v113 in the tree production runs (cac0c07, T-122's fifth fix round): the r5 values alone.
+const V113_R5 = V113
+  .replace("and source not in ('r5-membership', 'r5-user', 'r5-payment', 'r6-membership', 'r6-user', 'r6-payment');", "and source not in ('r5-membership', 'r5-user', 'r5-payment');")
+  .replace("check (source is null or source in ('r5-membership', 'r5-user', 'r5-payment', 'r6-membership', 'r6-user', 'r6-payment'));", "check (source is null or source in ('r5-membership', 'r5-user', 'r5-payment'));")
+/** The six values the check takes: the r6 rule's (this build's, since 2026-10-26) and the r5 rule's (production's build). */
+const WORDS = ['r5-membership', 'r5-user', 'r5-payment', 'r6-membership', 'r6-user', 'r6-payment']
 
 let pass = 0
 const fails = []
@@ -101,7 +109,7 @@ console.log('\n=== Before v113: the code writes the row without the columns ==='
 {
   const written = await as('service_role', before)
   ok(!written.code, 'the service role writes a row as v111 has it', show(written))
-  const withSource = await as('service_role', `insert into public.student_membership_discounts (student_id, discounted, checked_at, source, source_checked_at) values ('${B}', false, now(), 'r5-payment', now())`)
+  const withSource = await as('service_role', `insert into public.student_membership_discounts (student_id, discounted, checked_at, source, source_checked_at) values ('${B}', false, now(), 'r6-payment', now())`)
   ok(withSource.code === '42703', 'a row carrying the stamp is refused (42703, the column does not exist): the code then writes it again without', show(withSource))
 }
 
@@ -116,13 +124,13 @@ const kept = await rowsNow()
   const comment = async (col) => (await db.query(`select col_description(attrelid, attnum) as c from pg_attribute where attrelid = 'public.student_membership_discounts'::regclass and attname = '${col}'`)).rows[0]?.c
   const sourceComment = await comment('source')
   const timeComment = await comment('source_checked_at')
-  ok(typeof sourceComment === 'string' && ['r5-membership', 'r5-user', 'r5-payment', 'source_checked_at'].every((w) => sourceComment.includes(w))
+  ok(typeof sourceComment === 'string' && [...WORDS, 'source_checked_at'].every((w) => sourceComment.includes(w))
        && typeof timeComment === 'string' && /checked_at of the write that set source/.test(timeComment),
      'the columns say what each value means, and what the time is for', show([sourceComment, timeComment]))
   const second = await paste(V113)
   const checks = (await db.query(`select conname, pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.student_membership_discounts'::regclass and contype = 'c'`)).rows
-  ok(show(second) === show(first) && checks.length === 1 && /'r5-membership'::text, 'r5-user'::text, 'r5-payment'::text/.test(checks[0].def),
-     'a second paste changes nothing: the same check, one constraint naming this rule\'s three values', show(checks))
+  ok(show(second) === show(first) && checks.length === 1 && /'r5-membership'::text, 'r5-user'::text, 'r5-payment'::text, 'r6-membership'::text, 'r6-user'::text, 'r6-payment'::text/.test(checks[0].def),
+     'a second paste changes nothing: the same check, one constraint naming the six values, this rule\'s and the r5 rule\'s', show(checks))
   const policies = (await db.query(`select policyname, cmd, roles::text from pg_policies where tablename = 'student_membership_discounts'`)).rows
   ok(show(policies) === show([{ policyname: 'Team reads membership discounts', cmd: 'SELECT', roles: '{authenticated}' }]),
      'v111\'s one policy is still the only one', show(policies))
@@ -130,24 +138,24 @@ const kept = await rowsNow()
 
 console.log('\n=== Who may write and read the columns ===')
 {
-  for (const [word, student] of [['r5-membership', A], ['r5-user', A], ['r5-payment', B]]) {
+  for (const [word, student] of [['r5-membership', A], ['r5-user', A], ['r5-payment', B], ['r6-membership', A], ['r6-user', A], ['r6-payment', B]]) {
     const at = '2026-10-22T10:00:00.123Z'
-    const r = await as('service_role', upsert({ student_id: student, whop_membership_id: `mem_dev${word}`, discounted: word === 'r5-payment', checked_at: at, source: word, source_checked_at: at }))
+    const r = await as('service_role', upsert({ student_id: student, whop_membership_id: `mem_dev${word}`, discounted: word.endsWith('-payment'), checked_at: at, source: word, source_checked_at: at }))
     const now = await stampOf(student)
     ok(!r.code && now?.source === word && now?.same_write === true, `the service role writes source '${word}' with its time (one row per student, an upsert replaces it)`, show(r.code ?? now))
   }
-  for (const word of ['membership', 'user', 'payment', 'stored']) {
+  for (const word of ['membership', 'user', 'payment', 'stored', 'r7-membership']) {
     const wrong = await as('service_role', `update public.student_membership_discounts set source = '${word}' where student_id = '${A}'`)
-    ok(wrong.code === '23514', `'${word}' is refused (23514, the check): ${word === 'stored' ? 'no word but the three' : 'the word an earlier round\'s build writes'}`, show(wrong))
+    ok(wrong.code === '23514', `'${word}' is refused (23514, the check): ${word === 'stored' || word === 'r7-membership' ? 'no word but the six' : 'the word an earlier round\'s build writes'}`, show(wrong))
   }
   const empty = await as('service_role', `update public.student_membership_discounts set source = null, source_checked_at = null where student_id = '${A}' returning source`)
   ok(!empty.code && empty.rows.length === 1 && empty.rows[0].source === null,
      'an empty source is allowed (the rows written before v113, and a no coupon judged without the user\'s list)', show(empty))
   const team = await as('authenticated', 'select student_id, source, source_checked_at from public.student_membership_discounts order by student_id', { team: true, uid: A })
-  ok(team.rows?.length === 2 && team.rows[1].source === 'r5-payment' && team.rows[1].source_checked_at !== null, 'a team member reads the columns', show(team))
+  ok(team.rows?.length === 2 && team.rows[1].source === 'r6-payment' && team.rows[1].source_checked_at !== null, 'a team member reads the columns', show(team))
   const student = await as('authenticated', 'select source, source_checked_at from public.student_membership_discounts', { team: false, uid: A })
   ok(Array.isArray(student.rows) && student.rows.length === 0, 'a signed-in student still reads nothing', show(student))
-  const teamWrite = await as('authenticated', `update public.student_membership_discounts set source = 'r5-user'`, { team: true, uid: A })
+  const teamWrite = await as('authenticated', `update public.student_membership_discounts set source = 'r6-user'`, { team: true, uid: A })
   const visitor = await as('anon', 'select source from public.student_membership_discounts')
   ok(teamWrite.code === '42501' && visitor.code === '42501', 'a team member\'s update and a visitor\'s read are refused (42501), as before v113', show([teamWrite.code, visitor.code]))
 }
@@ -156,9 +164,9 @@ console.log('\n=== The older builds, writing as PostgREST does ===')
 {
   // This rule's row for A: no coupon, stamped by the write that set it.
   const at = '2026-10-22T10:00:00.123Z'
-  await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: null, discounted: false, checked_at: at, source: 'r5-membership', source_checked_at: at }))
+  await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: null, discounted: false, checked_at: at, source: 'r6-membership', source_checked_at: at }))
   const ours = await stampOf(A)
-  ok(ours?.source === 'r5-membership' && ours.same_write === true, 'this rule\'s write: the stamp, and source_checked_at the row\'s checked_at', show(ours))
+  ok(ours?.source === 'r6-membership' && ours.same_write === true, 'this rule\'s write: the stamp, and source_checked_at the row\'s checked_at', show(ours))
   // A build of T-122's earlier rounds (the world-engine preview, a89ff1c): its row carries a step's word.
   const earlier = await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', promo_code_id: 'promo_devW50', promo_code: 'welcome50', renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-22T11:00:00Z', source: 'membership' }))
   const afterEarlier = (await db.query(`select promo_code, checked_at::text from public.student_membership_discounts where student_id = '${A}'`)).rows[0]
@@ -169,12 +177,18 @@ console.log('\n=== The older builds, writing as PostgREST does ===')
   // The build from before T-122 (production's cron until the deploy): the eight columns alone.
   const pre = await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-22T12:40:00Z' }))
   const afterPre = await stampOf(A)
-  ok(!pre.code && afterPre?.source === 'r5-membership' && afterPre.same_write === false,
+  ok(!pre.code && afterPre?.source === 'r6-membership' && afterPre.same_write === false,
      'the build from before T-122 writes over this rule\'s row: the stamp kept (its upsert leaves the column alone) with a new checked_at, so the two times differ and the fallback does not answer with it', show(afterPre))
   const preNew = await as('service_role', upsert({ student_id: C, whop_membership_id: 'mem_devC', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-22T12:40:00Z' }))
   ok(!preNew.code && show(await stampOf(C)) === show({ source: null, same_write: false }), 'a row it adds holds no source', show(await stampOf(C)))
-  const again = await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: null, discounted: false, checked_at: '2026-10-22T14:40:00Z', source: 'r5-membership', source_checked_at: '2026-10-22T14:40:00Z' }))
+  const again = await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: null, discounted: false, checked_at: '2026-10-22T14:40:00Z', source: 'r6-membership', source_checked_at: '2026-10-22T14:40:00Z' }))
   ok(!again.code && (await stampOf(A))?.same_write === true, 'this rule\'s next write stamps the row again', show(await stampOf(A)))
+  // Production's build (the r5 rule) writes its own stamp over this rule's row, and this rule's next write over it.
+  const r5 = await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: null, discounted: false, checked_at: '2026-10-22T16:40:00Z', source: 'r5-membership', source_checked_at: '2026-10-22T16:40:00Z' }))
+  const afterR5 = await stampOf(A)
+  const r6 = await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: null, discounted: false, checked_at: '2026-10-22T18:40:00Z', source: 'r6-membership', source_checked_at: '2026-10-22T18:40:00Z' }))
+  ok(!r5.code && afterR5?.source === 'r5-membership' && afterR5.same_write === true && !r6.code && (await stampOf(A))?.source === 'r6-membership',
+     'the r5 build\'s write is taken, its stamp an older rule\'s for the r6 build (which never answers a no coupon with it), and the r6 build\'s next write stamps the row again', show({ afterR5, now: await stampOf(A) }))
 }
 
 console.log('\n=== The undo, pasted twice, then v113 again ===')
@@ -203,9 +217,28 @@ console.log('\n=== v113 on a database that holds an earlier copy of it ===')
   const words = (await dev.query(`select source from public.student_membership_discounts order by student_id`)).rows.map((r) => r.source)
   const checks = (await dev.query(`select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.student_membership_discounts'::regclass and contype = 'c'`)).rows
   ok(out[0]?.source_checks === 1 && out[0]?.rows_without_source === 3 && show(words) === show([null, null, null])
-       && checks.length === 1 && /'r5-membership'::text/.test(checks[0].def) && !/'membership'::text/.test(checks[0].def),
-     'the earlier copy\'s words are emptied, so no row carries a stamp this rule did not write, and the check takes this rule\'s three values alone', show({ out, words, checks }))
+       && checks.length === 1 && /'r5-membership'::text/.test(checks[0].def) && /'r6-membership'::text/.test(checks[0].def) && !/'membership'::text/.test(checks[0].def),
+     'the earlier copy\'s words are emptied, so no row carries a step\'s word alone, and the check takes the six values alone (the r6 rule\'s and the r5 rule\'s)', show({ out, words, checks }))
   ok(show(await columns(dev)) === show(V113_COLUMNS), 'with source_checked_at added beside the column it had', show(await columns(dev)))
+}
+
+console.log('\n=== v113 on a database that holds the copy taking the r5 values alone ===')
+{
+  // The copy in the tree production runs: pasted there before this one, the r6 build's writes are refused until this
+  // copy is pasted over it, which takes the six and keeps the r5 rows.
+  const prod = await database()
+  await paste(V113_R5, prod)
+  const at = '2026-10-26T10:40:00Z'
+  const r5Row = await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', discounted: false, renewal_price: 97, checked_at: at, source: 'r5-membership', source_checked_at: at }), {}, prod)
+  const r6Refused = await as('service_role', upsert({ student_id: B, whop_membership_id: 'mem_devB', discounted: false, checked_at: at, source: 'r6-payment', source_checked_at: at }), {}, prod)
+  ok(V113_R5 !== V113 && !r5Row.code && r6Refused.code === '23514',
+     'on the r5-only copy: production\'s r5 build writes, and the r6 build\'s write is refused (23514): it logs it and keeps its live answer, its cron answering 500', show({ r5: r5Row.code ?? 'ok', r6: r6Refused.code }))
+  const out = await paste(V113, prod)
+  const kept = (await prod.query(`select source from public.student_membership_discounts where student_id = '${A}'`)).rows[0]?.source
+  const r6Now = await as('service_role', upsert({ student_id: B, whop_membership_id: 'mem_devB', discounted: false, checked_at: at, source: 'r6-payment', source_checked_at: at }), {}, prod)
+  const checks = (await prod.query(`select pg_get_constraintdef(oid) as def from pg_constraint where conrelid = 'public.student_membership_discounts'::regclass and contype = 'c'`)).rows
+  ok(out[0]?.source_checks === 1 && kept === 'r5-membership' && !r6Now.code && (await stampOf(B, prod))?.source === 'r6-payment' && checks.length === 1 && /'r6-payment'::text/.test(checks[0].def),
+     'this copy pasted over it: one check taking the six, the r5 row kept, and the r6 build\'s write taken', show({ out, kept, r6: r6Now.code ?? 'ok', checks }))
 }
 
 console.log('\n=== v113 on a database without v111 ===')

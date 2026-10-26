@@ -14,8 +14,10 @@ import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/d
  *
  * The state is discountState() (src/lib/world/discount.ts) over what the app
  * already holds: AuthContext's student (first_paid_at), StudentContext's
- * discount request and its membershipDiscounted (a discount already on the
- * student's next Whop renewal, admin rebuild 2 D5), the catalog's lessons (is_gate, has_video,
+ * discount request, its membershipDiscounted (a discount already on the
+ * student's next Whop renewal, admin rebuild 2 D5) and its membershipUnpaid
+ * (no paid course plan and payment that went through, the owner's rule of
+ * 2026-10-26), the catalog's lessons (is_gate, has_video,
  * duration_seconds, counts_toward_progress, in course order) and the lessons
  * whose video is done (watchedLessonIds: completed_at set, action half or
  * not). It is worked out again every minute, so "11 days left" and the
@@ -62,6 +64,8 @@ export interface DiscountStandIn {
   firstPaidAt: string | null;
   /** The pretend student's Whop membership already has a discount on its next renewal (D5). Left out: none. */
   membershipDiscounted?: boolean;
+  /** Whop shows no paid course plan and payment that went through for the pretend student (2026-10-26). Left out: none stored. */
+  membershipUnpaid?: boolean;
   /**
    * The pretend student's clock (ms), when it is not the real one: a student
    * whose 14 days are over can only be shown on a clock past them, and until
@@ -161,8 +165,10 @@ export function useWorldDiscount(): WorldDiscountHook {
   );
 
   const firstPaidAt = stand ? stand.firstPaidAt : (student?.first_paid_at ?? null);
-  // D5: the stored flag /api/student/data carries (StudentContext), or the stand-in's.
+  // D5: the stored flag /api/student/data carries (StudentContext), or the stand-in's; and since 2026-10-26 the stored
+  // unpaid answer the same way.
   const membershipDiscounted = stand ? stand.membershipDiscounted === true : ctx.membershipDiscounted === true;
+  const membershipUnpaid = stand ? stand.membershipUnpaid === true : ctx.membershipUnpaid === true;
   const requestId = discountRequest?.id ?? null;
   const requests = useMemo<readonly DiscountRequestRow[]>(() => {
     if (stand) return stand.requests;
@@ -175,8 +181,16 @@ export function useWorldDiscount(): WorldDiscountHook {
 
   const state = useMemo(
     () =>
-      discountState({ now: new Date(now), firstPaidAt, lessons: courseLessons, videoDoneIds: videoDone, requests, membershipDiscounted }),
-    [now, firstPaidAt, courseLessons, videoDone, requests, membershipDiscounted],
+      discountState({
+        now: new Date(now),
+        firstPaidAt,
+        lessons: courseLessons,
+        videoDoneIds: videoDone,
+        requests,
+        membershipDiscounted,
+        membershipUnpaid,
+      }),
+    [now, firstPaidAt, courseLessons, videoDone, requests, membershipDiscounted, membershipUnpaid],
   );
 
   // The questions: the stand-in's, or the active ones StudentContext loaded

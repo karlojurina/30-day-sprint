@@ -6,7 +6,7 @@ import { CATALOG_IS_V2, LESSONS_TABLE } from "@/lib/catalog-tables";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
 import { checkMembershipDiscount, teamThirtyCodeFor } from "@/lib/membership-discount";
 import {
-  NO_REAL_PAYMENT_APPROVAL,
+  UNPAID_APPROVAL,
   approvalVerdict,
   couponApprovalRefusal,
   couponUncheckedApprovalRefusal,
@@ -36,12 +36,15 @@ import {
  *      its say (503, code "rule", the reason in the team's words:
  *      couponUncheckedApprovalRefusal); until then it went on. Approve
  *      anyway (`override`, a founder's or an admin's) still goes on, which
- *      the page offers on that refusal. Since 2026-10-26 a no coupon that
- *      says Whop shows no real payment from the student (the check's
- *      noRealPayment: the owner's applicant who "never paid", whose
- *      first_paid_at the rule below can still find filled) refuses the
- *      normal Approve before the rule, a 400 with code "rule"
- *      (NO_REAL_PAYMENT_APPROVAL), so only Approve anyway passes it.
+ *      the page offers on that refusal. Since 2026-10-26 a no coupon for
+ *      which Whop does not show both a paid course plan and a course payment
+ *      that went through (the check's unpaid, the owner's rule of that day:
+ *      "If they don't have a payment and a paid plan - no applying to 30%
+ *      off"; a student whose first_paid_at the rule below can still find
+ *      filled) refuses the normal Approve before the rule, a 400 with code
+ *      "rule" (UNPAID_APPROVAL), so only Approve anyway passes it. Until the
+ *      owner's answers of that day only no real payment beside no membership
+ *      renewing above 0 refused it.
  *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
  *      the ads are not checked (the owner's decision: the 30% already asks
  *      for the videos, 80% of them since 2026-10-26, 49 of today's 61, and
@@ -96,8 +99,8 @@ import {
 /**
  * The refusals Approve anyway skips with `override`: the 30% rule said no, or
  * a read it needs failed, since T-122's fourth fix round the coupon check
- * gave no answer, and since 2026-10-26 Whop shows no real payment from the
- * student (NO_REAL_PAYMENT_APPROVAL).
+ * gave no answer, and since 2026-10-26 Whop does not show both a paid course
+ * plan and a course payment that went through (UNPAID_APPROVAL).
  */
 const RULE = { code: "rule" } as const;
 
@@ -165,8 +168,8 @@ export async function POST(request: NextRequest) {
   // (`overrideCoupon`): then Whop is not asked at all. A check that gave no
   // answer is remembered, and refuses the normal Approve after the rule.
   let couponUnchecked: { liveFail: string | null } | null = null;
-  // Whop shows no real payment from the student (2026-10-26): no 30%, unless Approve anyway skips it.
-  let noRealPayment = false;
+  // No paid course plan and payment that went through (the owner, 2026-10-26): no 30%, unless Approve anyway skips it.
+  let unpaid = false;
   if (!overrideCoupon) {
     const coupon = await checkMembershipDiscount(supabase, discountReq.student_id);
     if (coupon.discounted) {
@@ -176,11 +179,13 @@ export async function POST(request: NextRequest) {
       );
     }
     if (coupon.source === "none") couponUnchecked = { liveFail: coupon.liveFail };
-    noRealPayment = coupon.noRealPayment;
+    unpaid = coupon.unpaid;
   }
-  if (noRealPayment && !override) {
-    console.warn(`[discount approve] request ${requestId}: nothing approved, Whop shows no real payment from the student`);
-    return NextResponse.json({ error: NO_REAL_PAYMENT_APPROVAL, ...RULE }, { status: 400 });
+  if (unpaid && !override) {
+    console.warn(
+      `[discount approve] request ${requestId}: nothing approved, Whop does not show both a paid course plan and a course payment that went through for the student`,
+    );
+    return NextResponse.json({ error: UNPAID_APPROVAL, ...RULE }, { status: 400 });
   }
 
   if (CATALOG_IS_V2) {
@@ -339,7 +344,7 @@ export async function POST(request: NextRequest) {
       override ? "Eligibility gates skipped." : null,
       overrideCoupon ? "The coupon check skipped." : null,
       couponUnchecked !== null ? "The coupon check gave no answer." : null,
-      noRealPayment ? "Whop shows no real payment from the student." : null,
+      unpaid ? "Whop does not show both a paid course plan and a course payment that went through." : null,
     ]
       .filter(Boolean)
       .join(" ");

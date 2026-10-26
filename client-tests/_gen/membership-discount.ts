@@ -144,19 +144,21 @@
  *     (when it names none, the membership the check settled on) and its
  *     code; with neither anywhere, the price of the first real one (step 3),
  *     the same source.
- * With no coupon the membership the check settled on answers with its own
- * source: the one on file when it read a renewal price above 0, else the
- * first found through the user that does, else the first found there that
- * renews at 0 (a free plan on file hands over to a paid one found there, as
- * the sync and the webhook put the newest membership that grants access on
- * file). Paid or free is the membership's own renewal price since the
- * fourth fix round: a membership naming no code has its plan read no more,
- * and its row holds no plan price. With none settled on, or when a
- * membership read gave no renewal price, the first real payment answers
- * with no coupon (source "payment"; the newest until the fourth fix round),
- * and no real course payment at all is none. A free one settled on answers
- * only beside a real course payment since 2026-10-26: with none, the
- * student has no real payment (NO REAL PAYMENT, below).
+ * With no coupon the check settles on a membership: the one on file when it
+ * read a renewal price above 0, else the first found through the user that
+ * does, else the first found there that renews at 0 (a free plan on file
+ * hands over to a paid one found there, as the sync and the webhook put the
+ * newest membership that grants access on file). Paid or free is the
+ * membership's own renewal price since the fourth fix round: a membership
+ * naming no code has its plan read no more, and its row holds no plan price.
+ * Since 2026-10-26 a no coupon needs a real course payment beside a paid plan
+ * (THE PAID PLAN AND THE PAYMENT, below): the paid membership settled on
+ * answers with its own source; with none settled on, when a membership read
+ * gave no renewal price or the user's list answered a 404 or another 4xx, the
+ * first real payment answers (source "payment"; the newest until the fourth
+ * fix round); every other no coupon is unpaid (source "payment"). Until then
+ * the settled membership answered whatever the payments, and with none the
+ * first real payment, a free one settled on only beside a real payment.
  *
  * NO ANSWER. A check gives no yes or no only when Whop does not answer: no
  * connection, a 5xx, a 429 after its two retries, nothing within the time
@@ -186,7 +188,9 @@
  * 4xx for it, a 410 once Whop turns v2 off on 13 November 2026) can miss a
  * code on a second, canceled or expired course membership that no payment
  * shows. The student gets that live answer all the same, but its row is
- * stored with no source, so the stored fallback never answers with it.
+ * stored with no source, so the stored fallback never answers with it. An
+ * unpaid answer is stamped all the same since 2026-10-26: it refuses whatever
+ * a code would have said.
  *
  * THE READS, all paced at 4 requests a second start to start, a 429 waited
  * out (Whop's "Try again in N seconds", or 15 s, at most 30) and retried
@@ -251,15 +255,16 @@
  * that payment's own, else the membership the check settled on; for a
  * "payment" row with no coupon the membership whose read gave no price, else
  * the first real payment's own (null when it names none; the newest
- * payment's until the fourth fix round), and with no real payment at all,
- * since 2026-10-26, the membership on file when it is one (so the answer
- * counts while it stays on file), else the one whose read gave no price,
- * else the free one settled on. `source` (v113) is THE RULE STAMP:
- * the step that answered with the rule's version before it ("r5-membership",
- * "r5-user", "r5-payment", storedSourceOf; the step's word alone until the
- * fifth fix round), or null on a no coupon judged without the user's list
- * (THE V2 SHUTDOWN); `source_checked_at` (v113) is the `checked_at` of the
- * write that set it. A database without v113 refuses a row that carries
+ * payment's until the fourth fix round), and for an unpaid answer (THE PAID
+ * PLAN AND THE PAYMENT, since 2026-10-26) the membership on file when it is
+ * one (so the answer counts while it stays on file), else the one whose read
+ * gave no price, else the free one settled on. `source` (v113) is THE RULE
+ * STAMP: the step that answered with the rule's version before it
+ * ("r6-membership", "r6-user", "r6-payment", storedSourceOf; "r5-..." from
+ * T-122's fifth fix round until the paid plan and the payment; the step's
+ * word alone until the fifth fix round), or null on a no coupon judged
+ * without the user's list (THE V2 SHUTDOWN); `source_checked_at` (v113) is
+ * the `checked_at` of the write that set it. A database without v113 refuses a row that carries
  * them, so the row is written again without them. On a membership row the
  * prices are the membership's renewal and its plan's (each empty when it did
  * not read; the plan's always empty on a membership naming no code since the
@@ -268,8 +273,8 @@
  * discounts (its total less any tax added on top, in its own currency; empty
  * when its total does not read) and `plan_renewal_price` what it is set
  * against: its subtotal when it names a code or shows a discount naming
- * none, 97.00 when the price judged it, else empty (both empty with no real
- * payment); the code is the payment's, when it names one.
+ * none, 97.00 when the price judged it, else empty (both empty, with no
+ * code, on an unpaid answer); the code is the payment's, when it names one.
  * A stored row counts only for the membership it was read from
  * (storedRowApplies): a student who moved to another membership since has no
  * stored answer. When the id on file is not a membership's, there is nothing
@@ -279,7 +284,10 @@
  * fall back to the stored row (checkMembershipDiscount). A stored coupon
  * answers whoever wrote it. A stored "no coupon" answers only when this rule
  * wrote it and no other writer wrote over it since (stampedByThisRule, since
- * T-122's fifth fix round): its `source` carries this rule's version and its
+ * T-122's fifth fix round): its `source` carries this rule's version (r6
+ * since 2026-10-26: a row of the r5 rule, which production's build writes,
+ * stored a trial or a refunded student's paid membership as no coupon, which
+ * this rule refuses) and its
  * `source_checked_at` is its `checked_at`; and, since the fourth fix round,
  * only when it names no code or this student's own 30% by the promo id on
  * their own approved or applied request (storedNoCouponAnswers). The builds
@@ -309,32 +317,57 @@
  * the stored flag through /api/student/data. The admin's 30% page reads the
  * stored rows.
  *
- * NO REAL PAYMENT (2026-10-26, the owner's applicant: "he never had a
- * membership. I see one payment, but it has failed ... he watched the course
- * even though he never paid"). With no coupon, the check says too whether Whop
- * shows a real payment: none when no real course payment exists and no
- * course membership with a renewal price above 0 answered (judgeStudentDiscount's
- * noRealPayment, a "payment" row with no code and no price,
- * rowShowsNoRealPayment). A free plan (renewing at 0) settled on never stands
- * in for a payment since the review of the same day: until then such a
- * student passed as no coupon when the user's list held the plan, and was
- * refused when it did not. The row names the membership on file when it is
- * one, so the 30% page's verdict and the stored fallback count it while that
- * membership stays on file (until the review it named none, which never
- * applied beside a membership id on file). Until then only the cron counted
- * it (no_real_payment), and such a student whose first_paid_at was filled
- * before the first-paid fix could apply and be approved. Since then the
- * request routes refuse on it before writing (noRealPaymentRefusal in
- * discount-server.ts), the approve route's normal Approve refuses with code
- * "rule" (NO_REAL_PAYMENT_APPROVAL; Approve anyway passes), on Whop's answer
- * now or a stored row this rule wrote that answers, and the 30% page's
- * verdict says it from the stored row.
- * STILL OPEN FOR THE OWNER: a course membership renewing above 0 still stands
- * in for a payment it does not show (trialing on a 97.00 plan with a $0
- * checkout, past_due after a failed first charge, canceled or expired on file
- * after a full refund: each passes as no coupon); and a real payment for
- * another product (ETfB) is not a course payment, so such a student with no
- * course payment reads as no real payment.
+ * THE PAID PLAN AND THE PAYMENT (the owner, 2026-10-26, his answers to the
+ * review of this rule: "They shouldn't be able to apply. If they don't have a
+ * payment and a paid plan - no applying to 30% off. Can't even give it to them
+ * so there's no point."; of a course membership with no real payment, "They
+ * shouldn't be able to apply either yes"; of the free plan, keep refusing it).
+ * With no coupon, the check says whether Whop shows BOTH a real course
+ * payment (firstRealPayment: paid, above 0, not refunded in full or lost in a
+ * dispute, naming its buyer) AND a course membership on a paid plan (one
+ * renewing above 0 settled on: the one on file, whatever its status, or one
+ * found through the Whop user that grants access). Without both the student
+ * is UNPAID (judgeStudentDiscount's `noRealPayment` and `noPaidPlan`,
+ * CouponCheck.unpaid): a payment for another product alone (ETfB, Apex), a
+ * free plan, a trial whose checkout was $0, a past_due membership whose only
+ * charge failed, a full refund, no course membership at all. The plan is not
+ * known, and the payment decides, when no paid membership is settled on but a
+ * membership's renewal price did not read or the user's list answered a 404
+ * or another 4xx: a real payer whose membership gives no price, or whose
+ * memberships v2 does not list, is never refused for it. An unpaid answer is
+ * stored as a "payment" row with no coupon, no code and no price
+ * (rowShowsUnpaid), naming the membership on file when it is one, so it
+ * counts while that stays on file (storedRowApplies), else the one whose read
+ * gave no price, else the free one; every other answer holds a price, the
+ * paid membership's renewal or the real payment's own. It carries THE RULE
+ * STAMP even when the user's list was not read: with no real course payment
+ * the list cannot change the answer, since the payments are read whole, and
+ * with the list unread no student is unpaid for the plan. Both request routes
+ * refuse an unpaid student before writing (unpaidRefusal in
+ * discount-server.ts, one sentence for every case: "The 30% needs a paid
+ * course plan and a payment that went through."), the normal Approve refuses
+ * with code "rule" (UNPAID_APPROVAL; Approve anyway passes), the 30% page's
+ * verdict says it from the stored row (thirty-view.ts couponOf), and the map's
+ * 30% panel says the student's sentence with no Apply, from the same row
+ * (/api/student/data's membershipUnpaid, discount.ts "unpaid").
+ * Until these answers a course membership renewing above 0 stood in for a
+ * payment it did not show (trialing at $0, past_due after a failed first
+ * charge, canceled or expired after a full refund each passed), a free plan
+ * beside a real payment passed, the refusal said "We can't see your first
+ * payment yet." to a student who had paid for another product, and the map
+ * offered Apply; until the review before them (2026-10-26, the owner's
+ * applicant: "he never had a membership. I see one payment, but it has failed
+ * ... he watched the course even though he never paid") only the cron counted
+ * a student with no real payment (no_real_payment), and one whose first_paid_at
+ * was filled before the first-paid fix could apply and be approved.
+ * STILL OPEN: the paid plan is the membership on file whatever its status, so
+ * a canceled or expired course membership on file that renews above 0, beside
+ * a real course payment, passes (the map's membership block keeps such a
+ * student off the panel; the routes do not read the status); whether Whop
+ * gives a canceled membership a renewal price above 0 has not been checked.
+ * And once v2's list answers a 404 or a 410 for everyone (13 November 2026,
+ * until the list moves to v1, task T-113) the payment decides whenever the
+ * membership on file shows no paid plan.
  *
  * No answer names a student, an email or a Whop id: student ids only. A
  * failure comes back as a kind, never as Whop's words.
@@ -389,15 +422,20 @@ export const DISCOUNT_SOURCES: readonly DiscountSource[] = ["membership", "user"
 
 /**
  * THE RULE STAMP (T-122's fifth fix round): the version of this rule, which
- * every `source` it stores carries before the step ("r5-membership"). v113's
- * check takes these three values and null alone, so no build of an older
- * round can store a `source` (theirs were the steps' words alone). A rule
+ * every `source` it stores carries before the step ("r6-membership"). A rule
  * that changes again takes the next version, in v113's check and here at
- * once.
+ * once. r6 since the owner's paid plan and payment (2026-10-26, the header):
+ * the r5 rule, which production's build runs, stored a no coupon for a paid
+ * membership with no real payment (a trial at $0, a full refund) and for a
+ * free plan beside a payment, both of which this rule refuses, so an r5 row
+ * is an older rule's here and never answers as a no coupon. v113's check takes
+ * the r5 and the r6 values and null, so production's r5 build keeps storing
+ * its rows until this one replaces it; the steps' words alone (the rounds
+ * before the fifth) it refuses.
  */
-export const RULE_VERSION = "r5";
-export type StoredSource = "r5-membership" | "r5-user" | "r5-payment";
-export const STORED_SOURCES: readonly StoredSource[] = ["r5-membership", "r5-user", "r5-payment"];
+export const RULE_VERSION = "r6";
+export type StoredSource = "r6-membership" | "r6-user" | "r6-payment";
+export const STORED_SOURCES: readonly StoredSource[] = ["r6-membership", "r6-user", "r6-payment"];
 
 /** The `source` this rule stores for a step. */
 export function storedSourceOf(step: DiscountSource): StoredSource {
@@ -1102,11 +1140,22 @@ export type StudentDiscountRead =
       /** The row to store, `checked_at` and THE RULE STAMP set (its `source` null on a no coupon judged without the user's list). */
       row: MembershipDiscountRow;
       /**
-       * No course membership renewing above 0 answered and the check found no
-       * real course payment, so no coupon (source "payment"). A free plan
-       * settled on is no payment since 2026-10-26 (NO REAL PAYMENT, the header).
+       * No coupon, and no real course payment: the student is unpaid, whatever
+       * the memberships say (THE PAID PLAN AND THE PAYMENT, the header; since
+       * 2026-10-26 a membership renewing above 0 no longer stands in for it).
+       * Source "payment".
        */
       noRealPayment: boolean;
+      /**
+       * No coupon, a real course payment, and no course membership on a paid
+       * plan: none renewing above 0 settled on, every renewal price read and
+       * the user's list answered (the owner, 2026-10-26: a free plan, or no
+       * course membership at all). The student is unpaid; never true with
+       * `noRealPayment`. False when the plan cannot be known (a renewal price
+       * that did not read, the list answering a 404 or another 4xx): the
+       * payment decides then. Source "payment".
+       */
+      noPaidPlan: boolean;
       /**
        * The Whop user's list of memberships answered a 404 or another 4xx (a
        * 410 once v2 is gone), so the check went on without it, by the
@@ -1198,17 +1247,21 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
   const found = (
     source: DiscountSource,
     row: MembershipDiscountRow,
-    more: Partial<Pick<Answered, "noRealPayment" | "byPrice" | "bySubtotal">> = {},
+    more: Partial<Pick<Answered, "noRealPayment" | "noPaidPlan" | "byPrice" | "bySubtotal">> = {},
   ): StudentDiscountRead => {
+    const noRealPayment = more.noRealPayment ?? false;
+    const noPaidPlan = more.noPaidPlan ?? false;
     // THE RULE STAMP, the step with this rule's version and the write's own moment. A no coupon judged without the
     // user's list may have missed a code on a second, canceled or expired membership (THE V2 SHUTDOWN): the student
-    // gets it live, and its row is stored with no source, so the stored fallback never answers with it.
-    const unstamped = userListUnusable && !row.discounted;
+    // gets it live, and its row is stored with no source, so the stored fallback never answers with it. An unpaid
+    // answer refuses whatever a code would have said, so it is stamped (since 2026-10-26).
+    const unstamped = userListUnusable && !row.discounted && !noRealPayment && !noPaidPlan;
     return {
       ok: true,
       source,
       row: { ...row, source: unstamped ? null : storedSourceOf(source), source_checked_at: unstamped ? null : row.checked_at },
-      noRealPayment: more.noRealPayment ?? false,
+      noRealPayment,
+      noPaidPlan,
       userListUnusable,
       byPrice: more.byPrice ?? null,
       bySubtotal: more.bySubtotal ?? null,
@@ -1345,52 +1398,74 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
     }
   }
 
-  // No coupon: the membership settled on answers; with none, the first real payment, no coupon. A membership renewing
-  // at 0 (a free plan) shows no payment, so with no real course payment it answers nothing and the student has no
-  // real payment (NO REAL PAYMENT in the header; the review of 2026-10-26: such a student passed as no coupon when the
-  // user's list held the free plan, and was refused when it did not).
-  const freeWithNoPayment = settled !== null && cents(settled.membership.renewalPrice) === 0 && first === null;
-  if (settled && !freeWithNoPayment) return found(settled.source, rowOf(student.id, settled.membership, now(), settled.source));
-  // A code still named on it is this student's own 30% (any other was a coupon above).
-  const judged = first ? paymentCoupon(first, { ownCode: true }) : null;
-  const promoCodeId = first?.promoCodeId ?? null;
-  const promoCode = first?.promoCode ?? (promoCodeId ? await promoCodeName(promoCodeId, ctx) : null);
-  // With no real payment the row names the membership on file when it is one, so it counts while that stays on file
-  // (storedRowApplies: the 30% page's verdict and the stored fallback; the review of 2026-10-26, a row naming none
-  // never applied beside a membership id on file); else the membership whose read gave no price, else the free one.
-  const noPaymentMembership = isMembershipId(onFile) ? onFile : (unpriced ?? settled?.membership.whopMembershipId ?? null);
+  // No coupon. THE PAID PLAN AND THE PAYMENT (the owner, 2026-10-26: "If they don't have a payment and a paid plan - no
+  // applying to 30% off"): the 30% needs both a real course payment and a course membership on a paid plan. The paid
+  // plan is a membership renewing above 0 settled on. When none is, the plan is not known if a membership's renewal
+  // price did not read or the user's list answered a 404 or another 4xx, and the payment decides: a real payer whose
+  // membership gives no price, or whose memberships v2 does not list, is never refused for the plan. Until then a
+  // membership renewing above 0 stood in for a payment it did not show, and a free one beside a real payment passed.
+  const paidPlan = settled !== null && cents(settled.membership.renewalPrice) > 0;
+  const planUnknown = !paidPlan && (unpriced !== null || list.unusable);
+  const noRealPayment = first === null;
+  const noPaidPlan = !noRealPayment && !paidPlan && !planUnknown;
+  if (first !== null && !noPaidPlan) {
+    // A real payment and a paid plan: the membership answers, no coupon.
+    if (settled !== null && paidPlan) return found(settled.source, rowOf(student.id, settled.membership, now(), settled.source));
+    // A real payment, the plan not known: the first real payment answers, no coupon. A code still named on it is this
+    // student's own 30% (any other was a coupon above).
+    const judged = paymentCoupon(first, { ownCode: true });
+    const promoCode = first.promoCode ?? (first.promoCodeId ? await promoCodeName(first.promoCodeId, ctx) : null);
+    return found("payment", {
+      student_id: student.id,
+      whop_membership_id: unpriced ?? first.membershipId ?? null,
+      promo_code_id: first.promoCodeId,
+      promo_code: promoCode,
+      renewal_price: judged.price,
+      plan_renewal_price: judged.heldAgainst,
+      discounted: false,
+      checked_at: now(),
+    });
+  }
+  // Unpaid: no coupon, no code and no price (rowShowsUnpaid). The row names the membership on file when it is one, so
+  // it counts while that stays on file (storedRowApplies: the map, the 30% page's verdict and the stored fallback; the
+  // review of 2026-10-26, a row naming none never applied beside a membership id on file); else the membership whose
+  // read gave no price, else the free one settled on.
   return found(
     "payment",
     {
       student_id: student.id,
-      whop_membership_id: first === null ? noPaymentMembership : (unpriced ?? first.membershipId ?? null),
-      promo_code_id: promoCodeId,
-      promo_code: promoCode,
-      renewal_price: judged ? judged.price : null,
-      plan_renewal_price: judged ? judged.heldAgainst : null,
+      whop_membership_id: isMembershipId(onFile) ? onFile : (unpriced ?? settled?.membership.whopMembershipId ?? null),
+      promo_code_id: null,
+      promo_code: null,
+      renewal_price: null,
+      plan_renewal_price: null,
       discounted: false,
       checked_at: now(),
     },
-    { noRealPayment: first === null },
+    { noRealPayment, noPaidPlan },
   );
 }
 
 /**
- * Whether a stored row is judgeStudentDiscount's "no real payment" answer
- * (`noRealPayment`: no course membership renewing above 0 answered and no
- * real course payment; the owner's applicant of 2026-10-26, "he never paid"):
+ * Whether a stored row is judgeStudentDiscount's unpaid answer (THE PAID PLAN
+ * AND THE PAYMENT, the header: `noRealPayment` or `noPaidPlan`, the owner's
+ * "If they don't have a payment and a paid plan - no applying to 30% off"):
  * no coupon, no code and no price. Every other answer this rule stores holds a
- * price, the renewal price of the membership the check settled on (a
- * membership is settled on only when its price reads, and a free one answers
- * only beside a real course payment) or the first real payment's (a real
- * payment's total always reads), so the row says it exactly;
+ * price: a coupon's row is discounted, and a no coupon answers only beside a
+ * real course payment, with the renewal price of the paid membership settled
+ * on (one is settled on only when its price reads) or the real payment's own
+ * (a real payment's total always reads). So the row says it exactly, and
  * client-tests/membership-discount.test.mjs holds it to every answer of
- * judgeStudentDiscount there, a free plan's among them. Read by the stored fallback
- * (checkMembershipDiscount: the request routes and the approve route) and by
- * the 30% page's verdict (thirty-view.ts couponOf). Strict: a column that was
- * not read (undefined) never reads as no price.
+ * judgeStudentDiscount there. Every rule before this one stored that shape only
+ * with no real course payment (the rules before T-122 stored no row without a
+ * price), which this rule refuses too, so the row means unpaid whoever wrote
+ * it: the map reads it with no stamp (/api/student/data), the stored fallback
+ * only on a row this rule wrote that answers (checkMembershipDiscount: the
+ * request routes and the approve route), and the 30% page's verdict
+ * (thirty-view.ts couponOf). Strict: a column that was not read (undefined)
+ * never reads as no price. It was rowShowsNoRealPayment until 2026-10-26.
  */
-export function rowShowsNoRealPayment(row: { discounted?: unknown; promo_code_id?: unknown; renewal_price?: unknown }): boolean {
+export function rowShowsUnpaid(row: { discounted?: unknown; promo_code_id?: unknown; renewal_price?: unknown }): boolean {
   return row.discounted === false && row.promo_code_id === null && row.renewal_price === null;
 }
 
@@ -1464,15 +1539,16 @@ export interface CouponCheck {
    */
   saved: boolean;
   /**
-   * No coupon, and Whop shows no real payment from the student: no course
-   * membership renewing above 0 answered and no real course payment
-   * (judgeStudentDiscount's noRealPayment on a live answer, or
-   * rowShowsNoRealPayment on a stored row this rule wrote that answers).
-   * Both request routes then refuse before writing, and the approve route's
-   * normal Approve refuses with code "rule" (the review of 2026-10-26: until
-   * then it was read only by the cron's count). False with any other answer.
+   * No coupon, and Whop does not show both a real course payment and a course
+   * membership on a paid plan (THE PAID PLAN AND THE PAYMENT, the header;
+   * judgeStudentDiscount's noRealPayment or noPaidPlan on a live answer, or
+   * rowShowsUnpaid on a stored row this rule wrote that answers). Both request
+   * routes then refuse before writing, and the approve route's normal Approve
+   * refuses with code "rule". False with any other answer. It was
+   * `noRealPayment`, no real payment and no membership renewing above 0, until
+   * the owner's answers of 2026-10-26.
    */
-  noRealPayment: boolean;
+  unpaid: boolean;
 }
 
 /** The student's own approved or applied 30% requests, as the check reads them (THIS STUDENT'S OWN 30% CODE, the header). */
@@ -1513,7 +1589,7 @@ async function ownThirtyOf(db: SupabaseClient, studentId: string): Promise<OwnTh
 
 /**
  * What the request routes' fallback reads of a stored row (with `source` and `source_checked_at` where the database
- * has v113); `renewal_price` since 2026-10-26, for rowShowsNoRealPayment.
+ * has v113); `renewal_price` since 2026-10-26, for rowShowsUnpaid.
  */
 const STORED_FALLBACK_COLUMNS = "whop_membership_id, promo_code_id, promo_code, renewal_price, discounted, checked_at";
 type StoredFallbackRow = Pick<
@@ -1601,9 +1677,11 @@ const NOT_THIS_RULE: Record<Exclude<StoredStamp, "this_rule"> | "a_code" | "stud
  * does the approve route's normal Approve). A live answer is stored, best
  * effort, so the map and the admin page catch up. Never throws. `apiKey`
  * defaults to WHOP_API_KEY; without one there is no live read. Since
- * 2026-10-26 a no coupon also carries `noRealPayment`, Whop showing no real
- * payment from the student, on which every caller but Check Whop again
- * refuses, and which Check Whop again reports (until then
+ * 2026-10-26 a no coupon also carries `unpaid` (THE PAID PLAN AND THE
+ * PAYMENT), Whop not showing both a real course payment and a course
+ * membership on a paid plan, on which every caller but Check Whop again
+ * refuses, and which Check Whop again reports (it was `noRealPayment` until
+ * the owner's answers of that day; until the review before them
  * judgeStudentDiscount said it and only the cron counted it).
  */
 export async function checkMembershipDiscount(
@@ -1659,7 +1737,7 @@ export async function checkMembershipDiscount(
         via: live.source,
         liveFail: null,
         saved,
-        noRealPayment: live.noRealPayment,
+        unpaid: live.noRealPayment || live.noPaidPlan,
       };
     }
     liveFail = live.fail;
@@ -1668,15 +1746,15 @@ export async function checkMembershipDiscount(
   // The stored row, when it was read from the membership the student has now (or when that could not be read): a
   // coupon always; no coupon only when this rule wrote it and nothing since, it names no code but the student's own,
   // and (since T-122's fifth fix round) the student's row was read, so the membership on file is known. Such a no
-  // coupon says too whether Whop showed a real payment (rowShowsNoRealPayment, since 2026-10-26).
-  let answer: CouponCheck = { discounted: false, code: null, source: "none", via: null, liveFail, saved: false, noRealPayment: false };
+  // coupon says too whether the student was unpaid (rowShowsUnpaid, since 2026-10-26).
+  let answer: CouponCheck = { discounted: false, code: null, source: "none", via: null, liveFail, saved: false, unpaid: false };
   let notThisRule: keyof typeof NOT_THIS_RULE | null = null;
   try {
     const stored = await storedFallback(db, studentId);
     if (stored && storedRowApplies(stored.row, student?.whop_membership_id)) {
       const discounted = stored.row.discounted === true;
       if (discounted) {
-        answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false, noRealPayment: false };
+        answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false, unpaid: false };
       } else if (student === undefined) {
         notThisRule = "student_unread";
       } else if (stored.stamp !== "this_rule") {
@@ -1691,7 +1769,7 @@ export async function checkMembershipDiscount(
             via: null,
             liveFail,
             saved: false,
-            noRealPayment: rowShowsNoRealPayment(stored.row),
+            unpaid: rowShowsUnpaid(stored.row),
           };
         } else notThisRule = "a_code";
       }
@@ -1744,12 +1822,19 @@ export interface RefreshAnswer {
   /**
    * Of `checked`, by the step that answered (the header's WHICH MEMBERSHIPS
    * AND PAYMENTS): the membership on file, a course membership found through
-   * the Whop user, a course payment (one on a coupon, or no membership
-   * answered).
+   * the Whop user, a course payment (one on a coupon, an unpaid answer, or
+   * no membership answered).
    */
   by_source: Record<DiscountSource, number>;
-  /** Of by_source.payment: no real course payment at all, so no coupon. */
+  /**
+   * Of by_source.payment, the unpaid (THE PAID PLAN AND THE PAYMENT, the
+   * header; both refused since 2026-10-26): no real course payment at all,
+   * whatever the memberships say (until then only with no membership renewing
+   * above 0 either); and a real course payment beside no course membership on
+   * a paid plan (a free plan, no course membership at all).
+   */
   no_real_payment: number;
+  no_paid_plan: number;
   /**
    * Of `checked`: the students whose Whop user's list of memberships
    * answered a 404 or another 4xx (a 410 once v2 is gone), judged without it
@@ -1821,6 +1906,7 @@ export async function refreshMembershipDiscounts(
     checked: 0,
     by_source: { membership: 0, user: 0, payment: 0 },
     no_real_payment: 0,
+    no_paid_plan: 0,
     user_list_unusable: 0,
     discounted: 0,
     refused_by_price: [],
@@ -1937,6 +2023,7 @@ export async function refreshMembershipDiscounts(
     answer.checked++;
     answer.by_source[r.source]++;
     if (r.noRealPayment) answer.no_real_payment++;
+    if (r.noPaidPlan) answer.no_paid_plan++;
     if (r.userListUnusable) answer.user_list_unusable++;
     if (r.row.discounted) answer.discounted++;
     if (r.byPrice) answer.refused_by_price.push({ student_id: r.row.student_id, price: r.byPrice.price, billing_reason: r.byPrice.billingReason });

@@ -38,11 +38,18 @@
  * students the price alone refused, by student id, with that payment's
  * price and billing_reason; since the fifth `refused_by_subtotal` lists
  * those a payment naming no code refused by its subtotal, with its price,
- * subtotal, currency and billing_reason. Every row this cron writes carries
- * the rule's stamp (v113: `source` "r5-" and the step, `source_checked_at`
- * its checked_at). The first dry run on production (2026-10-21, before
- * T-122) could not read 46 of 290: 22 payment ids where the membership's
- * belongs, 24 memberships with no plan or no renewal price.
+ * subtotal, currency and billing_reason. Since 2026-10-26 (the owner: "If
+ * they don't have a payment and a paid plan - no applying to 30% off") a no
+ * coupon is unpaid without both a real course payment and a course
+ * membership on a paid plan: `no_real_payment` counts those with no real
+ * course payment, whatever their memberships, and `no_paid_plan` those with
+ * one and no course membership on a paid plan; their rows are what the map
+ * reads to show that line with no Apply. Every row this cron writes carries
+ * the rule's stamp (v113: `source` "r6-" and the step since that day, "r5-"
+ * until then; `source_checked_at` its checked_at). The first dry run on
+ * production (2026-10-21, before T-122) could not read 46 of 290: 22 payment
+ * ids where the membership's belongs, 24 memberships with no plan or no
+ * renewal price.
  *
  * ?mode=dry reads Whop and writes nothing, for the first look after a deploy:
  * it passes when `checked` is above 0 and `failed` is empty, and

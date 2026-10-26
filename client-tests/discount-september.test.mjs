@@ -108,7 +108,8 @@ const OCT_2 = '2026-10-02T10:00:00.000Z'
  * answer on file. The row holds its source: since T-122's third fix round a
  * stored "no coupon" answers only when the rule of that round wrote it
  * (v113's source set), and since its fifth only with the rule's stamp
- * (`source` with the rule's version, `source_checked_at` its checked_at).
+ * (`source` with the rule's version, `source_checked_at` its checked_at), the
+ * version r6 since the owner's paid plan and payment (2026-10-26).
  */
 function freshDb(paid = OCT_2, requests = []) {
   setCatalog({ v2: true, lessonsTable: 'lessons' })
@@ -117,7 +118,7 @@ function freshDb(paid = OCT_2, requests = []) {
     student_membership_discounts: [{
       student_id: 's1', whop_membership_id: 'mem_devClean', promo_code_id: null, promo_code: null,
       renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-01T08:00:00.000Z',
-      source: 'r5-membership', source_checked_at: '2026-10-01T08:00:00.000Z',
+      source: 'r6-membership', source_checked_at: '2026-10-01T08:00:00.000Z',
     }],
     lessons: LESSONS,
     lesson_videos: Object.keys(lengths).map((lesson_id) => ({ lesson_id, created_at: '2026-10-12T00:00:00.000Z' })),

@@ -108,30 +108,42 @@ in between, and the harness has one connection.
 `eighty-closed-windows.test.mjs` (2026-10-26, run last, with
 `--experimental-strip-types` because it runs the app's own rule) holds
 `supabase/diagnostics/eighty-closed-windows.sql`, the read-only count of
-the students the owner's 80% rule would reach back to (a window of the 30%
-that closed while the app asked for every video, with 80% or more watched
-in time and not every video), to `src/lib/world/discount.ts` and
-`discount-server.ts`, copied to a temporary folder with their import lines
-pointed at each other. Its database is the five tables the count reads,
-with the columns the app reads there: the real course from
-`course_catalog.json`, a video for every lesson the development page's
-lengths file has, and 34 made-up students at each edge of the rule (a
-first payment at 1 October's first moment and a millisecond before it, at
-the launch and a millisecond before it, own 14 days ending a millisecond
-before 26 October in Croatia and at it, still open at the count and a
-millisecond past it; 47, 48, 49 and 60 videos in time, one at the
-deadline's own millisecond, one a millisecond late, lessons past the gate,
-a row with no `completed_at`; requests none, rejected, pending, approved,
-applied, from before the launch in the shared window and in their own 14
-days, two of them). The file's one `now()` is pinned, and its five lines
+where the owner's call (B: the 80% counts from 26 October, a window that
+closed before it keeps every video) leaves the students whose window of
+the 30% has closed with 80% or more watched in time and not every video,
+to `src/lib/world/discount.ts` and `discount-server.ts`, copied to a
+temporary folder with their import lines pointed at each other. Its
+database is the tables the count reads, with the columns the app reads
+there: the real course from `course_catalog.json`, a video for every
+lesson the development page's lengths file has, the course switch in
+`admin_config`, stored coupon rows (v111's columns), and 46 made-up
+students at each edge of the rule (a first payment at 1 October's first
+moment and a millisecond before it, at the launch and a millisecond
+before it, own 14 days ending a millisecond before 26 October in Croatia
+and at it, still open at the count and a millisecond past it; 45, 47, 48,
+49, 57, 60 and 61 videos in time, one at the deadline's own millisecond,
+one a millisecond late, lessons past the gate, a row with no
+`completed_at`; requests none, rejected, pending, approved, applied, from
+before the launch in the shared window and in their own 14 days, after a
+rejection, 5 minutes and two days after the deadline; a stored coupon, a
+stored no real payment, one of another membership and one with no
+membership on file). Its line c (the review's second round, 2026-10-26) is
+`approvalVerdict` itself on every pending request the 30% page lists:
+refused over the videos, the 80% of the videos it is judged by (those
+loaded by the request, or by the switch for one made before it) met but
+not every one, and nothing else refusing it, with no stored coupon row
+refusing it first. The file's one `now()` is pinned, and its five lines
 are held to the rule's count, students, active or past_due, first and last
-deadline in Croatia and ids, on the real course and on one where a lesson
-does not count, one is a quiz and one has no video. It is one select and
-leaves every table as it was. Each of 16 breaks of the count (the time in
-time, the request that counts, 80% rounded down, every video counted in,
-the rule's date, the clock, each of the three catalog filters, the gate
-itself, the newest request, the shared deadline, the first day, the
-launch, the memberships, the line's match) fails it.
+deadline in Croatia and each student's own deadline and id (each request
+id on line c), on the real course, with the last 12 videos up to the gate
+loaded after the requests, and on one where a lesson does not count, one
+is a quiz and one has no video. It is one select and leaves every table as
+it was. Each of 12 breaks of the count's line c and the rule (the late
+request, the other request, the stored coupon row, its membership, the
+switch, the first day listed, a student both in line a and line c, the
+rule's date, 80% rounded down, the time in time, every video counted in,
+the videos loaded later) fails it (16 breaks of the round before held its
+first version).
 
 `v112.test.mjs` (2026-10-21, the badges for the new course) builds its own
 database: `base.sql`, Supabase's default privileges, the badge tables made

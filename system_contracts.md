@@ -1118,8 +1118,13 @@ When adding a new table, append it here. When deleting a field, scan
   latest request that counts decide what the student sees. With none,
   it is the rule: since the owner's 80% rule (2026-10-26) 80% of the
   videos up to the gate by the deadline, `videosNeeded()` in
-  `discount.ts` (ceil(0.8 x N), 49 of 61), which the map, both request
-  routes, the approval and the 30% page all read; no first payment on
+  `discount.ts` (ceil(0.8 x N), 49 of 61), and every one of them for a
+  window that ended before 00:00 on 26 October in Croatia (the owner's B
+  of the same day: `videosNeededFor()`, `DISCOUNT_EIGHTY_FROM`), which the
+  map, both request routes, the approval and the 30% page all read, so
+  the approval and the 30% page judge a request of such a window by every
+  video (the branch before the review of that day judged it by the 80%,
+  and the normal Approve passed 49 to 60 of 61 there); no first payment on
   file (`first_paid_at` empty) is no window at all, so neither request
   route writes a row for such a student and the normal Approve refuses
   one (code `rule`; Approve anyway, a founder's or an admin's, passes).
@@ -1332,9 +1337,20 @@ When adding a new table, append it here. When deleting a field, scan
   its log line adding "Whop shows no real payment from the student.".
   Until then only the cron counted it (`no_real_payment`), and a student
   whose `first_paid_at` was filled before the first-paid fix could apply
-  and be approved. It is false whenever a course membership with a price
-  answers, whatever the payments, and with no answer from Whop or the
-  stored row (the 503s above stand).
+  and be approved. Since the review's second round (the same day) a free
+  plan, a course membership renewing at 0.00, settled on with no real
+  course payment is no real payment too (it answered no coupon whenever
+  v2's list held it), and the stored no-real-payment row names the
+  membership on file when it is one, so it counts for that membership
+  (`storedRowApplies`): the 30% page shows the verdict, and with Whop
+  down the routes refuse for no real payment where they gave their 503.
+  It is false whenever a course membership renewing above 0 answers,
+  whatever its status on file and whatever the payments (trialing,
+  past_due after a failed first charge, canceled after a full refund:
+  the owner's call), and with no answer from Whop or the stored row (the
+  503s above stand). A real payment for another product (ETfB) is no
+  course payment, so such a student reads as no real payment (the
+  owner's call too).
 - **Required questions are enforced on the server (the owner's review,
   2026-10-21; branch `night/admin3`, not on production):** before
   anything is written, `POST /api/discounts/request` and
@@ -1475,7 +1491,11 @@ When adding a new table, append it here. When deleting a field, scan
   does not read), and `plan_renewal_price` its subtotal when it names a
   code or shows a discount naming none, 97.00 when the price judged it,
   else null, both null with no real payment (the one answer of the rule
-  that stores no price, which `rowShowsNoRealPayment` reads); until T-122's third fix round
+  that stores no price, which `rowShowsNoRealPayment` reads; since the
+  review of 2026-10-26 a free plan settled on with no real course payment
+  is that answer too, and its `whop_membership_id` is the membership on
+  file when it is one, else the one whose read gave no price, else the
+  free one); until T-122's third fix round
   a payment in another currency was held against 97.00 at its
   `usd_total`'s rate, and until its first `discounted` was its total under
   97.00; the code is the payment's), the step's word alone until the fifth
@@ -2539,7 +2559,10 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     pending row (null on the others; since the 80% rule of 2026-10-26
     `facts` carries `videosNeeded`, the 80% of `videosTotal`, and the
     verdict says yes exactly when `videosDone` reaches it, its sentences
-    naming the 80%; no first payment on file reads "There is no real
+    naming the 80%; since the review's second round of the same day
+    `facts.everyVideo` is true for a deadline before 26 October, whose
+    `videosNeeded` is all of `videosTotal` and whose sentences say every
+    video, the owner's B; no first payment on file reads "There is no real
     payment on file for this student, and the 30% needs one."; since the
     review of the same day a stored coupon row showing no real payment
     gives the verdict reason `no-real-payment`, "Whop shows no real
@@ -2592,9 +2615,11 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   pending row whose stored coupon says a discount is on the next
   renewal offers only Reject; when the code was taken off the membership
   since, this asks Whop again for that one student.
-- **Called by:** `ThirtyView`'s `PendingRow`, on the coupon's row, through
-  `adminTransport.checkCoupon` (`src/lib/admin/admin-transport.ts`); the
-  page then reads `GET /api/admin/thirty` again.
+- **Called by:** `ThirtyView`'s `PendingRow`, on the coupon's row and,
+  since the review of 2026-10-26, on a row whose stored answer says no
+  real payment, through `adminTransport.checkCoupon`
+  (`src/lib/admin/admin-transport.ts`); the page then reads
+  `GET /api/admin/thirty` again.
 - **Auth:** `requireTeam` with founder, admin or csm (401 with no token or
   a bad one, 403 for a login that is not a team member).
 - **Depends on:** `discount_requests` (`id, student_id, status` by `id`),
@@ -2619,8 +2644,10 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   `source_checked_at` (v113), but a no coupon judged without the user's
   list, stored with no source.
 - **Produces:**
-  - 200 `{ discounted, code }`: Whop answered now and its answer is
-    stored; `code` is the code's name, or its promo id, or null.
+  - 200 `{ discounted, code, noRealPayment }`: Whop answered now and its
+    answer is stored; `code` is the code's name, or its promo id, or
+    null; `noRealPayment` (since the review of 2026-10-26) the check's
+    own, Whop showing no real payment from the student.
   - 400 "Missing requestId" (no id, or a body that is not JSON).
   - 404 "This request no longer exists."
   - 409 "This request was already decided." (the page reads its list

@@ -133,7 +133,31 @@ minutes", where the next in course order took 2.9 hours); and the closed
 line of a window that ended before the 80% rule (`expiredRuleLine`: the
 shared deadline and 24 October read "was for finishing every video", 26
 October the 80%). `membership-discount.test.mjs` runs Whop's live answer
-for the same student, and `discount.test.mjs` `shortestSeconds`.
+for the same student, and `discount.test.mjs` `shortestSeconds`. Since the
+review's second round (the same day, the owner's B) it holds
+`videosNeededFor` at its edges and in the source, and a window that ended
+before the 80% rule to every video: the shared deadline with 49 by it
+refused by `approvalVerdict`, a window ending at the rule's first moment
+approved at 49 and one ending a millisecond earlier refused, and through
+the real approve route and the 30% page the shared window's 57 of 61 with
+an old-dashboard request (refused, the row "61 needed, every video for a
+deadline before Mon 26 Oct"), a request from before the launch at the
+launch's own window (refused), and 49 at the rule's first moment
+(approved); every closed line for a first payment from 20 August until the
+last window that ends before the rule names no 80%, a first payment
+before 1 October reading "Your 2 weeks have passed." alone; `liveRuleLine`
+on a window open now and on the shared window seen on 19 October; the
+refusal at 48 with a3l25 (38 seconds) among the videos left, "about 1
+minute of video"; and the username's line beside the buttons with no
+Discord ID (`USERNAME_NOTE`).
+`discount.test.mjs` reads the 80%'s words on a window that ends after the
+rule (`PAID_80`) and the every-video words on one that ends before it,
+and one minute and one hour in the singular; `discount-september.test.mjs`
+gives the shared window back every video; `membership-discount.test.mjs`
+runs a free plan with no payment (with and without the user's list),
+the no-real-payment row naming the membership on file (one Whop does not
+know, a free plan) through Approve, Check Whop again and the 30% page, and
+the free plan through both request routes.
 
 `whop-catchup.test.mjs` (T-089, 2026-10-20) runs `POST /api/admin/whop-catchup`
 through its own `POST`: the route, the run (`src/lib/whop-catchup.ts`) and the
@@ -443,7 +467,14 @@ on file whose stored row is the coupon check's "no real payment" answer (the
 verdict `no-real-payment`, the count still on its line, Approve anyway
 skipping it as it skips the rule), and C8, the same row holding a 97.00
 first payment (the rule's yes); and B's time left is the 4 shortest videos
-not watched, where it was the next 4 in course order.
+not watched, where it was the next 4 in course order. Since the review's
+second round of the same day a deadline before 26 October keeps every
+video (the owner's B): A, R, I, the old-dashboard O1 and the Js whose
+windows end before it are judged by all their videos (`everyVideo`, the
+verdict's every-video sentences), the count check takes the window's rule,
+B is checked both on its own shared window (every video, 16 short) and on
+one ending 29 October (the 4 shortest), and the C students first paid on
+15 October, so C7's line still reads the 80%.
 
 `admin-routes.test.mjs` (admin rebuild, work item 3, 2026-10-20; until
 admin rebuild 2 `admin-today-routes.test.mjs`) runs the rebuilt admin's

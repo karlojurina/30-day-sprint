@@ -313,7 +313,9 @@ const { MEMBERSHIP_DISCOUNT_LINE, DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, 
 const { discountRefusalMessage, membershipDiscountRefusal, couponApprovalRefusal } = await import('./_gen/discount-server.ts')
 const { checkpointView } = await import('./_gen/checkpointView.ts')
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
-const { FakeDb, fakeClient, useDb: installDb, setCatalog, promoCodes } = await import('./_gen/stub-server.ts')
+const { FakeDb, fakeClient, useDb: installDb, setCatalog } = await import('./_gen/stub-server.ts')
+// The codes asked of Whop: stub-admin.ts's list, the one every copy shares (thirty-apply.ts's included, T-137).
+const { promoCodes } = await import('./_gen/stub-admin.ts')
 
 /** Runs `fn` with what it logs kept off the suite's output and handed back. */
 async function quiet(fn) {
@@ -858,7 +860,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devEvolve' }] })
   const live = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
   const row = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
-  ok(show(live.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'membership', liveFail: null, saved: true, unpaid: false }), 'Whop answers: discounted, evolve10, live from the membership on file, and saved', show(live.value))
+  ok(show(live.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'membership', liveFail: null, saved: true, unpaid: false, membershipId: 'mem_devEvolve' }), 'Whop answers: discounted, evolve10, live from the membership on file, and saved', show(live.value))
   ok(row && row.student_id === 's1' && row.whop_membership_id === 'mem_devEvolve' && row.promo_code === 'evolve10' && row.promo_code_id === 'promo_devEvolve'
        && row.renewal_price === 87.3 && row.plan_renewal_price === 97 && row.discounted === true && row.checked_at === new Date().toISOString()
        && row.source === R6('membership') && row.source_checked_at === row.checked_at,
@@ -880,7 +882,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   whop.answer = () => json(500, {})
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devEvolve' }], [MEMBERSHIP_DISCOUNTS_TABLE]: [storedEvolve('s1')] })
   const r = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
-  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'stored', via: null, liveFail: 'http_other', saved: false, unpaid: false }), 'Whop fails: the stored row for this membership decides (nothing saved)', show(r.value))
+  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'stored', via: null, liveFail: 'http_other', saved: false, unpaid: false, membershipId: 'mem_devEvolve' }), 'Whop fails: the stored row for this membership decides (nothing saved)', show(r.value))
   ok(r.lines.length === 1 && r.lines[0].includes('http_other') && r.lines[0].includes('the stored row decides') && !r.lines[0].includes('mem_'),
      'one line for the log, with the kind and no Whop id', show(r.lines))
 }
@@ -904,7 +906,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const noMembership = new FakeDb({ students: [{ id: 's1', whop_membership_id: null, whop_user_id: 'user_devFullPay' }], [MEMBERSHIP_DISCOUNTS_TABLE]: [storedEvolve('s1')] })
   const r2 = await quiet(() => checkMembershipDiscount(fakeClient(noMembership), 's1', { apiKey: KEY }))
   const row2 = noMembership.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
-  ok(show(r2.value) === show({ discounted: false, code: null, source: 'live', via: 'user', liveFail: null, saved: true, unpaid: false })
+  ok(show(r2.value) === show({ discounted: false, code: null, source: 'live', via: 'user', liveFail: null, saved: true, unpaid: false, membershipId: 'mem_devFull' })
        && row2.whop_membership_id === 'mem_devFull' && row2.source === R6('user') && row2.discounted === false && r2.lines.length === 0,
      'no membership on file: the course membership found through the Whop user answers (full price), and its row replaces the old one', show({ answer: r2.value, row: row2 }))
 }
@@ -913,14 +915,14 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   resetWhop()
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'pay_devPayment', whop_user_id: 'user_devEvolvePay' }] })
   const r = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
-  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'user', liveFail: null, saved: true, unpaid: false })
+  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'user', liveFail: null, saved: true, unpaid: false, membershipId: 'mem_devEvolve' })
        && db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].whop_membership_id === 'mem_devEvolve' && r.lines.length === 0,
      'a payment\'s id on file: through the Whop user, evolve10, stored for the membership it judged', show(r.value))
   resetWhop()
   const odd = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devNullPrice', whop_user_id: 'user_devOdd' }] })
   const r3 = await quiet(() => checkMembershipDiscount(fakeClient(odd), 's1', { apiKey: KEY }))
   const row3 = odd.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
-  ok(show(r3.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'payment', liveFail: null, saved: true, unpaid: false })
+  ok(show(r3.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'payment', liveFail: null, saved: true, unpaid: false, membershipId: 'mem_devOdd' })
        && row3.source === R6('payment') && row3.renewal_price === 87.3 && row3.plan_renewal_price === 97 && row3.whop_membership_id === 'mem_devOdd',
      'a null renewal price: the latest real payment (87.30) answers, stored with source payment for the payment\'s membership (since the second fix round)', show(row3))
   // Whop down while the user is asked, with a row stored through the user before: the stored row decides (the id on file names no membership).
@@ -928,7 +930,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   whop.answer = () => 'throw'
   const stale = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'pay_devPayment', whop_user_id: 'user_devEvolvePay' }], [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...storedEvolve('s1', 'mem_devEvolve'), source: 'user' }] })
   const r4 = await quiet(() => checkMembershipDiscount(fakeClient(stale), 's1', { apiKey: KEY }))
-  ok(show(r4.value) === show({ discounted: true, code: 'evolve10', source: 'stored', via: null, liveFail: 'network', saved: false, unpaid: false })
+  ok(show(r4.value) === show({ discounted: true, code: 'evolve10', source: 'stored', via: null, liveFail: 'network', saved: false, unpaid: false, membershipId: 'mem_devEvolve' })
        && r4.lines.some((l) => l.includes('Whop gave no answer (network), so the stored row decides')),
      'Whop down, a payment\'s id on file and a row stored through the user: that row decides', show(r4.value))
   resetWhop()
@@ -2767,23 +2769,45 @@ console.log('\n=== T-122\'s third fix round: a code anywhere is a coupon, then t
        'checkMembershipDiscount: "no coupon" with no source none, with this rule\'s stamp stored, with a step\'s word alone or any other value none; without v113 read twice and none', show({ a: a.source, b: b.source, b2: b2.source, c: c.source, d }))
   }
 
-  // The approve route names the code teamThirtyCodeFor makes, the name the check reads as the student's own.
+  // The name Approve made until the 30% that applies itself (T-137): teamThirtyCodeFor, the name the check reads as the
+  // student's own beside their request. Codes get random names since then (thirty-apply.ts thirtyCodeName), and a code
+  // with the old name waits for the team: the job leaves it (old_code), the team's Try again attaches it. The guard
+  // reads the old name with teamThirtyCodeFor alone (it was the approve route that did, until then).
   {
     round3Whop()
-    readyDb('mem_r3K1', {
-      discount_requests: [{ id: 'r3', student_id: SID, status: 'pending', created_at: new Date(Date.parse(NOW) - 3_600_000).toISOString() }],
-      admin_config: [{ key: 'curriculum_reset_at', value: '2026-10-19T14:33:00.000Z' }],
+    const prevCompany = process.env.WHOP_COMPANY_ID
+    process.env.WHOP_COMPANY_ID = 'biz_devCompany'
+    const applies = []
+    whop.answer = (p, n, u) => {
+      // Whop's list of the memberships holding the code: none, so the code goes on the membership on file.
+      if (p === '/api/v1/memberships' && u.searchParams.get('promo_code_ids') === 'promo_r3Own30') return json(200, { data: [] })
+      if (p === '/api/v1/memberships/mem_r3K1/apply_promo_code') {
+        applies.push(p)
+        return json(200, { id: 'mem_r3K1', status: 'active', promo_code_id: 'promo_r3Own30', renewal_price: '97.00' })
+      }
+      return null
+    }
+    const TA = await import('./_gen/thirty-apply.ts')
+    const oldNamed = () => readyDb('mem_r3K1', {
+      discount_requests: [{ id: 'r3', student_id: SID, status: 'approved', promo_code: OWN, whop_promo_id: 'promo_r3Own30',
+        created_at: new Date(Date.parse(NOW) - 3_600_000).toISOString(), reviewed_by: 'team-1', reviewed_at: new Date(Date.parse(NOW) - 3_000_000).toISOString() }],
     }, 'user_r3K1', SID)
-    const made = promoCodes.length
-    const res = await quiet(async () => {
-      const r = await approveRoute(new Request('http://app/api/discounts/approve', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'r3' }) }))
-      return { status: r.status, body: await r.json() }
-    })
-    ok(res.value.status === 200 && res.value.body.promoCode === OWN && promoCodes.length === made + 1 && promoCodes.at(-1).code === OWN
-         && typeof MD3.teamThirtyCodeFor === 'function' && MD3.teamThirtyCodeFor(SID) === OWN,
-       `Approve makes ${OWN} for this student (teamThirtyCodeFor), the name the check takes as theirs`, show(res.value.body))
-    const route = read('../src/app/api/discounts/approve/route.ts')
-    ok(/const code = teamThirtyCodeFor\(studentRow\.id\);/.test(route) && !/`ECOM30-\$\{/.test(route), 'the route builds the code with it alone, so the two cannot drift apart')
+    const put = (db, opts) => quiet(() => TA.putThirtyOn(fakeClient(db), 'r3', { correlationId: '00000000-0000-4000-8000-0000000000c3', deadlineMs: Date.now() + 20_000, ...opts }))
+    const jobDb = oldNamed()
+    const job = await put(jobDb, { actor: { kind: 'job' } })
+    const tryDb = oldNamed()
+    const tried = await put(tryDb, { actor: { kind: 'team', teamMemberId: 'team-1' }, allowOldName: true })
+    ok(typeof MD3.teamThirtyCodeFor === 'function' && MD3.teamThirtyCodeFor(SID) === OWN
+         && job.value.outcome === 'waiting' && job.value.reason === 'old_code' && jobDb.rows('discount_requests')[0].status === 'approved'
+         && tried.value.outcome === 'applied' && tryDb.rows('discount_requests')[0].status === 'applied' && applies.length === 1,
+       `a code named ${OWN} (teamThirtyCodeFor, as Approve named it until T-137): the job leaves it to the team (old_code), the team's Try again attaches it`,
+       show({ job: job.value, tried: tried.value, applies: applies.length }))
+    const step = read('../src/lib/thirty-apply.ts')
+    ok(/teamThirtyCodeFor\(row\.student_id\)/.test(step) && !/`ECOM30-\$\{/.test(step) && !/teamThirtyCodeFor/.test(step.slice(step.indexOf('export function thirtyCodeName'), step.indexOf('/** Whop\'s id for a code'))),
+       'the old-name guard builds the name with teamThirtyCodeFor alone, so the two cannot drift apart; a new code\'s name never uses it')
+    whop.answer = null
+    if (prevCompany === undefined) delete process.env.WHOP_COMPANY_ID
+    else process.env.WHOP_COMPANY_ID = prevCompany
   }
 
   // The cron: every case and control in the window, each judged and stored with its source.

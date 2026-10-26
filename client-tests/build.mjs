@@ -235,6 +235,9 @@ gen('../src/app/api/student/lesson-video/route.ts', './_gen/lesson-video-route.t
 // October): a double submit refused by v106 is answered as a request in
 // review. Their imports go to stub-server.ts or to the real copies above; the
 // database function the feedback form calls is the test's own stand-in.
+// The 30% that applies itself (T-137): the shared step's copy (thirty-apply.ts,
+// near the end of this file) for the routes that call it.
+const THIRTY_APPLY = ['from "@/lib/thirty-apply"', 'from "./thirty-apply.ts"']
 for (const [route, out] of [['request', 'discount-request-route'], ['submit-feedback', 'discount-submit-feedback-route']]) {
   gen(`../src/app/api/discounts/${route}/route.ts`, `./_gen/${out}.ts`, [
     GATE,
@@ -243,6 +246,7 @@ for (const [route, out] of [['request', 'discount-request-route'], ['submit-feed
     ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
     // The required questions (the owner's review, 2026-10-21): the forms' rule, copied above.
     ['from "@/lib/discount-feedback"', 'from "./discount-feedback.ts"'],
+    THIRTY_APPLY,
     ...toStub('next/server', '@supabase/supabase-js', '@/lib/csm-events', '@/lib/catalog-tables'),
   ])
 }
@@ -255,6 +259,7 @@ gen('../src/app/api/discounts/approve/route.ts', './_gen/discount-approve-route.
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
   ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+  THIRTY_APPLY,
   ...toStub('next/server', '@/lib/admin-auth', '@/lib/whop', '@/lib/catalog-tables'),
 ])
 
@@ -272,6 +277,8 @@ const RULE = [
 ]
 gen('../src/lib/admin/thirty-view.ts', './_gen/thirty-view.ts', [
   ...RULE,
+  // The 30% that applies itself (T-137): the words' module, copied near the end of this file.
+  ['from "@/lib/thirty-words"', 'from "./thirty-words.ts"'],
   ['from "./croatia-dates"', 'from "./croatia-dates.ts"'],
   // Copy username (2026-10-26, "Copy @" until its review): a username's leading "@" taken off as the other admin pages take it (people-common.ts, copied below).
   ['from "./people-common"', 'from "./people-common.ts"'],
@@ -521,6 +528,41 @@ gen('../src/app/api/admin/thirty/check-coupon/route.ts', './_gen/admin-check-cou
   ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
   ...toStub('next/server'),
 ])
+
+// ── The 30% that applies itself (T-137, thirty-apply.test.mjs) ──────────────
+// The words (thirty-words.ts) have no imports and copy across untouched. The
+// shared step (thirty-apply.ts) runs over the real coupon check and Whop reads
+// (membership-discount.ts above, on the test's stand-in fetch), the rule's
+// copies above and the words; its promo code create goes to stub-admin.ts
+// (createWhopPromoCode, WhopCallError and the switches that make it fail),
+// which counts every code asked for in one list stub-server.ts shares; which
+// catalog is live goes to stub-server.ts. The routes that call it point their
+// import at this copy (THIRTY_APPLY, above).
+gen('../src/lib/thirty-words.ts', './_gen/thirty-words.ts')
+gen('../src/lib/thirty-apply.ts', './_gen/thirty-apply.ts', [
+  ['from "@/lib/constants"', 'from "./constants.ts"'],
+  ['from "@/lib/catalog-tables"', 'from "./stub-server.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/whop"', 'from "./stub-admin.ts"'],
+  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+  ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  ['from "@/lib/thirty-words"', 'from "./thirty-words.ts"'],
+])
+// The job (GET /api/cron/apply-thirty), once its route is written (T-137's
+// work item 3): the shared step's copy above, the real cron-auth.ts on
+// stub-server.ts (as the coupon cron's copy above), Next and the service
+// client from stub-server.ts.
+if (fs.existsSync(fileURLToPath(new URL('../src/app/api/cron/apply-thirty/route.ts', import.meta.url)))) {
+  gen('../src/app/api/cron/apply-thirty/route.ts', './_gen/apply-thirty-route.ts', [
+    ['from "@/lib/cron-auth"', 'from "./cron-auth.stub-server.ts"'],
+    THIRTY_APPLY,
+    ['from "@/lib/thirty-words"', 'from "./thirty-words.ts"'],
+    ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+    ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+    ...toStub('next/server', '@/lib/supabase-server', '@/lib/catalog-tables'),
+  ])
+}
 
 // ── Admin rebuild 2, lane WI-5 and WI-6 (Tasks, All students, the student page,
 // the journey), for admin-tasks.test.mjs and admin-people.test.mjs. The tasks

@@ -30,6 +30,9 @@
  *                          check's unpaid, the owner's rule of 2026-10-26):
  *                          the request routes' refusal and the approve
  *                          route's
+ *   holdsAnotherThirty     the 30% that applies itself (T-137): another
+ *                          request of the student's went through, so the app
+ *                          makes no code on its own
  *
  * Everything fails closed. A read that errors, or comes back empty where a
  * row must exist, means no request and no approval: a believable "you're not
@@ -558,6 +561,24 @@ function madeOutsideApply(
     error: `Cannot approve: this student's other request (made ${other.created_at}) ${why}. Judge it by hand; Generate anyway skips the check.`,
     reason: "another-request",
   };
+}
+
+/**
+ * The 30% that applies itself (T-137, src/lib/thirty-apply.ts): whether the
+ * student holds another request that counts (discount.ts requestCounts) and
+ * went through, approved or applied. The app never makes a second code for
+ * such a student on its own: the request waits for the team.
+ * `requestId` is the request being worked, never counted as "another".
+ * madeOutsideApply above stays as it is.
+ */
+export function holdsAnotherThirty(
+  requests: readonly DiscountRequestRow[],
+  firstPaidAt: string | null,
+  requestId: string,
+): boolean {
+  return requests.some(
+    (r) => r.id !== requestId && (r.status === "approved" || r.status === "applied") && requestCounts(r, firstPaidAt),
+  );
 }
 
 /**

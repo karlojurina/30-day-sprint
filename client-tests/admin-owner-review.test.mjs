@@ -88,7 +88,9 @@ const F = await import('./_gen/discount-feedback.ts')
 const DS = await import('./_gen/discount-server.ts')
 const { PAYING_WHOP_PLAN_IDS_ARRAY } = await import('./_gen/metrics-definitions.ts')
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
-const { FakeDb, useDb: installDb, setCatalog, promoCodes } = await import('./_gen/stub-server.ts')
+const { FakeDb, useDb: installDb, setCatalog } = await import('./_gen/stub-server.ts')
+// The codes asked of Whop: stub-admin.ts's list, the one every copy shares (thirty-apply.ts's included, T-137).
+const { promoCodes } = await import('./_gen/stub-admin.ts')
 const { POST: approveRoute } = await import('./_gen/discount-approve-route.ts')
 const { POST: requestRoute } = await import('./_gen/discount-request-route.ts')
 const { POST: feedbackRoute } = await import('./_gen/discount-submit-feedback-route.ts')
@@ -268,8 +270,10 @@ async function approve(body) {
        && route.indexOf('auth.teamMember.role !== "founder"') < route.indexOf('.from("discount_requests")'),
      'a csm\'s override is refused before anything is read (the routes\' real login runs it in admin-discounts.test.mjs)')
   // Since T-122's fourth fix round the coupon check that gave no answer refuses the normal Approve with the code too,
-  // and since 2026-10-26 Whop showing no real payment from the student.
-  ok((route.match(/\.\.\.RULE/g) ?? []).length === 8, 'every refusal the override skips carries the code: the switch date unread, the new rule, the old rule\'s four, the coupon check that gave no answer, and Whop showing no real payment', String((route.match(/\.\.\.RULE/g) ?? []).length))
+  // and since 2026-10-26 Whop showing no real payment from the student. Since the 30% that applies itself (T-137) the
+  // checks live in thirty-apply.ts (thirtyApprovalChecks), which the route and the job both run.
+  const checks = fromSrc('src/lib/thirty-apply.ts')
+  ok((checks.match(/\.\.\.RULE/g) ?? []).length === 8, 'every refusal the override skips carries the code (thirtyApprovalChecks): the switch date unread, the new rule, the old rule\'s four, the coupon check that gave no answer, and Whop showing no real payment', String((checks.match(/\.\.\.RULE/g) ?? []).length))
 }
 
 // ════════════════════════════════════════════════════════════════════════════

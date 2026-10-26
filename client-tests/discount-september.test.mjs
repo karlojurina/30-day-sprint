@@ -50,7 +50,9 @@ import {
 } from './_gen/discount-server.ts'
 import { discountState, requiredLessons } from './_gen/discount.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
-import { FakeDb, fakeClient, promoCodes, useDb as installDb, setCatalog, setWhop, steps } from './_gen/stub-server.ts'
+import { FakeDb, fakeClient, useDb as installDb, setCatalog, setWhop, steps } from './_gen/stub-server.ts'
+// The codes asked of Whop: stub-admin.ts's list, the one every copy shares (thirty-apply.ts's included, T-137).
+import { promoCodes } from './_gen/stub-admin.ts'
 
 let pass = 0
 const fails = []

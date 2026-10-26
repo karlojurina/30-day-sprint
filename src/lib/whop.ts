@@ -428,27 +428,58 @@ export async function fetchCompletedLessonsAsAdmin(
 }
 
 /**
- * Create a promo code on Whop
+ * A Whop call that did not give its answer (the 30% that applies itself,
+ * T-137): `status` is Whop's HTTP status, or null when there was none (a
+ * timeout, the call aborted, no connection, or a body that could not be
+ * read). A caller tells "Whop refused, nothing was made" (a 4xx) from "the
+ * outcome is not known" (null or a 5xx) by it.
+ */
+export class WhopCallError extends Error {
+  readonly status: number | null;
+  constructor(status: number | null, message: string) {
+    super(message);
+    this.name = "WhopCallError";
+    this.status = status;
+  }
+}
+
+/**
+ * Create a promo code on Whop. A non-2xx answer throws a WhopCallError with
+ * its status; an abort (`opts.signal`, the caller's time limit), no
+ * connection or a body that does not read throw one with status null.
  */
 export async function createWhopPromoCode(
-  params: Omit<WhopPromoCodeRequest, "company_id">
+  params: Omit<WhopPromoCodeRequest, "company_id">,
+  opts: { signal?: AbortSignal } = {}
 ): Promise<WhopPromoCodeResponse> {
-  const res = await fetch(`${WHOP_API_BASE}/promo_codes`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${process.env.WHOP_API_KEY!}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      ...params,
-      company_id: process.env.WHOP_COMPANY_ID!,
-    }),
-  });
-
-  if (!res.ok) {
-    const error = await res.text();
-    throw new Error(`Whop promo code creation failed: ${error}`);
+  const failed = (err: unknown) =>
+    new WhopCallError(null, `Whop promo code creation failed: ${err instanceof Error ? err.message : String(err)}`);
+  let res: Response;
+  try {
+    res = await fetch(`${WHOP_API_BASE}/promo_codes`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.WHOP_API_KEY!}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        ...params,
+        company_id: process.env.WHOP_COMPANY_ID!,
+      }),
+      signal: opts.signal,
+    });
+  } catch (err) {
+    throw failed(err);
   }
 
-  return res.json();
+  if (!res.ok) {
+    const error = await res.text().catch(() => "");
+    throw new WhopCallError(res.status, `Whop promo code creation failed: ${error}`);
+  }
+
+  try {
+    return await res.json();
+  } catch (err) {
+    throw failed(err);
+  }
 }

@@ -401,6 +401,18 @@
  *
  * No answer names a student, an email or a Whop id: student ids only. A
  * failure comes back as a kind, never as Whop's words.
+ *
+ * THE 30% THAT APPLIES ITSELF (T-137) adds the attach and the reads around
+ * it, below readMembershipDiscount: applyWhopPromoCode (POST
+ * /api/v1/memberships/{id}/apply_promo_code, by the code's name, a fresh
+ * Idempotency-Key each call), readMembershipForApply (the membership's status,
+ * code, product and renewal price), findThirtyCodeByName (the company's codes
+ * made after a time, by name) and findMembershipsWithCode (the memberships
+ * holding a code), all pinned. The attach's refusal carries Whop's
+ * error.message, cut to 300 characters, for the team's 30% page: the one
+ * answer here that does. The check's answer names the membership it was read
+ * from (CouponCheck.membershipId), where the code goes first, and
+ * `store: false` reads without storing.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -978,6 +990,10 @@ type MembershipFields =
       productId: string | null;
       /** It grants access now (accessOf above 0): active, trialing or past_due; never canceled or expired. */
       grantsAccess: boolean;
+      /** Whop's `status` as it gave it (null when it gave none): the 30% is attached only to an active or trialing one (readMembershipForApply). */
+      status: string | null;
+      /** Set to cancel at the end of its period: such a membership still takes the 30% (R3 of T-137). */
+      cancelAtPeriodEnd: boolean;
     }
   | { ok: false; fail: MembershipReadFail };
 
@@ -1005,6 +1021,8 @@ async function membershipFields(membershipId: string, ctx: WhopReadContext): Pro
     renewalPrice: priceOf(m.body.renewal_price),
     productId: idOf(m.body.product_id) ?? idOf(m.body.product),
     grantsAccess: accessOf(m.body.status, m.body.valid) > 0,
+    status: typeof m.body.status === "string" && m.body.status.trim() !== "" ? m.body.status : null,
+    cancelAtPeriodEnd: m.body.cancel_at_period_end === true,
   };
 }
 
@@ -1029,6 +1047,202 @@ export async function readMembershipDiscount(membershipId: string, ctx: WhopRead
       discounted: isDiscounted(promoCodeId, renewalPrice, plan.price),
     },
   };
+}
+
+// ── The 30% that applies itself (T-137): the attach, and the reads around it ──
+// The shared step (src/lib/thirty-apply.ts) attaches a student's 30% code to
+// their course membership and asks Whop where a code sits before it marks a
+// request applied or lets the team reject it. Every call is pinned to
+// WHOP_DISCOUNT_VERSION; the three reads go through whopGetUrl (paced, a 429
+// waited out, inside the context's limits). No answer here names a student.
+
+/** A membership as the 30%'s attach reads it (readMembershipForApply). */
+export type MembershipForApply =
+  | {
+      ok: true;
+      status: string | null;
+      promoCodeId: string | null;
+      productId: string | null;
+      cancelAtPeriodEnd: boolean;
+      renewalPrice: number | null;
+    }
+  | { ok: false; fail: MembershipReadFail };
+
+/** One membership before the 30% goes on it: its status, the code on it, its product, whether it is set to cancel, its renewal price. */
+export async function readMembershipForApply(membershipId: string, ctx: WhopReadContext): Promise<MembershipForApply> {
+  const m = await membershipFields(membershipId, ctx);
+  if (!m.ok) return m;
+  return {
+    ok: true,
+    status: m.status,
+    promoCodeId: m.promoCodeId,
+    productId: m.productId,
+    cancelAtPeriodEnd: m.cancelAtPeriodEnd,
+    renewalPrice: m.renewalPrice,
+  };
+}
+
+/**
+ * Whop's answer to an attach: the membership now names `promoCodeId` (null
+ * when it names none); or it did not take the code (`refused`: a 400, 401,
+ * 403, 404 or 422, so nothing changed), or there is no telling (`unknown`: a
+ * 409, a 429, a 5xx, any other status, a timeout, no connection, a 2xx body
+ * that does not read). `message` is Whop's error.message, cut to 300
+ * characters, or what failed.
+ */
+export type ApplyAnswer =
+  | { ok: true; promoCodeId: string | null }
+  | { ok: false; http: number | null; message: string | null; outcome: "refused" | "unknown" };
+
+const APPLY_REFUSED = new Set([400, 401, 403, 404, 422]);
+const cut300 = (s: string) => (s.length > 300 ? s.slice(0, 300) : s);
+
+/**
+ * Attaches a promo code to a membership (POST
+ * /api/v1/memberships/{id}/apply_promo_code, scope member:manage, the live
+ * probe of 2026-10-26): by the code's name, never its id, with a fresh
+ * `idempotencyKey` every call (Whop replays a key's answer, errors included,
+ * for 24 hours), within `timeoutMs`. Whop takes a code only on an active or
+ * trialing membership that has none.
+ */
+export async function applyWhopPromoCode(
+  membershipId: string,
+  code: string,
+  idempotencyKey: string,
+  timeoutMs: number,
+): Promise<ApplyAnswer> {
+  const apiKey = process.env.WHOP_API_KEY;
+  if (!apiKey) return { ok: false, http: null, message: "no_api_key", outcome: "refused" };
+  let res: Response;
+  try {
+    res = await fetch(`${WHOP_API_V1}/memberships/${encodeURIComponent(membershipId)}/apply_promo_code`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+        "Api-Version-Date": WHOP_DISCOUNT_VERSION,
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({ promo_code: code }),
+      signal: AbortSignal.timeout(Math.max(0, timeoutMs)),
+    });
+  } catch (e) {
+    const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
+    return { ok: false, http: null, message: timedOut ? "timeout" : cut300(e instanceof Error ? e.message : String(e)), outcome: "unknown" };
+  }
+  let body: unknown = undefined;
+  try {
+    body = await res.json();
+  } catch {
+    body = undefined;
+  }
+  const object = body !== null && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
+  if (res.ok) {
+    if (object === null) return { ok: false, http: res.status, message: "a body that does not read", outcome: "unknown" };
+    return { ok: true, promoCodeId: idOf(object.promo_code_id) };
+  }
+  const error = object?.error;
+  const said = error !== null && typeof error === "object" ? (error as { message?: unknown }).message : undefined;
+  const message = typeof said === "string" && said.trim() !== "" ? cut300(said) : null;
+  return { ok: false, http: res.status, message, outcome: APPLY_REFUSED.has(res.status) ? "refused" : "unknown" };
+}
+
+/** Why a list read gave no answer: a membership read's kinds, no company on the deployment, more pages than allowed. */
+export type ListReadFail = MembershipReadFail | "no_company_id" | "too_many_pages";
+
+/** findThirtyCodeByName reads at most this many pages of 100 codes. */
+const CODE_PAGES_MAX = 5;
+
+/**
+ * A code the app made, found by its name (the 30%'s lost claim, T-137): the
+ * pinned list of the company's promo codes made after `createdAfterIso`,
+ * oldest first (GET /api/v1/promo_codes?account_id&created_after&direction=asc
+ * &first=100, `after` paging, the probe of 2026-10-26), at most 5 pages. The
+ * first whose code is `name` (trimmed, the case not minded) answers with its
+ * id; none, null. A page that fails or does not read, or a list still going
+ * after the 5th page, is no answer: a code not seen may still be there.
+ */
+export async function findThirtyCodeByName(
+  name: string,
+  createdAfterIso: string,
+  ctx: WhopReadContext,
+): Promise<{ ok: true; id: string | null } | { ok: false; fail: ListReadFail }> {
+  if (!ctx.apiKey) return { ok: false, fail: "no_api_key" };
+  const company = process.env.WHOP_COMPANY_ID;
+  if (!company) return { ok: false, fail: "no_company_id" };
+  const wanted = name.trim().toLowerCase();
+  let after: string | null = null;
+  for (let page = 1; page <= CODE_PAGES_MAX; page++) {
+    const query = new URLSearchParams({ account_id: company, created_after: createdAfterIso, direction: "asc", first: "100" });
+    if (after !== null) query.set("after", after);
+    const r = await whopGetUrl(`${WHOP_API_V1}/promo_codes?${query}`, ctx, true);
+    if (!r.ok) return { ok: false, fail: r.fail };
+    const rows = r.body.data;
+    if (!Array.isArray(rows)) return { ok: false, fail: "bad_shape" };
+    for (const c of rows) {
+      if (c === null || typeof c !== "object") continue;
+      const listed = (c as { code?: unknown }).code;
+      const id = idOf((c as { id?: unknown }).id);
+      if (typeof listed === "string" && listed.trim().toLowerCase() === wanted && id !== null) return { ok: true, id };
+    }
+    const info = (r.body.page_info ?? null) as { has_next_page?: unknown; end_cursor?: unknown } | null;
+    if (info?.has_next_page !== true) return { ok: true, id: null };
+    // More codes and no cursor to reach them: not all were seen.
+    if (typeof info.end_cursor !== "string" || info.end_cursor === "") return { ok: false, fail: "bad_shape" };
+    after = info.end_cursor;
+  }
+  return { ok: false, fail: "too_many_pages" };
+}
+
+/** A membership holding a code, as Whop's list gives it (findMembershipsWithCode). userId is null for a business buyer. */
+export interface MembershipWithCode {
+  id: string;
+  userId: string | null;
+  status: string | null;
+  productId: string | null;
+  productTitle: string | null;
+  promoCodeId: string | null;
+  renewalPrice: number | null;
+}
+
+/**
+ * The memberships holding a promo code (the 30%'s where read, T-137): GET
+ * /api/v1/memberships?promo_code_ids=<id>&company_id=<WHOP_COMPANY_ID>
+ * &first=10, pinned (the probe of 2026-10-26 answered exactly the membership
+ * a code had been applied to, naming the code, with the user's id). A body
+ * that does not read, or a row naming no id, is no answer.
+ */
+export async function findMembershipsWithCode(
+  promoId: string,
+  ctx: WhopReadContext,
+): Promise<{ ok: true; memberships: MembershipWithCode[] } | { ok: false; fail: ListReadFail }> {
+  if (!ctx.apiKey) return { ok: false, fail: "no_api_key" };
+  const company = process.env.WHOP_COMPANY_ID;
+  if (!company) return { ok: false, fail: "no_company_id" };
+  const query = new URLSearchParams({ promo_code_ids: promoId, company_id: company, first: "10" });
+  const r = await whopGetUrl(`${WHOP_API_V1}/memberships?${query}`, ctx, true);
+  if (!r.ok) return { ok: false, fail: r.fail };
+  const rows = r.body.data;
+  if (!Array.isArray(rows) || !rows.every((m) => m !== null && typeof m === "object" && !Array.isArray(m))) {
+    return { ok: false, fail: "bad_shape" };
+  }
+  const memberships: MembershipWithCode[] = [];
+  for (const m of rows as Record<string, unknown>[]) {
+    const id = idOf(m.id);
+    if (id === null) return { ok: false, fail: "bad_shape" };
+    const product = m.product !== null && typeof m.product === "object" ? (m.product as { title?: unknown }) : null;
+    memberships.push({
+      id,
+      userId: idOf(m.user) ?? idOf(m.user_id),
+      status: typeof m.status === "string" ? m.status : null,
+      productId: idOf(m.product_id) ?? idOf(m.product),
+      productTitle: typeof product?.title === "string" && product.title.trim() !== "" ? product.title.trim() : null,
+      promoCodeId: idOf(m.promo_code_id) ?? idOf(m.promo_code),
+      renewalPrice: priceOf(m.renewal_price),
+    });
+  }
+  return { ok: true, memberships };
 }
 
 /**
@@ -1704,6 +1918,13 @@ export interface CouponCheck {
    * the owner's answers of 2026-10-26.
    */
   unpaid: boolean;
+  /**
+   * The membership the answer was read from, where the 30% that applies
+   * itself attaches the code first (T-137): for a live answer the row's
+   * `whop_membership_id` when it is a membership's (`mem_`), for a stored
+   * answer the stored row's, with no answer (source "none") null.
+   */
+  membershipId: string | null;
 }
 
 /** The student's own approved or applied 30% requests, as the check reads them (THIS STUDENT'S OWN 30% CODE, the header). */
@@ -1837,12 +2058,14 @@ const NOT_THIS_RULE: Record<Exclude<StoredStamp, "this_rule"> | "a_code" | "stud
  * membership on a paid plan, on which every caller but Check Whop again
  * refuses, and which Check Whop again reports (it was `noRealPayment` until
  * the owner's answers of that day; until the review before them
- * judgeStudentDiscount said it and only the cron counted it).
+ * judgeStudentDiscount said it and only the cron counted it). `store: false`
+ * (the 30% job's dry run, T-137) leaves Whop's answer unstored, `saved`
+ * false.
  */
 export async function checkMembershipDiscount(
   db: SupabaseClient,
   studentId: string,
-  opts: { apiKey?: string | null } = {},
+  opts: { apiKey?: string | null; store?: boolean } = {},
 ): Promise<CouponCheck> {
   const apiKey = opts.apiKey === undefined ? (process.env.WHOP_API_KEY ?? null) : opts.apiKey;
   let student: StudentForCheck | undefined;
@@ -1878,12 +2101,14 @@ export async function checkMembershipDiscount(
     const live = await judgeStudentDiscount({ ...student, ownThirtyPromoIds: own.promoIds, holdsOwnThirty: own.held }, ctx);
     if (live.ok) {
       let saved = false;
-      try {
-        const error = await upsertDiscountRows(db, [live.row], { withoutSource: false });
-        if (error) console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${error}`);
-        else saved = true;
-      } catch (e) {
-        console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${e instanceof Error ? e.message : String(e)}`);
+      if (opts.store !== false) {
+        try {
+          const error = await upsertDiscountRows(db, [live.row], { withoutSource: false });
+          if (error) console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${error}`);
+          else saved = true;
+        } catch (e) {
+          console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${e instanceof Error ? e.message : String(e)}`);
+        }
       }
       return {
         discounted: live.row.discounted,
@@ -1893,6 +2118,7 @@ export async function checkMembershipDiscount(
         liveFail: null,
         saved,
         unpaid: live.noRealPayment || live.noPaidPlan,
+        membershipId: isMembershipId(live.row.whop_membership_id) ? live.row.whop_membership_id : null,
       };
     }
     liveFail = live.fail;
@@ -1902,14 +2128,15 @@ export async function checkMembershipDiscount(
   // coupon always; no coupon only when this rule wrote it and nothing since, it names no code but the student's own,
   // and (since T-122's fifth fix round) the student's row was read, so the membership on file is known. Such a no
   // coupon says too whether the student was unpaid (rowShowsUnpaid, since 2026-10-26).
-  let answer: CouponCheck = { discounted: false, code: null, source: "none", via: null, liveFail, saved: false, unpaid: false };
+  let answer: CouponCheck = { discounted: false, code: null, source: "none", via: null, liveFail, saved: false, unpaid: false, membershipId: null };
   let notThisRule: keyof typeof NOT_THIS_RULE | null = null;
   try {
     const stored = await storedFallback(db, studentId);
     if (stored && storedRowApplies(stored.row, student?.whop_membership_id)) {
       const discounted = stored.row.discounted === true;
+      const membershipId = stored.row.whop_membership_id ?? null;
       if (discounted) {
-        answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false, unpaid: false };
+        answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false, unpaid: false, membershipId };
       } else if (student === undefined) {
         notThisRule = "student_unread";
       } else if (stored.stamp !== "this_rule") {
@@ -1925,6 +2152,7 @@ export async function checkMembershipDiscount(
             liveFail,
             saved: false,
             unpaid: rowShowsUnpaid(stored.row),
+            membershipId,
           };
         } else notThisRule = "a_code";
       }

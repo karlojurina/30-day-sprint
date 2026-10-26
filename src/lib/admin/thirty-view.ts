@@ -89,6 +89,8 @@ import {
 } from "@/lib/world/discount-server";
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "@/lib/world/discount-server";
 import { isMembershipId, rowShowsUnpaid, storedRowApplies } from "@/lib/membership-discount";
+// The 30% that applies itself (T-137): the reasons a request waits, from the words module the page reads too (no server code).
+import type { ThirtyReason } from "@/lib/thirty-words";
 import { dayLabel } from "./croatia-dates";
 import { bareUsername } from "./people-common";
 import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data";
@@ -245,6 +247,26 @@ export interface ThirtyRequestRow {
   coupon: Coupon | null;
   /** Where `coupon` comes from, or why there is none. */
   couponCheck: CouponCheck;
+}
+
+/**
+ * The newest failed attempt of a request (an attempt_failed event of v116's
+ * history), as the 30% page's Why line reads it (thirtyWords in
+ * src/lib/thirty-words.ts): its reason, the step that said so, when, and
+ * from its detail Whop's words, the membership's status, the code, the
+ * product it landed on and, for a code attached after a reject, whether Whop
+ * showed it attached. The 30% that applies itself (T-137); the page's rows
+ * carry it from the list that needs a hand.
+ */
+export interface ThirtyFailure {
+  reason: ThirtyReason;
+  step: string | null;
+  at: string;
+  message: string | null;
+  membershipStatus: string | null;
+  code: string | null;
+  product: string | null;
+  confirmed: boolean | null;
 }
 
 export interface ThirtyView {

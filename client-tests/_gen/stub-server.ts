@@ -44,6 +44,10 @@
 //   - an update refuses a row that would break a unique key or index (23505)
 //     and then writes nothing: `tasks` has v27's one open task per student
 //     and scenario (idx_tasks_unique_open).
+//   - an insert into `discount_request_events` (v116, T-137) refuses an
+//     event, actor or reason outside v116's check lists (V116_CHECKS), and
+//     with STUB_STRICT_NULL=1 an .eq() handed null throws "use .is() for
+//     null": PostgREST's eq.null matches nothing, where === would match.
 // `fail['table.op']` makes every such call fail with that error, and
 // `failWhen(call)` fails the calls it returns an error for (one batch of a
 // bulk read, say: the call's filters are in `call.filters`). With `shuffle`
@@ -73,6 +77,8 @@ type PartialUnique = { name: string; key: string[]; where: (r: Row) => boolean }
 const now = () => new Date().toISOString();
 let seq = 0;
 const newId = () => `00000000-0000-4000-8000-${String(++seq).padStart(12, "0")}`;
+/** discount_request_events.id: v116's bigint identity. */
+let eventSeq = 0;
 const none = () => null;
 
 /** PostgREST's max-rows on Supabase: no select answers more rows than this. */
@@ -198,12 +204,53 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       id: newId, student_id: none, status: () => "pending", promo_code: none, whop_promo_id: none,
       reviewed_by: none, reviewed_at: none, rejection_reason: none, gate_lesson_id: none, created_at: now,
       applied_at: none, applied_by: none,
+      // v116 (the 30% that applies itself, T-137): the claim's time, and the three audit columns the trigger turns
+      // into an event and empties. This stand-in runs no trigger, so they keep what the last write set.
+      promo_claimed_at: none, audit_actor: none, audit_correlation_id: none, audit_team_member_id: none,
     },
     // v106: at most one pending request per student.
     partialUnique: [{ name: "discount_requests_one_pending_per_student", key: ["student_id"], where: (r) => r.status === "pending" }],
   },
+  // v116's history: one row per change of a request. The trigger's events are not written here (no trigger runs);
+  // the app's own (attempt_failed, override) are, and v116's three check lists refuse a value outside them.
+  discount_request_events: {
+    columns: {
+      id: () => ++eventSeq, request_id: none, student_id: none, event: none, from_status: none, to_status: none,
+      actor: none, team_member_id: none, correlation_id: none, reason: none, detail: () => ({}), created_at: now,
+    },
+  },
 };
 DEFS.lessons_next = DEFS.lessons;
+
+/**
+ * v116's check lists on discount_request_events, word for word
+ * (supabase/migrations/2026_v116_discount_request_history.sql; thirty-apply.test.mjs holds them equal to the
+ * migration). An insert naming an event, actor or reason outside them is refused as Postgres refuses it (23514, or
+ * 23502 for a missing event or actor), and nothing is written.
+ */
+export const V116_CHECKS = {
+  event: ["requested", "code_made", "applied", "rejected", "reopened", "code_changed", "attempt_failed", "override"],
+  actor: ["student", "auto", "job", "team", "sql"],
+  reason: [
+    "check_refused", "no_membership", "membership_not_active", "membership_has_code", "whop_no_answer", "key_not_allowed",
+    "code_not_made", "apply_refused", "landed_elsewhere", "write_failed", "old_code", "code_unknown",
+  ],
+};
+function checkViolation(table: string, row: Row): DbError | null {
+  if (table !== "discount_request_events") return null;
+  for (const col of ["event", "actor"] as const) {
+    if (row[col] === null || row[col] === undefined) {
+      return { code: "23502", message: `null value in column "${col}" of relation "discount_request_events" violates not-null constraint` };
+    }
+    if (!V116_CHECKS[col].includes(row[col] as string)) {
+      return { code: "23514", message: `new row for relation "discount_request_events" violates check constraint "discount_request_events_${col}_check"` };
+    }
+  }
+  if (row.reason !== null && row.reason !== undefined && !V116_CHECKS.reason.includes(row.reason as string)) {
+    return { code: "23514", message: 'new row for relation "discount_request_events" violates check constraint "discount_request_events_reason_check"' };
+  }
+  return null;
+}
 
 function withDefaults(table: string, row: Row): Row {
   const def = DEFS[table];
@@ -355,7 +402,12 @@ function builder(db: FakeDb, table: string) {
       } else q.returning = c;
       return b;
     },
-    eq: (c: string, v: unknown) => filter(`${c}=${String(v)}`, (r) => r[c] === v),
+    eq: (c: string, v: unknown) => {
+      // PostgREST's eq.null matches no row (a NULL is never equal to anything), where this stand-in's === would match
+      // one. With STUB_STRICT_NULL=1 such a call throws, so a conditional write on a value read as NULL must say .is().
+      if (v == null && process.env.STUB_STRICT_NULL === "1") throw new Error(`use .is() for null (${table}.${c})`);
+      return filter(`${c}=${String(v)}`, (r) => r[c] === v);
+    },
     neq: (c: string, v: unknown) => filter(`${c}!=${String(v)}`, (r) => r[c] !== v),
     in: (c: string, vs: unknown[]) => filter(`${c} in (${vs.map(String).join(",")})`, (r) => vs.includes(r[c])),
     is: (c: string, v: unknown) => filter(`${c} is ${String(v)}`, (r) => (r[c] ?? null) === v),
@@ -448,6 +500,8 @@ function builder(db: FakeDb, table: string) {
   }
 
   function violation(row: Row, others: Row[]): DbError | null {
+    const checked = checkViolation(table, row);
+    if (checked) return checked;
     const clash = uniqueViolation(row, others);
     if (clash) return clash;
     if (table === "student_lesson_completions" && !db.rows("lessons").some((l) => l.id === row.lesson_id)) {
@@ -689,12 +743,11 @@ export function setWhop(fn: (whopUserId: string) => Promise<WhopAnswer>) {
 export async function fetchCompletedLessonsAsAdmin(whopUserId: string) {
   return whopAnswer(whopUserId);
 }
-/** The promo codes the approve route asked Whop for, in order. */
-export const promoCodes: Array<Record<string, unknown>> = [];
-export async function createWhopPromoCode(params: Record<string, unknown>) {
-  promoCodes.push(structuredClone(params));
-  return { id: `promo_${promoCodes.length}` };
-}
+// The promo code Whop makes: stub-admin.ts's createWhopPromoCode, its list of the codes asked for and whop.ts's
+// typed error (T-137). One list for every copy: the approve route's copy points @/lib/whop here, thirty-apply.ts's
+// copy at stub-admin.ts, and a suite counts the codes the same whichever asked. stub-admin.ts imports this file in
+// turn, but reads its exports only inside its functions, so the two load in either order.
+export { WhopCallError, createWhopPromoCode, promoCodes } from "./stub-admin.ts";
 /** What the login's self-heal finds on Whop (fetchActiveMembershipForUser); none unless a test sets it. */
 let activeMembership: (whopUserId: string) => Promise<unknown> = async () => null;
 export function setActiveMembership(fn: (whopUserId: string) => Promise<unknown>) {

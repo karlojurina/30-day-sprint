@@ -12,7 +12,13 @@
 //
 // WHOP. createWhopPromoCode records what it is asked for, then runs what the
 // test set with whileWhopAnswers, if anything: the moment in which another
-// team member can decide the same request while Whop makes the code.
+// team member can decide the same request while Whop makes the code. Since
+// the 30% that applies itself (T-137) it is the one stand-in for the code
+// Whop makes: build.mjs points thirty-apply.ts's copy here, stub-server.ts
+// hands out this same function and list, so a suite counts every code asked
+// for in `promoCodes` whichever copy asked. It throws whop.ts's WhopCallError
+// (its status, or null for no answer) after setWhopCreateError, and answers a
+// body of the test's own after setWhopCreateBody (a 2xx naming no code id).
 
 import { NextResponse, createClient } from "./stub-server.ts";
 
@@ -37,17 +43,46 @@ export function isAuthFailure(result: { error?: unknown }) {
   return result.error !== undefined;
 }
 
-/** The promo codes the approve route asked Whop for, in order. */
+/** whop.ts's typed error, as the real createWhopPromoCode throws it: Whop's HTTP status, or null for no answer. */
+export class WhopCallError extends Error {
+  readonly status: number | null;
+  constructor(status: number | null, message: string) {
+    super(message);
+    this.name = "WhopCallError";
+    this.status = status;
+  }
+}
+
+/** The promo codes the routes and the 30%'s step asked Whop for, in order (a refused one too). */
 export const promoCodes: Array<Record<string, unknown>> = [];
+/** Whether each of those asks was handed an AbortSignal (the step's time limit), in the same order. */
+export const createSignals: boolean[] = [];
 let during: ((params: Record<string, unknown>) => unknown) | null = null;
+let createError: { status: number | null } | null = null;
+let createBody: Record<string, unknown> | null = null;
 
 /** Runs `fn` inside every Whop call from now on (null: nothing). */
 export function whileWhopAnswers(fn: ((params: Record<string, unknown>) => unknown) | null) {
   during = fn;
 }
 
-export async function createWhopPromoCode(params: Record<string, unknown>) {
+/** From now on every create throws a WhopCallError with this status (null: Whop gave no answer); undefined makes codes again. */
+export function setWhopCreateError(status: number | null | undefined) {
+  createError = status === undefined ? null : { status };
+}
+
+/** From now on every create answers this body instead of a made code (a 2xx naming no promo_ id, say); null makes codes again. */
+export function setWhopCreateBody(body: Record<string, unknown> | null) {
+  createBody = body;
+}
+
+export async function createWhopPromoCode(params: Record<string, unknown>, opts: { signal?: AbortSignal } = {}) {
   promoCodes.push(structuredClone(params));
+  createSignals.push(opts.signal instanceof AbortSignal);
   if (during) await during(params);
+  if (createError) {
+    throw new WhopCallError(createError.status, `Whop promo code creation failed: ${createError.status === null ? "no answer" : `HTTP ${createError.status}`}`);
+  }
+  if (createBody) return structuredClone(createBody);
   return { id: `promo_${promoCodes.length}` };
 }

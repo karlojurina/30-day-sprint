@@ -33,7 +33,20 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *   ?discount=eighty         the same student with one more: 49 of 61, the
  *                            least the 80% takes, so it is ready
  *   ?discount=pending        as ready, and an application sent 2 hours ago
+ *   ?discount=pending-auto   as ready, and a send comes back pending: the app
+ *                            could not put the 30% on in the request (Whop
+ *                            slow, a stored coupon answer, the switch off),
+ *                            so the job or the team finishes it (the 30%
+ *                            that applies itself, T-137; every other preset's
+ *                            send comes back applied, below)
  *   ?discount=approved       as ready, and the application approved
+ *   ?discount=approved-6-days  as approved, the application made 6 days ago
+ *                            (the first payment 8 days ago): past the 5 days
+ *                            in which an applied one's full-screen moment can
+ *                            start (celebrations.ts RENEWAL_AHEAD_DAYS), so a
+ *                            moment that fell due while it was approved takes
+ *                            "The discount has been approved." once it is
+ *                            applied (setStatus, below)
  *   ?discount=applied        as ready, and the 30% on the Whop subscription
  *   ?discount=applied-after-renewal  first payment on 2026-10-12, applied for
  *                            on 2026-10-15 and applied, and this student's
@@ -125,14 +138,19 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *   ?questions=fail          the six, and sending them is refused with the
  *                            words a failed request shows
  *
- * Sending resolves in memory after 600 ms: the application turns pending, as
- * the route's row would, and the answers are kept. So does the plain Apply. No
- * request leaves the page. The clock is the page's load time, so the days
+ * Sending resolves in memory after 600 ms: the application comes back
+ * applied, as the request routes answer once the app has put the 30% on (the
+ * 30% that applies itself, T-137; pending until then, and with
+ * ?discount=pending-auto), and the answers are kept. So does the plain Apply.
+ * No request leaves the page. The clock is the page's load time, so the days
  * left do not drift while a test runs.
  *
  * window.__fixtureDiscount, for the browser run: the preset, the requests,
- * the answers sent (one array per application) and how many plain requests
- * went in.
+ * the answers sent (one array per application), how many plain requests went
+ * in, and setStatus(status), which moves the preset's application on in
+ * memory, as the app or the team would while the page is open (a moment that
+ * fell due while approved, opening once applied: v6-celebrate-applied.mjs
+ * row 9).
  */
 
 export type DiscountPreset =
@@ -141,7 +159,9 @@ export type DiscountPreset =
   | "almost"
   | "eighty"
   | "pending"
+  | "pending-auto"
   | "approved"
+  | "approved-6-days"
   | "applied"
   | "applied-after-renewal"
   | "rejected"
@@ -158,14 +178,16 @@ export type DiscountPreset =
   | "unpaid"
   | "unpaid-expired";
 const PRESETS: readonly DiscountPreset[] = [
-  "locked", "ready", "almost", "eighty", "pending", "approved", "applied", "applied-after-renewal", "rejected", "expired",
-  "before-launch", "september", "october", "october-expired", "october-old-course",
-  "october-old-course-pending", "october-old-course-approved", "no-payment", "has-discount", "unpaid", "unpaid-expired",
+  "locked", "ready", "almost", "eighty", "pending", "pending-auto", "approved", "approved-6-days", "applied",
+  "applied-after-renewal", "rejected", "expired", "before-launch", "september", "october", "october-expired",
+  "october-old-course", "october-old-course-pending", "october-old-course-approved", "no-payment", "has-discount",
+  "unpaid", "unpaid-expired",
 ];
 /** The presets with an application in, and its status. Their student has watched every video the offer asks for. */
 const APPLIED: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
   pending: "pending",
   approved: "approved",
+  "approved-6-days": "approved",
   applied: "applied",
   rejected: "rejected",
 };
@@ -259,17 +281,18 @@ export function discountPresetOf(search: string | null): DiscountPreset | null {
 }
 
 /**
- * The videos a preset needs watched on top of ?p=: for ready, has-discount,
- * unpaid and every preset with an application in, every lesson the offer
- * counts (discount.ts requiredLessons), so the map's lanterns and counts agree
- * with the panel;
+ * The videos a preset needs watched on top of ?p=: for ready, pending-auto,
+ * has-discount, unpaid and every preset with an application in, every lesson
+ * the offer counts (discount.ts requiredLessons), so the map's lanterns and
+ * counts agree with the panel;
  * for eighty the first videosNeeded of them in course order, the least the
  * 80% takes, and for almost one fewer.
  */
 export function discountPresetIds(search: string | null, lessons: readonly CatalogLessonLike[]): string[] {
   const preset = discountPresetOf(search);
   const edge = preset === "almost" || preset === "eighty";
-  const everyVideo = preset === "ready" || preset === "applied-after-renewal" || preset === "has-discount" || preset === "unpaid";
+  const everyVideo =
+    preset === "ready" || preset === "pending-auto" || preset === "applied-after-renewal" || preset === "has-discount" || preset === "unpaid";
   if (preset === null || (!edge && !everyVideo && !APPLIED[preset])) return [];
   const course: DiscountLesson[] = [...lessons]
     .sort((a, b) => a.sort_order - b.sort_order)
@@ -293,6 +316,7 @@ type FixtureDiscountWindow = Window & {
     requests: () => DiscountRequestRow[];
     answers: () => DiscountFeedbackAnswer[][];
     plain: () => number;
+    setStatus: (status: DiscountRequestRow["status"]) => void;
   };
 };
 
@@ -302,9 +326,13 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   // The page's load time: the presets count from it.
   const [boot] = useState(() => Date.now());
   const [sent, setSent] = useState<DiscountRequestRow[]>([]);
+  /** The preset's application moved on in memory (window.__fixtureDiscount.setStatus), or null: as the preset has it. */
+  const [moved, setMoved] = useState<DiscountRequestRow["status"] | null>(null);
   /** What each application carried, and how many went in with no questions. */
   const answersRef = useRef<DiscountFeedbackAnswer[][]>([]);
   const plainRef = useRef(0);
+  /** What a send comes back as: applied, as the request routes answer once the app has put the 30% on; pending-auto, pending. */
+  const sentStatus: DiscountRequestRow["status"] = preset === "pending-auto" ? "pending" : "applied";
 
   // Expired: 20 days in, never before the launch (20 days back from today was,
   // until 2026-10-29, so the panel said "joined before the new course"), and
@@ -334,6 +362,7 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   const firstPaidAt = useMemo(() => {
     switch (preset) {
       case "ready":
+      case "pending-auto":
       case "almost":
       case "eighty":
       case "has-discount":
@@ -344,6 +373,8 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
       case "applied":
       case "rejected":
         return new Date(boot - 6 * DAY_MS).toISOString();
+      case "approved-6-days":
+        return new Date(boot - 8 * DAY_MS).toISOString();
       case "expired":
       case "unpaid-expired":
         return new Date(expiredPaid).toISOString();
@@ -368,7 +399,8 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   }, [preset, boot, expiredPaid]);
 
   const requests = useMemo<DiscountRequestRow[]>(() => {
-    const at = new Date(boot - 2 * HOUR_MS).toISOString();
+    // Applied for 2 hours ago; approved-6-days, 6 days ago.
+    const at = new Date(boot - (preset === "approved-6-days" ? 6 * DAY_MS : 2 * HOUR_MS)).toISOString();
     const status = preset === null ? undefined : APPLIED[preset];
     const old = preset === null ? undefined : OLD_COURSE[preset];
     const base: DiscountRequestRow[] = old
@@ -378,15 +410,15 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
         : status
           ? [{ id: "fixture-request", status, created_at: at, rejection_reason: status === "rejected" ? FIXTURE_REJECTION : null }]
           : [];
-    return [...base, ...sent];
-  }, [preset, boot, sent]);
+    return [...(moved ? base.map((r) => ({ ...r, status: moved })) : base), ...sent];
+  }, [preset, boot, sent, moved]);
 
   const apply = useCallback(async (): Promise<string | null> => {
     await new Promise((r) => setTimeout(r, APPLY_MS));
     plainRef.current += 1;
-    setSent((prev) => (prev.length ? prev : [{ id: "fixture-sent", status: "pending", created_at: new Date().toISOString() }]));
+    setSent((prev) => (prev.length ? prev : [{ id: "fixture-sent", status: sentStatus, created_at: new Date().toISOString() }]));
     return null;
-  }, []);
+  }, [sentStatus]);
 
   const questions = questionsPreset === "none" ? NO_QUESTIONS : QUESTIONS;
   const submit = useCallback(
@@ -394,10 +426,10 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
       await new Promise((r) => setTimeout(r, APPLY_MS));
       if (questionsPreset === "fail") return SEND_REFUSED;
       answersRef.current.push(answers);
-      setSent((prev) => (prev.length ? prev : [{ id: "fixture-sent", status: "pending", created_at: new Date().toISOString() }]));
+      setSent((prev) => (prev.length ? prev : [{ id: "fixture-sent", status: sentStatus, created_at: new Date().toISOString() }]));
       return null;
     },
-    [questionsPreset],
+    [questionsPreset, sentStatus],
   );
 
   const membershipDiscounted = preset === "has-discount";
@@ -414,6 +446,7 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
       requests: () => value.requests.slice(),
       answers: () => answersRef.current.map((a) => a.slice()),
       plain: () => plainRef.current,
+      setStatus: (status) => setMoved(status),
     };
     return () => {
       delete w.__fixtureDiscount;

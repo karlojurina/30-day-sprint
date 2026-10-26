@@ -32,7 +32,6 @@ import { SKY_MARKS } from "@/lib/world-v6/layout";
 import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
 import { DISCOUNT_PERCENT, MEMBERSHIP_DISCOUNT_LINE, PAID_PLAN_LINE } from "@/lib/world/discount";
-import { renewalStillAhead } from "@/lib/world/celebrations";
 import { checkpointCounts, checkpointView, discountRule, expiredRuleLine, liveRuleLine, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
@@ -4210,8 +4209,9 @@ function BountyBody({
  * both the hover's tip and its description. apply() takes no click, Enter or
  * Space before the state is ready. The copy reuses the old dashboard's
  * (DiscountClaimCelebration, StatsWidget) where it still holds: "30% off your
- * next month", "within 48 hours", "your Whop subscription". The code is never
- * shown (the team attaches it on Whop).
+ * next month", "your Whop subscription". The code is never shown (R6 of the
+ * 30% that applies itself, the owner's words of 2026-10-26: "don't show them
+ * the discount. Just say the discount has been approved").
  *
  * Since Lovro's second Loom (2026-10-16) it opens for every student and state.
  * Where the offer is closed for the student (the deadline passed, a first
@@ -4240,15 +4240,19 @@ function BountyBody({
  * reaches those students as the date in "Apply by" and, once it has passed,
  * in "This closed on". An
  * application made on the old dashboard (st.madeBeforeLaunch) gets its own
- * words: "within 48 hours" and "on your next renewal" may no longer hold.
+ * words: the new course's, which say the app puts the 30% on, may not hold
+ * for it.
  * Every deadline shows its date and hour in the student's own time zone
  * (checkpointView.ts deadlineAt).
  *
- * Applied, "You'll see 30% off on your next renewal" shows for 5 days after
- * the application (celebrations.ts renewalStillAhead, the 2026-10-20 review):
- * the applied state lasts for good, and after the renewal that used the 30%
- * the line was false. Then it says "You got your 30%. The team put it on your
- * Whop subscription."
+ * In review, approved and applied (R6 of the 30% that applies itself,
+ * T-137): "Your application is in. You'll see it here once the 30% is on
+ * your Whop subscription.", "Approved. You'll see it here once it's on your
+ * Whop subscription." and "The discount has been approved.", the last at any
+ * age. Until then the applied line said "next renewal" for 5 days after the
+ * application (the 2026-10-20 review: after the renewal that used the 30% it
+ * was false), then "You got your 30%. The team put it on your Whop
+ * subscription."
  */
 function CheckpointBody({
   discount,
@@ -4373,7 +4377,7 @@ function CheckpointBody({
           </span>
         </p>
         <p className={s.desc}>
-          Your application is in. The team checks it and confirms within 48 hours, then puts the {DISCOUNT_PERCENT}% on your Whop subscription.
+          Your application is in. You&apos;ll see it here once the {DISCOUNT_PERCENT}% is on your Whop subscription.
         </p>
       </>
     );
@@ -4383,20 +4387,15 @@ function CheckpointBody({
         Your {DISCOUNT_PERCENT}% was approved before the new course opened. If it hasn&apos;t shown up on a payment yet, ask in Discord.
       </p>
     ) : (
-      <p className={s.desc}>
-        Approved. The team is putting it on your Whop subscription, and you&apos;ll see it on your next renewal. Nothing else to do.
-      </p>
+      <p className={s.desc}>Approved. You&apos;ll see it here once it&apos;s on your Whop subscription.</p>
     );
   } else if (st.kind === "applied") {
-    // "On your next renewal" only while that renewal is sure to be still
-    // ahead (celebrations.ts renewalStillAhead, the 30%'s moment's rule);
-    // later it may have used the 30% already, so the line says what stays true.
+    // R6: one sentence at any age, so no date is read. Until the 30% applied itself it said "on your next renewal"
+    // for 5 days after the application, then "You got your 30%. The team put it on your Whop subscription."
     body = st.madeBeforeLaunch ? (
       <p className={s.desc}>You got your {DISCOUNT_PERCENT}% before the new course opened. It&apos;s one per student.</p>
-    ) : renewalStillAhead(st.at, discount.now) ? (
-      <p className={s.desc}>It&apos;s on your Whop subscription. You&apos;ll see {DISCOUNT_PERCENT}% off on your next renewal.</p>
     ) : (
-      <p className={s.desc}>You got your {DISCOUNT_PERCENT}%. The team put it on your Whop subscription.</p>
+      <p className={s.desc}>The discount has been approved.</p>
     );
   } else if (st.kind === "rejected") {
     body = (

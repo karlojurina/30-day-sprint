@@ -249,8 +249,12 @@ function videoTime(seconds: number): string {
   return `about ${hours} ${hours === 1 ? "hour" : "hours"} of video`;
 }
 
-/** What a student with a request in review reads when they apply again. */
-export const ALREADY_APPLIED = "You already applied for the discount. We're reviewing it.";
+/**
+ * What a student with a request in review reads when they apply again. Since
+ * the 30% applies itself (T-137, R6, the owner's words of 2026-10-26) it says
+ * where the 30% will show, where it said "We're reviewing it."
+ */
+export const ALREADY_APPLIED = `You already applied for the discount. You'll see it here once the ${DISCOUNT_PERCENT}% is on your Whop subscription.`;
 
 /**
  * What a student reads when saving the request fails for any other reason: a

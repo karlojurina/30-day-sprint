@@ -12,6 +12,14 @@
 // (renewalStillAhead), and the panel says "next renewal" only as long, then
 // "You got your 30%. The team put it on your Whop subscription."
 //
+// SINCE THE 30% APPLIES ITSELF (T-137, R6, the owner's words of 2026-10-26)
+// the panel says "The discount has been approved." at any age, so it reads no
+// date. The moment still counts the 5 days, and approvalOnMap is as it was: no
+// moment starts for an applied request from day 5. One already due takes its
+// line from the discount state as it is, on the same clock: "Your 30% is on
+// your next payment." within the 5 days, "The discount has been approved."
+// after them (WorldCelebrations.tsx).
+//
 //   1  The reviewer's student, through the real discountState and
 //      approvalOnMap (the _gen copies): first paid 10 October, applied for on
 //      15 October and applied. On 17 October the moment plays; on 20
@@ -25,8 +33,11 @@
 //      30 days, whichever is sooner). The limit must leave at least a day
 //      before the shortest of those gaps, so moving a date closer fails here.
 //   3  The source: WorldMap.tsx gives approvalOnMap the discount's clock, the
-//      one the panel gets too (WorldDiscount.now), and the panel's applied
-//      line reads renewalStillAhead with it, with both lines.
+//      one the panel gets too (WorldDiscount.now) and WorldCelebrations, with
+//      the state's own applied and date; WorldCelebrations reads
+//      renewalStillAhead on it for the moment's line. The panel's applied
+//      line is the one sentence and reads no date (until R6 it read
+//      renewalStillAhead, with two lines).
 //
 //   node client-tests/build.mjs && node --experimental-strip-types client-tests/discount-next-renewal.test.mjs
 import fs from 'node:fs'
@@ -125,14 +136,18 @@ ok(LIMIT < shortest.gap, `${C.RENEWAL_AHEAD_DAYS} days is shorter than that gap 
 ok(LIMIT + DAY <= shortest.gap, 'and leaves at least a day spare, for a wrong clock on the student\'s device or a charge taken early', `spare ${span(shortest.gap - LIMIT)}`)
 
 // ── 3. The source ───────────────────────────────────────────────────────────
-console.log('\n3. The map and the panel read it on the discount\'s clock')
+console.log('\n3. The map and the moment read it on the discount\'s clock; the panel reads no date')
 const host = read('src/components/world/WorldMap.tsx')
 ok(/const approval = approvalOnMap\(discountNow, discountClock\);/.test(host), 'WorldMap.tsx asks approvalOnMap on the discount\'s clock')
 ok(/return \{ state: discountNow, now: discountClock, next, apply: applyDiscount \};/.test(host), 'and hands the map the same clock (WorldDiscount.now)')
+ok(/<WorldCelebrations[^>]*\snow=\{discountClock\}/.test(host), 'and WorldCelebrations too, for the moment\'s line')
+const moments = read('src/components/world/WorldCelebrations.tsx')
+ok(/const renewalAhead = renewalStillAhead\(at \?\? approval\?\.at \?\? "", now\);/.test(moments),
+   'WorldCelebrations counts the 5 days with renewalStillAhead on that clock, from the state\'s date or the one it had when the moment fell due')
 const map = read('src/components/world-v6/WorldV6.tsx')
-ok(/import \{ renewalStillAhead \} from "@\/lib\/world\/celebrations";/.test(map), 'WorldV6.tsx reads renewalStillAhead from celebrations.ts')
-ok(/\) : renewalStillAhead\(st\.at, discount\.now\) \? \(\s*<p className=\{s\.desc\}>It&apos;s on your Whop subscription\. You&apos;ll see \{DISCOUNT_PERCENT\}% off on your next renewal\.<\/p>\s*\) : \(\s*<p className=\{s\.desc\}>You got your \{DISCOUNT_PERCENT\}%\. The team put it on your Whop subscription\.<\/p>/.test(map),
-   'the panel\'s applied line: "next renewal" while it is ahead, then "You got your 30%. The team put it on your Whop subscription."')
+ok(!/renewalStillAhead/.test(map), 'WorldV6.tsx no longer reads renewalStillAhead: the panel\'s applied line has no age')
+ok(/\} else if \(st\.kind === "applied"\) \{[\s\S]*?body = st\.madeBeforeLaunch \? \(\s*<p className=\{s\.desc\}>You got your \{DISCOUNT_PERCENT\}% before the new course opened\. It&apos;s one per student\.<\/p>\s*\) : \(\s*<p className=\{s\.desc\}>The discount has been approved\.<\/p>\s*\);\s*\} else if \(st\.kind === "rejected"\)/.test(map),
+   'the panel\'s applied line on the new course: "The discount has been approved." at any age (R6; "next renewal" for 5 days, then "You got your 30%. The team put it on your Whop subscription." until then); the old dashboard\'s keeps its words')
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1) }

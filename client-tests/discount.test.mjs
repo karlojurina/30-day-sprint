@@ -21,7 +21,7 @@ import {
 } from './_gen/discount.ts'
 import { DISCOUNT_WINDOW_DAYS as CONSTANTS_WINDOW_DAYS } from './_gen/constants.ts'
 import {
-  LESSON_COLUMNS, OLD_COURSE_REQUEST_REFUSAL, REQUEST_COLUMNS, REQUEST_GRACE_MS, VIDEO_COLUMNS,
+  ALREADY_APPLIED, LESSON_COLUMNS, OLD_COURSE_REQUEST_REFUSAL, REQUEST_COLUMNS, REQUEST_GRACE_MS, VIDEO_COLUMNS,
   approvalVerdict, decideDiscountRequest, discountRefusalMessage, explainOldCourseRequest, factsFromReads,
   loadDiscountReads, toDiscountLessons, videoDoneIds,
 } from './_gen/discount-server.ts'
@@ -538,10 +538,11 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
        && expiredRuleLine(DISCOUNT_EIGHTY_FROM, 'Video Ads II') === rule.closed && expiredRuleLine('2026-10-29T12:00:00.000Z', 'Video Ads II') === rule.closed,
      'the expired panel\'s line: the shared deadline and a window that ended the millisecond before the rule read "was for finishing every video"; one ending at it or later reads the 80%')
   ok(closedBeforeEighty('not a date') === false && expiredRuleLine('not a date', 'Video Ads II') === rule.closed, 'a date that does not parse reads the rule as it stands')
-  ok(rule.ready === "You've watched at least 80% of the videos through Video Ads II. Apply now and the team confirms within 48 hours.",
-     'ready, above Apply ("Every video through Video Ads II is watched." until 2026-10-26)', rule.ready)
+  // The 30% that applies itself (T-137, R6): Apply puts the 30% on, so the ready lines no longer say "the team confirms within 48 hours".
+  ok(rule.ready === "You've watched at least 80% of the videos through Video Ads II. Apply now and we'll put the 30% on your Whop subscription.",
+     'ready, above Apply ("Every video through Video Ads II is watched." until 2026-10-26; "the team confirms within 48 hours" until the 30% applied itself)', rule.ready)
   ok(rule.openEvery === 'Finish every video through Video Ads II within 2 weeks of joining to apply.'
-       && rule.readyEvery === "You've watched every video through Video Ads II. Apply now and the team confirms within 48 hours.",
+       && rule.readyEvery === "You've watched every video through Video Ads II. Apply now and we'll put the 30% on your Whop subscription.",
      'a window that ends before the 80% rule, seen open (a clock before 26 October): the every-video lines', show([rule.openEvery, rule.readyEvery]))
   ok(discountRule('Somewhere Else').open === 'Watch 80% of the videos through Somewhere Else within 2 weeks of joining to apply.',
      'the place is the name handed in, never written into the words')
@@ -553,6 +554,13 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
      `${DISCOUNT_WINDOW_DAYS} days; ${show(twoWeeks)}`)
   ok([rule.open, rule.closed, rule.closedBefore, rule.beforeLaunch, rule.ready, rule.openEvery, rule.readyEvery, ...msgs].every((m) => !m.includes('—') && !/unlock|EcomTalent/i.test(m) && !/\btwo\b|fourteen/i.test(m)),
      'no em dash, no "unlock", no "EcomTalent", numbers as digits')
+  // R6 (the owner, 2026-10-26: "don't show them the discount. Just say the discount has been approved"): the lines this
+  // build changed promise nothing the app leaves to the team, and none names or shows a code.
+  const r6 = [rule.ready, rule.readyEvery, ALREADY_APPLIED]
+  ok(ALREADY_APPLIED === "You already applied for the discount. You'll see it here once the 30% is on your Whop subscription.",
+     'a second Apply while one is in: "You\'ll see it here once the 30% is on your Whop subscription." ("We\'re reviewing it." until the 30% applied itself)', ALREADY_APPLIED)
+  ok(r6.every((m) => !/\bcode\b|promo|ECOM30|48 hours|team confirms|reviewing/i.test(m) && !m.includes('—') && !/unlock|EcomTalent/i.test(m)),
+     'the ready lines and the second Apply\'s: no code, no "48 hours", no review by the team, no em dash, no "unlock", no "EcomTalent"', show(r6))
 }
 
 {
@@ -601,7 +609,7 @@ console.log('\n=== decideDiscountRequest: an early-October joiner who already ha
   const NOW = new Date('2026-10-20T10:00:00Z')
   const ALL = ['x01', 'x05', 'x06']
   const words = {
-    pending: "You already applied for the discount. We're reviewing it.",
+    pending: "You already applied for the discount. You'll see it here once the 30% is on your Whop subscription.",
     approved: 'Your discount is already approved.',
     applied: 'Your discount is already on your membership.',
   }

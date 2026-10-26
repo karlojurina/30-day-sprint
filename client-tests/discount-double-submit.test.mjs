@@ -4,7 +4,9 @@
 // the second insert with 23505. The two routes that write a request
 // (POST /api/discounts/request and POST /api/discounts/submit-feedback) answer
 // that the way they answer a request already in review: 400, "You already
-// applied for the discount. We're reviewing it.", state "pending". Never the
+// applied for the discount. You'll see it here once the 30% is on your Whop
+// subscription." (ALREADY_APPLIED; "We're reviewing it." until the 30% applied
+// itself), state "pending". Never the
 // database's words, and the first request stands. Any other failure, on either
 // route and either course, is answered with one plain sentence (SAVE_FAILED,
 // 17 October), the status as before, and the real error goes to the server
@@ -228,7 +230,7 @@ console.log('\n=== Apply, new course: two clicks at the same moment ===')
   ok(db.calls('submit_discount_with_feedback', 'rpc').length === 2 && db.calls('discount_requests', 'insert').length === 2,
      'both clicks passed the route\'s checks and the function\'s, and reached the insert, as a real double submit does')
   ok(won.status === 200 && won.body.status === 'pending' && won.body.student_id === 's1', 'the first request is made', show(won))
-  ok(lost.status === 400 && same(lost.body, IN_REVIEW), 'the second: 400, "You already applied for the discount. We\'re reviewing it.", state pending (it was 500 "Failed to create request")', show(lost))
+  ok(lost.status === 400 && same(lost.body, IN_REVIEW), 'the second: 400, "You already applied for the discount. You\'ll see it here once the 30% is on your Whop subscription.", state pending (it was 500 "Failed to create request")', show(lost))
   ok(!dbWords(lost.body), 'none of the database\'s words reach the student')
   ok(db.rows('discount_requests').length === 1 && same(stepNames(), ['discount-requested']), 'one request stands, and the team\'s hook ran for it alone', show(stepNames()))
   const later = await apply()

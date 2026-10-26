@@ -13,8 +13,12 @@
 // src/lib/world/discount.ts) for a student who paid after the launch and one
 // who paid in early October and applied on the old dashboard, so the test
 // follows the rule the map itself runs. The second half reads the map's
-// source: WorldMap.tsx hands the celebration approvalOnMap's answer, and the
-// celebration's line for an applied one is the plain one asked for.
+// source: WorldMap.tsx hands the celebration approvalOnMap's request id, with
+// the discount state's own applied and date and the discount's clock, and the
+// celebration's lines are R6's (the 30% that applies itself, the owner's words
+// of 2026-10-26): applied, "Your 30% is on your next payment." within 5 days
+// of the application and "The discount has been approved." after; approved,
+// "You'll see it on your map once it's on your Whop subscription.".
 //
 //   node client-tests/build.mjs && node --experimental-strip-types client-tests/discount-celebration.test.mjs
 import fs from 'node:fs'
@@ -62,8 +66,8 @@ console.log('\nWhich application the map\'s moment plays for (approvalOnMap)')
 ok(typeof C.approvalOnMap === 'function', 'celebrations.ts has approvalOnMap')
 if (typeof C.approvalOnMap === 'function') {
   const cases = [
-    ['approved on the new course: plays, its line the team is putting it on', newCourse('approved'), { requestId: 'req-new', applied: false }],
-    ['applied on the new course before the student is back on the map (Approve and Mark applied in one sitting): plays, its line says it is on', newCourse('applied'), { requestId: 'req-new', applied: true }],
+    ['approved on the new course: plays, its line that it shows on the map once it is on the Whop subscription', newCourse('approved'), { requestId: 'req-new', applied: false }],
+    ['applied on the new course (the app put it on when the student applied, or the team since): plays, its line says it is on', newCourse('applied'), { requestId: 'req-new', applied: true }],
     ['pending: nothing', newCourse('pending'), null],
     ['rejected: nothing', newCourse('rejected'), null],
     ['approved on the old dashboard before the launch: nothing (its 30% may already be on a past payment)', oldCourse('approved'), null],
@@ -86,15 +90,20 @@ if (typeof C.approvalOnMap === 'function') {
      'celebrated while approved (the key is the request id), then applied: it does not play again', show({ key: approved.requestId, now: applied.requestId }))
 }
 
-console.log('\nThe map hands the celebration this rule, and the applied line')
+console.log('\nThe map hands the celebration this rule and the state as it is; the lines are R6\'s')
 const host = read('src/components/world/WorldMap.tsx')
 ok(/const approval = approvalOnMap\(discountNow, discountClock\);/.test(host), 'WorldMap.tsx asks approvalOnMap with its discount state and the discount\'s clock')
-ok(/approvedRequestId=\{approval\?\.requestId \?\? null\}/.test(host) && /applied=\{approval\?\.applied \?\? false\}/.test(host),
-   'and passes its request id and whether it is applied to WorldCelebrations')
+ok(/approvedRequestId=\{approval\?\.requestId \?\? null\}/.test(host) && /applied=\{discountNow\.kind === "applied"\}/.test(host)
+     && /at=\{"at" in discountNow \? discountNow\.at : null\}/.test(host) && /now=\{discountClock\}/.test(host),
+   'and passes WorldCelebrations its request id, with the discount state\'s own applied and date and the discount\'s clock (approvalOnMap names no applied request from day 5)')
 ok(!/discountNow\.kind === "approved"/.test(host), 'no copy of the old approved-only test is left in WorldMap.tsx')
 const moment = read('src/components/map/DiscountApprovedCelebration.tsx')
-ok(/where === "map" && applied \? \(\s*<>Your 30% is on your next payment\.<\/>/.test(moment), 'the map\'s line for an applied one: "Your 30% is on your next payment."')
-ok(/applied=\{applied\}/.test(read('src/components/world/WorldCelebrations.tsx')), 'WorldCelebrations passes it on')
+ok(/where === "map" && applied \? \(\s*renewalAhead \? \(\s*<>Your 30% is on your next payment\.<\/>\s*\) : \(\s*<>The discount has been approved\.<\/>\s*\)\s*\) : where === "map" \? \(\s*<>You&rsquo;ll see it on your map once it&rsquo;s on your Whop subscription\.<\/>/.test(moment),
+   'the map\'s lines (R6): applied, "Your 30% is on your next payment." while the renewal is still ahead, else "The discount has been approved."; approved, "You\'ll see it on your map once it\'s on your Whop subscription."')
+ok(/Our team has applied the 30% discount to your\s+subscription\. You&rsquo;ll see it on your next Whop\s+renewal\. Nothing else to do\./.test(moment), 'the old dashboard keeps its words')
+const moments = read('src/components/world/WorldCelebrations.tsx')
+ok(/const lineApplied = applied \|\| approval\?\.applied === true;/.test(moments) && /applied=\{lineApplied\}/.test(moments) && /renewalAhead=\{renewalAhead\}/.test(moments),
+   'WorldCelebrations passes it on: applied now or when the moment fell due, and whether the renewal is still ahead')
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)
 if (fails.length) { fails.forEach((f) => console.log('  - ' + f)); process.exit(1) }

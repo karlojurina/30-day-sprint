@@ -9,20 +9,27 @@ interface DiscountApprovedCelebrationProps {
   show: boolean;
   onDismiss: () => void;
   /**
-   * "map": the new course's map (WorldCelebrations.tsx). It plays when the
-   * application is approved, before the team has put the 30% on, so its line
-   * says the team is putting it on, in the map panel's words. The old
-   * dashboard (the default) keeps its words (D5).
+   * "map": the new course's map (WorldCelebrations.tsx). For an application
+   * approved and not applied yet its line says the student will see it on the
+   * map once it is on the Whop subscription (R6 of the 30% that applies
+   * itself, the owner's words of 2026-10-26; that the team was putting it on
+   * until then). The old dashboard (the default) keeps its words (D5).
    */
   where?: "dashboard" | "map";
   /**
-   * On the map: the application is applied already (the team approved it and
-   * put the 30% on before the student was back on the map), so the line says
-   * it is on (2026-10-20, streak-2; Lovro may change the words). The map passes
-   * it only within 5 days of the application, while that payment is sure to
-   * be still ahead (celebrations.ts approvalOnMap).
+   * On the map: the application is applied (the app put the 30% on when the
+   * student applied, or the team since), so the line says it is on
+   * (2026-10-20, streak-2).
    */
   applied?: boolean;
+  /**
+   * On the map, with `applied`: the renewal the 30% goes on is sure to be
+   * still ahead (celebrations.ts renewalStillAhead: within 5 days of the
+   * application), so the line says it is on the next payment. False: that
+   * renewal may have used it, and the line says "The discount has been
+   * approved." (R6). Left out: still ahead, as before.
+   */
+  renewalAhead?: boolean;
 }
 
 /** A finger, not a mouse: the closing line says tap. */
@@ -63,16 +70,23 @@ const getFalse = () => false;
  * the key; the closing line is readable (it was 20% white) and says how. On
  * the map (`where="map"`) the explainer no longer says the 30% is applied:
  * "The team is putting it on your Whop subscription, and you'll see it on
- * your next renewal. Nothing else to do.", as the map's panel says when
+ * your next renewal. Nothing else to do.", as the map's panel said when
  * approved. Since 2026-10-20 the map also plays it for an application the
  * team has applied already (`applied`), whose line is "Your 30% is on your
  * next payment."
+ *
+ * Since the 30% applies itself (T-137, R6, the owner's words of 2026-10-26)
+ * the map's lines are: applied, "Your 30% is on your next payment." while
+ * that renewal is still ahead (`renewalAhead`) and "The discount has been
+ * approved." after; approved, "You'll see it on your map once it's on your
+ * Whop subscription." No line names or shows a code.
  */
 export function DiscountApprovedCelebration({
   show,
   onDismiss,
   where = "dashboard",
   applied = false,
+  renewalAhead = true,
 }: DiscountApprovedCelebrationProps) {
   /** Closed by a click, Esc or the safety net; the exit animation then calls onDismiss. */
   const [closed, setClosed] = useState(false);
@@ -224,12 +238,13 @@ export function DiscountApprovedCelebration({
                 }}
               >
                 {where === "map" && applied ? (
-                  <>Your 30% is on your next payment.</>
+                  renewalAhead ? (
+                    <>Your 30% is on your next payment.</>
+                  ) : (
+                    <>The discount has been approved.</>
+                  )
                 ) : where === "map" ? (
-                  <>
-                    The team is putting it on your Whop subscription, and
-                    you&rsquo;ll see it on your next renewal. Nothing else to do.
-                  </>
+                  <>You&rsquo;ll see it on your map once it&rsquo;s on your Whop subscription.</>
                 ) : (
                   <>
                     Our team has applied the 30% discount to your

@@ -234,6 +234,9 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
 
   // The application the full-screen moment is for: approved, or applied since,
   // within 5 days of the application (approvalOnMap), on the discount's clock.
+  // Its line reads the state itself (R6): applied or not, and the request's
+  // date on the same clock, so a moment already due says it is on once it is,
+  // from day 5 too, when approvalOnMap no longer names it.
   const approval = approvalOnMap(discountNow, discountClock);
 
   return (
@@ -244,7 +247,9 @@ function SourcedMap({ model }: { model: ReadyMapModel }) {
       <WorldDiscountForm form={discountForm} paused={lessonId !== null} />
       <WorldCelebrations
         approvedRequestId={approval?.requestId ?? null}
-        applied={approval?.applied ?? false}
+        applied={discountNow.kind === "applied"}
+        at={"at" in discountNow ? discountNow.at : null}
+        now={discountClock}
         paused={lessonId !== null}
       />
     </>

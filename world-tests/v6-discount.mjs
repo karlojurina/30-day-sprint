@@ -11,7 +11,12 @@
  * (src/app/dev/world-app/fixtureDiscount.tsx; without it, a first payment 3
  * days ago): the offer's states in memory, Apply resolving in memory.
  * Headless Chrome on the real GPU, 1691x1278 unless a row says otherwise.
- * About 6 to 7 minutes.
+ * About 7 to 8 minutes.
+ *
+ * Since the 30% applies itself (T-137, R6, the owner's words of 2026-10-26)
+ * the stand-in answers a send with the request applied, as the request routes
+ * do once the app has put the 30% on; ?discount=pending-auto keeps it
+ * pending, as when the app could not finish it then (rows 8, 14, 15, 33).
  *
  * One PASS or FAIL line per row, with what was measured. Every row loads its
  * own page in its own browser context. After the rows, one MEASURED line:
@@ -52,9 +57,14 @@
  *   8  ready: the chip says to apply, the cache is ready, Apply is on (no
  *      aria-disabled, no reason, filled) and opens the
  *      application's questions (2026-10-14: WorldDiscountForm.tsx, the six
- *      the stand-in serves); answered and sent (in memory), the form closes,
- *      the panel turns to "in review", the chip too, the cache is claimed
- *   9  pending and approved say so; a student in Video Ads II who is still
+ *      the stand-in serves); answered and sent (in memory), the form closes
+ *      and the request comes back applied: the panel says "The discount has
+ *      been approved.", the header's chip goes (it is done), the cache is
+ *      claimed ("in review" until the 30% applied itself)
+ *   9  pending and approved say so, in R6's words ("Your application is in.
+ *      You'll see it here once the 30% is on your Whop subscription.";
+ *      "Approved. You'll see it here once it's on your Whop
+ *      subscription."); a student in Video Ads II who is still
  *      locked (?discount=almost: a1 to a3 and a4l01 to a4l04, 48 of 61) sees
  *      the cache's lantern lit (near); since the 80% rule (2026-10-26) ?p=mid
  *      (a1 to a3 and a4l01 to a4l09, 53 of 61), the locked student this row
@@ -84,13 +94,15 @@
  *  13  refused (?questions=fail): the form stays on the last question, says
  *      why, keeps the answers; nothing is in review
  *  14  no active questions (?questions=none): Apply sends the plain request
- *      at once, as before the questions, and no form opens
+ *      at once, as before the questions, and no form opens; it comes back
+ *      applied
  *  15  phone (390x844): the chip opens the checkpoint, Apply opens the form as
  *      a full sheet, the numbers in two rows of five, every target at least
- *      40 px; sent, the checkpoint says in review
+ *      40 px; sent, the checkpoint says "The discount has been approved."
  *  16  applied (?discount=applied): no chip in the header (it is done); the
- *      tag says "Yours" and is done, the cache claimed; the panel says it is
- *      on the Whop subscription, no Apply; its tag and word in sand (done)
+ *      tag says "Yours" and is done, the cache claimed; the panel says "The
+ *      discount has been approved." (R6), no Apply; its tag and word in sand
+ *      (done)
  *  17  rejected (?discount=rejected): no chip in the header; the tag says
  *      "Not approved" and is closed; the panel says the team did not approve
  *      it, gives the team's reason and where to ask, no Apply; its tag and
@@ -108,8 +120,9 @@
  *  20  the approved celebration on a 360 px phone: "30% OFF" on one line,
  *      inside the screen; it says how to close it ("Tap anywhere to close"
  *      with touch, "Click anywhere or press Esc to close" without), and on
- *      the map that the team is putting it on (it plays on approval, before
- *      the team has applied it; the old dashboard keeps its words); Esc
+ *      the map, for a request not applied yet, "You'll see it on your map
+ *      once it's on your Whop subscription." (R6; that the team is putting
+ *      it on until then; the old dashboard keeps its words); Esc
  *      closes it and the checkpoint open under it stays open; under
  *      prefers-reduced-motion its "30% OFF" never springs (scale 1 on every
  *      frame), where without it the spring starts small
@@ -203,6 +216,21 @@
  *      until the review, and stayed after a payment made once the window
  *      had closed); "Closed" in its eyebrow, no Apply. At 1440x900, and the
  *      phone's sheet at 390x844 says the same
+ *  32  the student's words since the 30% applies itself (R6, the owner's
+ *      words of 2026-10-26: "don't show them the discount. Just say the
+ *      discount has been approved"), each state's one sentence, word for
+ *      word: ready, "... Apply now and we'll put the 30% on your Whop
+ *      subscription."; pending, "Your application is in. You'll see it here
+ *      once the 30% is on your Whop subscription."; approved, "Approved.
+ *      You'll see it here once it's on your Whop subscription."; applied,
+ *      "The discount has been approved." None names or shows a code, says
+ *      "48 hours" or says the team checks it. At 1440x900, and the phone's
+ *      sheet at 390x844 says the same
+ *  33  ?discount=pending-auto (the app could not put the 30% on in the
+ *      request): Apply opens the questions, and sent, the request comes back
+ *      pending: the panel says "Your application is in. You'll see it here
+ *      once the 30% is on your Whop subscription.", "In review", the chip
+ *      says in review, the cache is claimed
  *  Rows 24 to 27 load their pages in Europe/Zagreb (page.emulateTimezone),
  *  so they read the same on any machine.
  *
@@ -214,14 +242,14 @@
  *   header-chip.png       the header's right end: the group with the chip in it (row 1)
  *   panel-ready.png       the panel, ready, before Apply (row 8)
  *   form-map.png          the questions on the map, 1691x1278, a number picked (row 8)
- *   panel-pending.png     the panel after the questions went in (row 8)
+ *   panel-sent.png        the panel after the questions went in: applied (row 8)
  *   world-ready.png       the cache ready, from the passing camera (row 8)
  *   form-choice.png       a choice question, one chosen (row 11)
  *   form-text.png         an optional text question, typed in (row 11)
  *   form-refused.png      the last question with the refusal (row 13)
  *   form-phone.png        the questions as a phone's sheet, 390x844 (row 15)
  *   form-phone-choice.png a choice question on the phone (row 15)
- *   panel-phone-pending.png the phone's checkpoint after sending (row 15)
+ *   panel-phone-sent.png  the phone's checkpoint after sending: applied (row 15)
  *   panel-<preset>.png    the panel, closed: expired, before-launch,
  *                         no-payment (row 10); applied, rejected (rows 16, 17)
  *   world-no-payment.png  the plaque in the world, no first payment (row 10)
@@ -246,6 +274,9 @@
  *                         payment that went through (row 30)
  *   panel-unpaid-expired-1440.png, phone-sheet-unpaid-expired.png  the same,
  *                         its window closed: "This closed on" (row 31)
+ *   r6-<preset>-1440.png, r6-phone-<preset>.png  ready, pending, approved and
+ *                         applied in R6's words, 1440x900 and 390x844 (row 32)
+ *   panel-pending-auto.png the panel after a send the app could not finish (row 33)
  *
  * What a row reads:
  *   hooks      window.__worldReady, __worldFrame, __worldScrollFor(depth),
@@ -853,7 +884,7 @@ try {
     r.check('the chip still counts the days (nothing went in for review)', /11 days left/i.test(chip?.text ?? ''), chip)
   })
 
-  await runRow(8, 'ready: Apply opens the questions; sent, the panel and the chip turn to in review, the cache is claimed', async (r) => {
+  await runRow(8, 'ready: Apply opens the questions; sent, the request comes back applied: the panel says the discount has been approved, the chip goes, the cache is claimed', async (r) => {
     const page = await r.open({ discount: 'ready' })
     let s = await page.evaluate(SNAP)
     r.check('the chip says to apply, with the days left (9)', /Apply/.test(s.chip?.text ?? '') && /9 days left/i.test(s.chip?.text ?? ''), s.chip)
@@ -865,7 +896,7 @@ try {
     await page.evaluate(() => window.__worldPark('checkpoint'))
     await parked(page, 'row 8')
     s = await page.evaluate(SNAP)
-    r.check('the panel says at least 80% of the videos are watched, and offers Apply', /You've watched at least 80% of the videos through Video Ads II\. Apply now and the team confirms within 48 hours\./.test(s.panel?.text ?? '') && (await page.evaluate(FIND.apply)) !== null, s.panel?.text)
+    r.check('the panel says at least 80% of the videos are watched, and offers Apply', /You've watched at least 80% of the videos through Video Ads II\. Apply now and we'll put the 30% on your Whop subscription\./.test(s.panel?.text ?? '') && (await page.evaluate(FIND.apply)) !== null, s.panel?.text)
     const on = await page.evaluate(APPLY)
     r.check('ready, Apply is on: not aria-disabled, no reason, filled, a pointer', on?.ariaDisabled === null && on.disabled === false && on.title === null && on.filled && on.cursor === 'pointer', on)
     await page.screenshot({ path: path.join(OUT, 'panel-ready.png') })
@@ -893,21 +924,21 @@ try {
     r.check('the last question offers Send application', f?.count === '6 of 6' && f.buttons.some((b) => b.text === 'Send application' && !b.disabled), f?.buttons)
     await pick(page, 'Send application', 'row 8')
     await waitFor(page, () => [...(document.querySelector('[data-discount-form] [role="dialog"]')?.querySelectorAll('button') ?? [])].some((b) => /Sending/.test(b.textContent)), { timeout: 3000, what: 'row 8: Send did not show it is sending' })
-    await waitFor(page, () => !document.querySelector('[data-discount-form]') && /Your application is in/.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 8000, what: 'row 8: the form did not close into "in review"' })
+    await waitFor(page, () => !document.querySelector('[data-discount-form]') && /The discount has been approved\./.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 8000, what: 'row 8: the form did not close into "The discount has been approved."' })
     await sleep(500)
     s = await page.evaluate(SNAP)
-    r.check('the form closed, the panel says it is in review', /In review/.test(s.panel?.text ?? '') && /Your application is in/.test(s.panel?.text ?? ''), s.panel?.text)
-    r.check('one application, pending, in memory', s.requests?.length === 1 && s.requests[0].status === 'pending', s.requests)
+    r.check('the form closed, the panel says "Yours" and "The discount has been approved.", no Apply', /Yours/.test(s.panel?.text ?? '') && /The discount has been approved\./.test(s.panel?.text ?? '') && (await page.evaluate(FIND.apply)) === null, s.panel?.text)
+    r.check('one application, applied, in memory', s.requests?.length === 1 && s.requests[0].status === 'applied', s.requests)
     r.check('it went with the answers (no plain request)', (await page.evaluate(() => window.__fixtureDiscount.answers().length)) === 1 && (await page.evaluate(() => window.__fixtureDiscount.plain())) === 0)
-    r.check('the chip says in review', /In review/.test(s.chip?.text ?? ''), s.chip)
+    r.check('the header\'s chip has gone (applied: done)', s.chip === null && s.chipState === null, { chip: s.chip, chipState: s.chipState })
     r.check('the cache is claimed', s.cp?.look === 'claimed', s.cp?.look)
-    await page.screenshot({ path: path.join(OUT, 'panel-pending.png') })
+    await page.screenshot({ path: path.join(OUT, 'panel-sent.png') })
   })
 
   await runRow(9, 'pending and approved say so; a student in Video Ads II sees the lantern lit', async (r) => {
     for (const [preset, words] of [
-      ['pending', /Your application is in/],
-      ['approved', /Approved\. The team is putting it on your Whop subscription/],
+      ['pending', /Your application is in\. You'll see it here once the 30% is on your Whop subscription\./],
+      ['approved', /Approved\. You'll see it here once it's on your Whop subscription\./],
     ]) {
       const page = await r.open({ discount: preset })
       let s = await page.evaluate(SNAP)
@@ -1087,18 +1118,18 @@ try {
     await page.screenshot({ path: path.join(OUT, 'form-refused.png') })
   })
 
-  await runRow(14, 'no active questions (?questions=none): Apply sends the plain request, no form', async (r) => {
+  await runRow(14, 'no active questions (?questions=none): Apply sends the plain request, no form; it comes back applied', async (r) => {
     const page = await r.open({ discount: 'ready', questions: 'none' })
     await page.evaluate(() => window.__worldPark('checkpoint'))
     await parked(page, 'row 14')
     await click(page, FIND.apply, 'row 14: Apply')
-    await waitFor(page, () => /Your application is in/.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 8000, what: 'row 14: the panel did not turn to in review' })
+    await waitFor(page, () => /The discount has been approved\./.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 8000, what: 'row 14: the panel did not turn to "The discount has been approved."' })
     const s = await page.evaluate(SNAP)
     const seen = await page.evaluate(() => ({ form: !!document.querySelector('[data-discount-form]'), plain: window.__fixtureDiscount.plain(), answers: window.__fixtureDiscount.answers().length }))
-    r.check('no form opened; one plain request; the panel in review', !seen.form && seen.plain === 1 && seen.answers === 0 && s.requests?.length === 1 && s.requests[0].status === 'pending', { ...seen, requests: s.requests })
+    r.check('no form opened; one plain request; it came back applied', !seen.form && seen.plain === 1 && seen.answers === 0 && s.requests?.length === 1 && s.requests[0].status === 'applied', { ...seen, requests: s.requests })
   })
 
-  await runRow(15, 'phone (390x844): Apply opens the questions as a full sheet; sent, the checkpoint says in review', async (r) => {
+  await runRow(15, 'phone (390x844): Apply opens the questions as a full sheet; sent, the checkpoint says the discount has been approved', async (r) => {
     const ctx = await browser.createBrowserContext()
     try {
       const page = await openPhone(ctx, r.row, url({ discount: 'ready' }))
@@ -1127,18 +1158,18 @@ try {
       f = await page.evaluate(FORM)
       r.check('the optional questions can be left: on to 6 of 6', f.count === '6 of 6', f.count)
       await pick(page, 'Send application', 'row 15')
-      await waitFor(page, () => !document.querySelector('[data-discount-form]') && /Your application is in/.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 8000, what: 'row 15: the sheet did not close into "in review"' })
+      await waitFor(page, () => !document.querySelector('[data-discount-form]') && /The discount has been approved\./.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 8000, what: 'row 15: the sheet did not close into "The discount has been approved."' })
       await sleep(400)
       const sent = await page.evaluate(() => window.__fixtureDiscount.requests())
-      r.check('one application, pending', sent.length === 1 && sent[0].status === 'pending', sent)
-      await page.screenshot({ path: path.join(OUT, 'panel-phone-pending.png') })
+      r.check('one application, applied', sent.length === 1 && sent[0].status === 'applied', sent)
+      await page.screenshot({ path: path.join(OUT, 'panel-phone-sent.png') })
     } finally {
       await ctx.close().catch(() => {})
     }
   })
 
   for (const [id, preset, chipWord, tagState, look, words] of [
-    [16, 'applied', 'Yours', 'done', 'claimed', /It's on your Whop subscription\. You'll see 30% off on your next renewal\./],
+    [16, 'applied', 'Yours', 'done', 'claimed', /The discount has been approved\./],
     [17, 'rejected', 'Not approved', 'closed', 'closed', /The team didn't approve this one\.\s*Several of the videos were skipped through in under a minute\.\s*If you think that's wrong, ask in Discord and the team will sort it out\./],
   ]) {
     await runRow(id, `${preset}: no chip in the header; the tag says where it stands, the panel says what happened, no Apply`, async (r) => {
@@ -1287,8 +1318,8 @@ try {
       const ps = [...d.querySelectorAll('p')].map((p) => p.textContent.replace(/\s+/g, ' ').trim())
       return { lines, l: Math.round(b.left), r: Math.round(b.right), fontSize: getComputedStyle(hero).fontSize, line: ps.find((t) => /Whop/.test(t)) ?? null, close: ps.at(-1) ?? null, overflow: document.documentElement.scrollWidth > innerWidth }
     }
-    /** The map's line (the fix round of 2026-10-16): approved, the team is putting it on, as the map's panel says; never "applied". */
-    const MAP_LINE = /^The team is putting it on your Whop subscription, and you.ll see it on your next renewal\. Nothing else to do\.$/
+    /** The map's line for a request not applied (R6, 2026-10-26; that the team is putting it on until then): never "applied". */
+    const MAP_LINE = /^You.ll see it on your map once it.s on your Whop subscription\.$/
     // The dashboard's test event shows it (WorldCelebrations hears it too) once the page is up, so
     // its 5 s safety net cannot run out while the page loads; it records nothing.
     const fire = (page) => page.evaluate(() => window.dispatchEvent(new Event('et:test:discount-approved')))
@@ -1317,7 +1348,7 @@ try {
         r.row.values[name] = { look, scales }
         r.check(`${name}: "30% OFF" on one line, inside the 360 px screen, nothing runs off it sideways`, look?.lines === 1 && look.l >= 0 && look.r <= VP.width && !look.overflow, look)
         r.check(`${name}: on a touch screen it says "Tap anywhere to close"`, look?.close === 'Tap anywhere to close', look?.close)
-        r.check(`${name}: on the map it says the team is putting it on, not that it is applied`, MAP_LINE.test(look?.line ?? '') && !/applied/i.test(look?.line ?? ''), look?.line)
+        r.check(`${name}: on the map it says the student will see it there once it is on the Whop subscription, not that it is applied`, MAP_LINE.test(look?.line ?? '') && !/applied/i.test(look?.line ?? ''), look?.line)
         if (reduced) r.check('reduced motion: "30% OFF" never springs (scale 1 on every frame it is up)', scales.length > 0 && scales.every((x) => Math.abs(x - 1) < 1e-3), scales)
         else r.check('motion on: the spring starts small (the control for the reduced run)', scales.length > 0 && Math.min(...scales) < 0.9, scales)
         if (!reduced) await page.screenshot({ path: path.join(OUT, 'celebration-360.png') })
@@ -1343,7 +1374,7 @@ try {
     await sleep(1900)
     const look = await page.evaluate(LOOK, DIALOG)
     r.check('with a mouse it says "Click anywhere or press Esc to close"', look?.close === 'Click anywhere or press Esc to close', look?.close)
-    r.check('on the map, with a mouse too, it says the team is putting it on', MAP_LINE.test(look?.line ?? ''), look?.line)
+    r.check('on the map, with a mouse too, the same line', MAP_LINE.test(look?.line ?? ''), look?.line)
     await page.keyboard.press('Escape')
     await waitFor(page, (sel) => !document.querySelector(sel), { arg: DIALOG, timeout: 4000, what: 'row 20: Esc did not close the celebration' })
     await sleep(800)
@@ -1692,7 +1723,7 @@ try {
   await runRow(29, "the 80%: one short (?discount=almost, 48 of 61) locked, the lantern lit, \"48 watched\" and \"49 of 61 needed\", Apply greyed with its reason; one more (?discount=eighty, 49) ready, Apply on; 1440x900 and the phone's sheets at 390x844", async (r) => {
     const WIDE = { width: 1440, height: 900 }
     const RULE = /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\./
-    const READY = /You've watched at least 80% of the videos through Video Ads II\. Apply now and the team confirms within 48 hours\./
+    const READY = /You've watched at least 80% of the videos through Video Ads II\. Apply now and we'll put the 30% on your Whop subscription\./
     /** The bar under the rule: how full its fill is drawn (scaleX), 0 to 1. */
     const BAR = () => {
       const i = [...(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.querySelectorAll('i') ?? [])].find((x) => /scaleX/.test(x.getAttribute('style') ?? ''))
@@ -1788,6 +1819,51 @@ try {
     await page.close()
     const p = await phoneSheet(r, 'unpaid-expired', null, 'phone-sheet-unpaid-expired.png')
     r.check('phone (390x844): the sheet says the same, no Apply', CLOSED.test(p.text ?? '') && !(p.text ?? '').includes(UNPAID) && p.apply === null, p)
+  })
+
+  // The 30% that applies itself (T-137), R6, the owner's words of 2026-10-26: "Run it and don't show them the discount.
+  // Just say the discount has been approved". Each state's one sentence, word for word, on the panel and the phone's sheet.
+  await runRow(32, "the student's words since the 30% applies itself (R6): ready, pending, approved and applied, each its one sentence, no code, no \"48 hours\"; 1440x900 and the phone's sheet at 390x844", async (r) => {
+    const WIDE = { width: 1440, height: 900 }
+    /** What none of the four may say: a code, the old 48 hours, the team checking it or putting it on. */
+    const NEVER = /\bcode\b|promo|ECOM30|48 hours|team confirms|team checks|team is putting|next renewal/i
+    for (const [preset, line] of [
+      ['ready', "You've watched at least 80% of the videos through Video Ads II. Apply now and we'll put the 30% on your Whop subscription."],
+      ['pending', "Your application is in. You'll see it here once the 30% is on your Whop subscription."],
+      ['approved', "Approved. You'll see it here once it's on your Whop subscription."],
+      ['applied', 'The discount has been approved.'],
+    ]) {
+      const page = await r.open({ discount: preset }, '', WIDE)
+      await page.evaluate(() => window.__worldPark('checkpoint'))
+      await parked(page, `row 32 (${preset})`)
+      const s = await page.evaluate(SNAP)
+      const text = s.panel?.text ?? ''
+      r.check(`${preset}: the panel says "${line}"`, text.includes(line), text)
+      r.check(`${preset}: and no code, no "48 hours", nothing about the team checking it or putting it on`, !NEVER.test(text), text)
+      r.check(`${preset}: Apply ${preset === 'ready' ? 'is on' : 'is not there'}`, preset === 'ready' ? (await page.evaluate(APPLY))?.ariaDisabled === null : (await page.evaluate(FIND.apply)) === null)
+      await page.screenshot({ path: path.join(OUT, `r6-${preset}-1440.png`) })
+      await page.close()
+      const p = await phoneSheet(r, preset, null, `r6-phone-${preset}.png`)
+      r.check(`${preset}, phone (390x844): the sheet says the same, and nothing of the never list`, (p.text ?? '').includes(line) && !NEVER.test(p.text ?? ''), p)
+    }
+  })
+
+  // The 30% that applies itself (T-137): when the app could not put it on in the request itself (Whop slow, a stored coupon
+  // answer, the switch off), the request comes back pending, and the job or the team finishes it.
+  await runRow(33, "pending-auto (the app could not put the 30% on in the request): sent, the request comes back pending; the panel says \"Your application is in. You'll see it here once the 30% is on your Whop subscription.\", the chip in review, the cache claimed", async (r) => {
+    const LINE = "Your application is in. You'll see it here once the 30% is on your Whop subscription."
+    const page = await r.open({ discount: 'pending-auto' })
+    let s = await page.evaluate(SNAP)
+    r.check('before the send it is ready: the chip says to apply', /Apply/.test(s.chip?.text ?? '') && s.cp?.look === 'ready', { chip: s.chip, look: s.cp?.look })
+    await openForm(page, 'row 33')
+    await answerAll(page, 'row 33')
+    await waitFor(page, () => !document.querySelector('[data-discount-form]') && /Your application is in/.test(document.querySelector('main section[aria-labelledby="cp-panel-title"]')?.textContent ?? ''), { timeout: 8000, what: 'row 33: the form did not close into "in review"' })
+    await sleep(500)
+    s = await page.evaluate(SNAP)
+    r.check(`the form closed, the panel says "In review" and "${LINE}"`, /In review/.test(s.panel?.text ?? '') && (s.panel?.text ?? '').includes(LINE), s.panel?.text)
+    r.check('one application, pending, sent with the answers', s.requests?.length === 1 && s.requests[0].status === 'pending' && (await page.evaluate(() => window.__fixtureDiscount.answers().length)) === 1, s.requests)
+    r.check('the chip says in review, the cache is claimed', /In review/.test(s.chip?.text ?? '') && s.cp?.look === 'claimed', { chip: s.chip, look: s.cp?.look })
+    await page.screenshot({ path: path.join(OUT, 'panel-pending-auto.png') })
   })
 } finally {
   await browser.close()

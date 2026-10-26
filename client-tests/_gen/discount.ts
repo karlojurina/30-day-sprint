@@ -270,8 +270,9 @@ export type DiscountState =
       /**
        * The request was made before the launch, on the old dashboard, by a
        * student who first paid from 1 October (requestCounts). Its 30% is
-       * from the old course, so "the team confirms within 48 hours" and "on
-       * your next renewal" may no longer hold. Never true for "rejected".
+       * from the old course, so the map's words for a request on the new
+       * course (the app putting the 30% on, "on your next payment") may no
+       * longer hold. Never true for "rejected".
        */
       madeBeforeLaunch: boolean;
     };

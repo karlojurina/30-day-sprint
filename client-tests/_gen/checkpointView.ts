@@ -132,7 +132,11 @@ export function deadlineAt(iso: string): string {
  *                 membership's earlier date can read this line while their
  *                 real window is open (CONTEXT.md).
  *   ready         above Apply, once the student has met it ("at least": a
- *                 student who watched them all reads it too).
+ *                 student who watched them all reads it too). Since the 30%
+ *                 applies itself (T-137, R6, the owner's words of 2026-10-26)
+ *                 it ends "Apply now and we'll put the 30% on your Whop
+ *                 subscription.", where it said "the team confirms within 48
+ *                 hours".
  *   openEvery, readyEvery  open and ready for a window that ends before the
  *                 80% rule, which asks for every video (discount.ts
  *                 videosNeededFor): only a clock before 26 October can see
@@ -160,9 +164,9 @@ export function discountRule(after: string): {
     closed: `The ${DISCOUNT_PERCENT}% is for watching ${share} of the videos through ${after} within 2 weeks of joining.`,
     closedBefore: `The ${DISCOUNT_PERCENT}% was for finishing every video through ${after} within 2 weeks of joining.`,
     beforeLaunch: "Your 2 weeks have passed.",
-    ready: `You've watched at least ${share} of the videos through ${after}. Apply now and the team confirms within 48 hours.`,
+    ready: `You've watched at least ${share} of the videos through ${after}. Apply now and we'll put the ${DISCOUNT_PERCENT}% on your Whop subscription.`,
     openEvery: `Finish every video through ${after} within 2 weeks of joining to apply.`,
-    readyEvery: `You've watched every video through ${after}. Apply now and the team confirms within 48 hours.`,
+    readyEvery: `You've watched every video through ${after}. Apply now and we'll put the ${DISCOUNT_PERCENT}% on your Whop subscription.`,
   };
 }
 

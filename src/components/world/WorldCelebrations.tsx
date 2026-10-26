@@ -7,6 +7,7 @@ import { DiscountApprovedCelebration } from "@/components/map/DiscountApprovedCe
 import {
   approvalToCelebrate,
   DISCOUNT_APPROVED_LAST_SEEN_KEY,
+  renewalStillAhead,
   streakLastSeenKey,
   streakToCelebrate,
 } from "@/lib/world/celebrations";
@@ -35,6 +36,19 @@ import {
  * so the map's words, you'll see it on your next renewal, may not hold, and
  * the panel says where it stands in its own words. The old dashboard had its
  * own moment for it, under this same key.
+ *
+ * ITS LINE (R6 of the 30% that applies itself, the owner's words of
+ * 2026-10-26) comes from the discount state as it is when the moment opens,
+ * which WorldMap.tsx hands over beside approvalOnMap's request: applied, now
+ * or when the moment fell due, "Your 30% is on your next payment." within 5
+ * days of the application (renewalStillAhead, on the discount's clock) and
+ * "The discount has been approved." after them; approved, "You'll see it on
+ * your map once it's on your Whop subscription." A moment already due keeps
+ * its place when approvalOnMap stops naming it (an applied request from day
+ * 5), so one that fell due while approved, behind a lesson page, and opens
+ * after the request was applied says it is on, never that it is still to
+ * come. approvalOnMap itself is unchanged: no new moment starts for an
+ * applied request from day 5.
  *
  * Since 2026-10-17 the celebration opens only once the map is up (useMapUp,
  * below) and no lesson page is over it (`paused`), and the browser
@@ -345,12 +359,18 @@ export function useStreakMoment(paused: boolean, seg: RefObject<HTMLElement | nu
 export function WorldCelebrations({
   approvedRequestId,
   applied = false,
+  at = null,
+  now,
   paused,
 }: {
   /** The approved application to celebrate (approved, or applied since: approvalOnMap), or null: none, or one made on the old dashboard (madeBeforeLaunch). */
   approvedRequestId: string | null;
-  /** That application is applied: the 30% is on the student's subscription, and the moment's line says so. */
+  /** The discount state is applied (its own kind, whatever approvalOnMap answers): the 30% is on the student's subscription, and the moment's line says so. */
   applied?: boolean;
+  /** The discount state's request date (created_at), or null when it has none: the moment's line counts the 5 days from it. */
+  at?: string | null;
+  /** The discount's clock, ms: the one approvalOnMap and the checkpoint's panel read (useWorldDiscount's `now`). */
+  now: number;
   /** A lesson page is open over the map: the celebration waits until the student is back on it. */
   paused: boolean;
 }) {
@@ -360,8 +380,8 @@ export function WorldCelebrations({
   const studentId = stand ? stand.studentId : (student?.id ?? null);
   const ready = !loading && studentId !== null;
 
-  /** Due, until it closes. `id` null: a test event's, not recorded. */
-  const [approval, setApproval] = useState<{ id: string | null } | null>(null);
+  /** Due, until it closes. `id` null: a test event's, not recorded. `applied` and `at`: the discount state when it fell due. */
+  const [approval, setApproval] = useState<{ id: string | null; applied: boolean; at: string | null } | null>(null);
   /** The input last decided on, so each change is looked at once. */
   const [approvalAsked, setApprovalAsked] = useState<string | null>(null);
   /** On screen: it opened once the map was up, and stays until it closes, whatever opens over the map after. */
@@ -372,7 +392,7 @@ export function WorldCelebrations({
   const approvalSig = ready ? approvedRequestId : null;
   if (approvalSig !== null && approvalSig !== approvalAsked) {
     setApprovalAsked(approvalSig);
-    if (approvalToCelebrate(approvalSig, readKey(DISCOUNT_APPROVED_LAST_SEEN_KEY))) setApproval({ id: approvalSig });
+    if (approvalToCelebrate(approvalSig, readKey(DISCOUNT_APPROVED_LAST_SEEN_KEY))) setApproval({ id: approvalSig, applied, at });
   }
 
   // Opened once the map is up and no lesson page is over it, so its 5 s
@@ -396,11 +416,22 @@ export function WorldCelebrations({
   // The dashboard's test event (DevTestPanel), heard here too; it waits for
   // the map as well. A real one already due keeps its place.
   useEffect(() => {
-    const onApproved = () => setApproval((a) => a ?? { id: null });
+    const onApproved = () => setApproval((a) => a ?? { id: null, applied: false, at: null });
     window.addEventListener("et:test:discount-approved", onApproved);
     return () => window.removeEventListener("et:test:discount-approved", onApproved);
   }, []);
 
-  // The map's words: approved, the team is putting it on; or applied, on the next payment (the dashboard's say it is applied).
-  return <DiscountApprovedCelebration show={open} onDismiss={() => setApproval(null)} where="map" applied={applied} />;
+  // The map's words (R6): applied now or when the moment fell due, on the next payment while the renewal is still ahead,
+  // else "The discount has been approved."; approved, that it shows on the map once it is on (the dashboard's say it is applied).
+  const lineApplied = applied || approval?.applied === true;
+  const renewalAhead = renewalStillAhead(at ?? approval?.at ?? "", now);
+  return (
+    <DiscountApprovedCelebration
+      show={open}
+      onDismiss={() => setApproval(null)}
+      where="map"
+      applied={lineApplied}
+      renewalAhead={renewalAhead}
+    />
+  );
 }

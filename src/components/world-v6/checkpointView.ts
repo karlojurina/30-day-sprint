@@ -37,7 +37,9 @@
  *                 that went through ("unpaid", the owner's rule of
  *                 2026-10-26: the panel says "The 30% needs a paid course
  *                 plan and a payment that went through." with no Apply; it
- *                 opens again once the stored answer says otherwise). "Not
+ *                 opens again once the stored answer says otherwise, and it
+ *                 is said only while the window is open: a closed one reads
+ *                 as expired, since the review of the same day). "Not
  *                 open yet" when
  *                 the course has no gate. "Ask the team" with no first payment
  *                 on record, in the open (locked) look: it may be a new student
@@ -264,7 +266,8 @@ export function checkpointView(state: DiscountState, now: number, place: number,
       if (state.reason === "no-payment") return noClock(lead, "Ask the team", "locked", "closed");
       // A discount already on the next renewal (D5): closed to them for good, as a first payment before 1 October.
       if (state.reason === "has-discount") return noClock(lead, "Closed", "closed", "closed");
-      // No paid course plan and payment that went through (2026-10-26): closed to them while Whop shows them so.
+      // No paid course plan and payment that went through (2026-10-26): closed to them while Whop shows them so, in an
+      // open window (discountState says "expired" once it has closed).
       if (state.reason === "unpaid") return noClock(lead, "Closed", "closed", "closed");
       return noClock(lead, state.reason === "no-gate" ? "Not open yet" : "Closed", "closed", "closed");
   }

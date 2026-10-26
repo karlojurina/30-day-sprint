@@ -100,6 +100,13 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            paid course plan and a payment that went
  *                            through." with no Apply, the word "Closed", no
  *                            chip in the header
+ *   ?discount=unpaid-expired as expired (its window closed, the same clock),
+ *                            with that stored unpaid answer: the panel says
+ *                            "This closed on ..." and the rule, as expired
+ *                            does, never the unpaid sentence (the review of
+ *                            2026-10-26: the unpaid line came first, and
+ *                            stayed after a payment made once the window had
+ *                            closed)
  *   no ?discount             as locked: a first payment 3 days ago, videos as
  *                            ?p= has them, so the 30% shows with no parameter
  *                            (2026-10-16, Lovro's second Loom: he reviewed
@@ -148,11 +155,12 @@ export type DiscountPreset =
   | "october-old-course-approved"
   | "no-payment"
   | "has-discount"
-  | "unpaid";
+  | "unpaid"
+  | "unpaid-expired";
 const PRESETS: readonly DiscountPreset[] = [
   "locked", "ready", "almost", "eighty", "pending", "approved", "applied", "applied-after-renewal", "rejected", "expired",
   "before-launch", "september", "october", "october-expired", "october-old-course",
-  "october-old-course-pending", "october-old-course-approved", "no-payment", "has-discount", "unpaid",
+  "october-old-course-pending", "october-old-course-approved", "no-payment", "has-discount", "unpaid", "unpaid-expired",
 ];
 /** The presets with an application in, and its status. Their student has watched every video the offer asks for. */
 const APPLIED: Partial<Record<DiscountPreset, DiscountRequestRow["status"]>> = {
@@ -311,8 +319,9 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
     Date.parse(DISCOUNT_LAUNCH_DATE) + DAY_MS,
     Date.parse(DISCOUNT_EIGHTY_FROM) - (DISCOUNT_WINDOW_DAYS - 1) * DAY_MS,
   );
+  const expiredLike = preset === "expired" || preset === "unpaid-expired";
   const now =
-    preset === "expired" && expiredPaid + 20 * DAY_MS > boot
+    expiredLike && expiredPaid + 20 * DAY_MS > boot
       ? expiredPaid + 20 * DAY_MS
       : preset === "october"
         ? OCTOBER_CLOCK
@@ -336,6 +345,7 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
       case "rejected":
         return new Date(boot - 6 * DAY_MS).toISOString();
       case "expired":
+      case "unpaid-expired":
         return new Date(expiredPaid).toISOString();
       case "applied-after-renewal":
         return AFTER_RENEWAL_PAID;
@@ -391,7 +401,7 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   );
 
   const membershipDiscounted = preset === "has-discount";
-  const membershipUnpaid = preset === "unpaid";
+  const membershipUnpaid = preset === "unpaid" || preset === "unpaid-expired";
   const value = useMemo<DiscountStandIn>(
     () => ({ firstPaidAt, membershipDiscounted, membershipUnpaid, now, requests, apply, questions, submit }),
     [firstPaidAt, membershipDiscounted, membershipUnpaid, now, requests, apply, questions, submit],

@@ -575,10 +575,12 @@ const paths = () => whop.log.map((r) => `${r.path}${r.path.endsWith('/membership
        && price.row.promo_code_id === 'promo_devEvolve' && price.row.promo_code === 'evolve10' && price.row.whop_membership_id === 'mem_devOdd' && price.row.source === R6('payment') && price.noRealPayment === false,
      'a null renewal price, the latest real payment 87.30 (on evolve10): discounted, the payment\'s total and the 97.00 stored, the code named, the payment\'s membership named', show(price))
   // Since T-122's third fix round the user's course memberships are read whatever the one on file said (a code on a
-  // second membership is a coupon), so the list comes before the payments; until then it was not read here.
-  ok(show(paths()) === show(['/api/v1/memberships/mem_devNullPrice', '/api/v2/memberships?user_id=user_devOdd&per=50&page=1', '/api/v1/payments?user_id=user_devOdd&status=paid&first=100', '/api/v1/promo_codes/promo_devEvolve'])
-       && whop.log.filter((r) => r.path.startsWith('/api/v1/')).every((r) => r.version === PINNED) && whop.log[1].version === null,
-     'the membership, the user\'s course memberships (v2, no pin), then the payments pinned, then the code\'s name', show(paths()))
+  // second membership is a coupon), so the list comes before the payments; until then it was not read here. Since the
+  // review of 2026-10-26 the plan of a membership naming no code with no renewal price is read (one-time or renewing at
+  // 0 is free): the 97.00 plan here, so the membership stays one whose plan the payment decides.
+  ok(show(paths()) === show(['/api/v1/memberships/mem_devNullPrice', '/api/v1/plans/plan_devMonthly97', '/api/v2/memberships?user_id=user_devOdd&per=50&page=1', '/api/v1/payments?user_id=user_devOdd&status=paid&first=100', '/api/v1/promo_codes/promo_devEvolve'])
+       && whop.log.filter((r) => r.path.startsWith('/api/v1/')).every((r) => r.version === PINNED) && whop.log[2].version === null,
+     'the membership, its plan (no renewal price on it), the user\'s course memberships (v2, no pin), then the payments pinned, then the code\'s name', show(paths()))
   // Since the second fix round an 87.30 on evolve10 before the newest 97.00 is a coupon: the student came in on a code
   // (the newest payment alone said none until then).
   const ninetySeven = await judge('mem_devNullPrice', 'user_devOddFull')
@@ -1735,8 +1737,10 @@ console.log('\n=== No real payment: the approve route and the 30% page (the revi
       if (unpaid && a.value.row.source !== R6('payment')) wrong.push(`${user} ${onFile}: unpaid stamped ${a.value.row.source}`)
     }
   }
-  ok(answers > 90 && none >= 4 && noPlan >= 10 && answers - none - noPlan >= 40 && freeNone >= 4 && wrong.length === 0,
-     `rowShowsUnpaid agrees with noRealPayment or noPaidPlan on all ${answers} answers (${users.length} Whop users by ${files.length} ids on file), ${none} of them no real payment (${freeNone} on a free plan alone) and ${noPlan} a payment with no paid plan, never both, each naming the membership id on file and stamped`, wrong.slice(0, 3).join(' | '))
+  // The floor of the answers that are not unpaid sits near their number (92 of 140 on 2026-10-26), so a change that
+  // turns many of them unpaid fails here (it was 60 before the paid plan and the payment, then 40 with no reason given).
+  ok(answers > 90 && none >= 4 && noPlan >= 10 && answers - none - noPlan >= 85 && freeNone >= 4 && wrong.length === 0,
+     `rowShowsUnpaid agrees with noRealPayment or noPaidPlan on all ${answers} answers (${users.length} Whop users by ${files.length} ids on file), ${none} of them no real payment (${freeNone} on a free plan alone), ${noPlan} a payment with no paid plan and ${answers - none - noPlan} neither, never both, each naming the membership id on file and stamped`, wrong.slice(0, 3).join(' | '))
   ok(rowShowsUnpaid({ discounted: false, promo_code_id: null, renewal_price: null }) && !rowShowsUnpaid({ discounted: false, promo_code_id: null })
        && !rowShowsUnpaid({ discounted: false, promo_code_id: null, renewal_price: '97.00' }) && !rowShowsUnpaid({ discounted: true, promo_code_id: null, renewal_price: null })
        && !rowShowsUnpaid({ discounted: false, promo_code_id: 'promo_devX', renewal_price: null }),
@@ -3811,6 +3815,54 @@ console.log('\n=== The owner\'s paid plan and payment (2026-10-26): a course pay
     P('user_p6PD',
       pay('pay_p6PDb', 'user_p6PD', '97.00', AT.later, { status: 'failed', substatus: 'failed', paid_at: null, membership_id: 'mem_p6PD', billing_reason: 'subscription_cycle' }),
       real('pay_p6PDa', 'user_p6PD', 'mem_p6PD'))
+    // The review of 2026-10-26 (every one beside a real 97.00 course payment, never refunded). A1: a canceled course
+    // membership on file renewing at 97.00; A3: the same giving no renewal price (Whop's docs: null for a membership
+    // that does not renew). A2 is N2's Whop with its expired membership on file.
+    for (const [k, renewal] of [['A1', '97.00'], ['A3', null]]) {
+      m(`mem_p6${k}`, renewal, { status: 'canceled' })
+      L(`user_p6${k}`, v2(`mem_p6${k}`, `user_p6${k}`, { status: 'canceled', valid: false }))
+      P(`user_p6${k}`, real(`pay_p6${k}`, `user_p6${k}`, `mem_p6${k}`))
+    }
+    // A4: the course's free plan (one-time) on file with no renewal price; A4b the same with the field missing; A4c a
+    // renewal plan at 0.00, its membership giving no renewal price.
+    const ZERO_PLAN = 'plan_p6Zero'
+    whop.plans.set(ZERO_PLAN, { id: ZERO_PLAN, plan_type: 'renewal', renewal_price: '0.00', initial_price: '0.00' })
+    m('mem_p6A4', null, { status: 'completed', plan_id: FREE })
+    whop.memberships.set('mem_p6A4b', { id: 'mem_p6A4b', status: 'completed', promo_code_id: null, plan_id: FREE, product_id: COURSE })
+    m('mem_p6A4c', null, { plan_id: ZERO_PLAN })
+    for (const [k, plan, status] of [['A4', FREE, 'completed'], ['A4b', FREE, 'completed'], ['A4c', ZERO_PLAN, 'active']]) {
+      L(`user_p6${k}`, v2(`mem_p6${k}`, `user_p6${k}`, { plan, status, valid: true }))
+      P(`user_p6${k}`, real(`pay_p6${k}`, `user_p6${k}`, null))
+    }
+    // A5: the free plan at 0.00 on file, and v2 lists a course membership v1 answers 404 for; A5b, 422 for it.
+    // A6: the free plan at 0.00 on file and a second listed course membership on the free plan with no renewal price.
+    // A6m: the same with the second on the 97.00 plan with no renewal price: its plan renews above 0, so the payment
+    // decides (let in, below).
+    for (const k of ['A5', 'A5b', 'A6', 'A6m']) m(`mem_p6${k}`, '0.00', { status: 'completed', plan_id: FREE })
+    m('mem_p6A6x', null, { status: 'completed', plan_id: FREE })
+    m('mem_p6A6mx', null)
+    const freeRow = (k) => v2(`mem_p6${k}`, `user_p6${k}`, { plan: FREE, status: 'completed', valid: true })
+    L('user_p6A5', freeRow('A5'), v2('mem_p6A5x', 'user_p6A5', { created_at: 1_760_900_000 }))
+    L('user_p6A5b', freeRow('A5b'), v2('mem_p6A5bx', 'user_p6A5b', { created_at: 1_760_900_000 }))
+    L('user_p6A6', freeRow('A6'), v2('mem_p6A6x', 'user_p6A6', { plan: FREE, status: 'completed', valid: true, created_at: 1_760_900_000 }))
+    L('user_p6A6m', freeRow('A6m'), v2('mem_p6A6mx', 'user_p6A6m', { created_at: 1_760_900_000 }))
+    for (const k of ['A5', 'A5b', 'A6']) P(`user_p6${k}`, real(`pay_p6${k}`, `user_p6${k}`, null))
+    P('user_p6A6m', real('pay_p6A6m', 'user_p6A6m', 'mem_p6A6mx'))
+    whop.answer = (path) => (path === '/api/v1/memberships/mem_p6A5bx' ? json(422, { error: { message: 'Unprocessable' } }) : null)
+    // PDv: a payment's id on file, the course membership found through the Whop user past_due on a failed renewal and
+    // marked not valid by v2, the first payment real (the same membership on file passed; found through v2 it was never
+    // settled on until the review).
+    m('mem_p6PDv', '97.00', { status: 'past_due' })
+    L('user_p6PDv', v2('mem_p6PDv', 'user_p6PDv', { status: 'past_due', valid: false }))
+    P('user_p6PDv',
+      pay('pay_p6PDvb', 'user_p6PDv', '97.00', AT.later, { status: 'failed', substatus: 'failed', paid_at: null, membership_id: 'mem_p6PDv', billing_reason: 'subscription_cycle' }),
+      real('pay_p6PDva', 'user_p6PDv', 'mem_p6PDv'))
+    // Zs: Z's converted trial with its $0 checkout stated at the plan's 97.00 (a subtotal of 97.00), then 97.00.
+    m('mem_p6Zs', '97.00')
+    L('user_p6Zs', v2('mem_p6Zs', 'user_p6Zs'))
+    P('user_p6Zs',
+      pay('pay_p6Zsb', 'user_p6Zs', '97.00', AT.later, { membership_id: 'mem_p6Zs', billing_reason: 'subscription_cycle' }),
+      pay('pay_p6Zsa', 'user_p6Zs', '0.00', AT.first, { subtotal: money('97.00'), membership_id: 'mem_p6Zs', billing_reason: 'subscription_create' }))
   }
   /** [why, membership on file, Whop user, the half that refuses, the membership the unpaid row names]. */
   const refusedCases = [
@@ -3824,6 +3876,16 @@ console.log('\n=== The owner\'s paid plan and payment (2026-10-26): a course pay
     ['X: expired on file after a full refund', 'mem_p6X', 'user_p6X', 'noRealPayment', 'mem_p6X'],
     ['N1: no course membership at all, no payment', 'pay_p6N1', 'user_p6N1', 'noRealPayment', null],
     ['N2: no course membership that grants access, beside a real 97.00 course payment', 'pay_p6N2', 'user_p6N2', 'noPaidPlan', null],
+    // The review of 2026-10-26: each let in, by both request routes and the normal Approve, until its fixes.
+    ['A1: a canceled course membership on file renewing at 97.00, beside a real 97.00 never refunded', 'mem_p6A1', 'user_p6A1', 'noPaidPlan', 'mem_p6A1'],
+    ['A2: N2\'s expired course membership on file, beside its real 97.00', 'mem_p6N2', 'user_p6N2', 'noPaidPlan', 'mem_p6N2'],
+    ['A3: a canceled course membership on file with no renewal price, beside a real 97.00', 'mem_p6A3', 'user_p6A3', 'noPaidPlan', 'mem_p6A3'],
+    ['A4: the free (one-time) plan on file with no renewal price, beside a real 97.00', 'mem_p6A4', 'user_p6A4', 'noPaidPlan', 'mem_p6A4'],
+    ['A4b: the free plan on file naming no renewal price at all, beside a real 97.00', 'mem_p6A4b', 'user_p6A4b', 'noPaidPlan', 'mem_p6A4b'],
+    ['A4c: a renewal plan at 0.00 on file, its membership giving no renewal price, beside a real 97.00', 'mem_p6A4c', 'user_p6A4c', 'noPaidPlan', 'mem_p6A4c'],
+    ['A5: the free plan on file, v2 also listing a course membership v1 answers 404 for, beside a real 97.00', 'mem_p6A5', 'user_p6A5', 'noPaidPlan', 'mem_p6A5'],
+    ['A5b: the same, v1 answering 422 for it', 'mem_p6A5b', 'user_p6A5b', 'noPaidPlan', 'mem_p6A5b'],
+    ['A6: the free plan on file and a second free one with no renewal price, beside a real 97.00', 'mem_p6A6', 'user_p6A6', 'noPaidPlan', 'mem_p6A6'],
   ]
   /** [why, membership on file, Whop user, the step that answers, the membership its row names, the row stamped]. */
   const paidCases = [
@@ -3835,6 +3897,9 @@ console.log('\n=== The owner\'s paid plan and payment (2026-10-26): a course pay
     ['Z: a $0 first payment, then 97.00', 'mem_p6Z', 'user_p6Z', 'membership', 'mem_p6Z', true],
     ['PD: past_due after a failed renewal, the first payment real', 'mem_p6PD', 'user_p6PD', 'membership', 'mem_p6PD', true],
     ['U: a membership on file with no renewal price beside a real 97.00', 'mem_p6U', 'user_p6U', 'payment', 'mem_p6U', true],
+    // The review of 2026-10-26.
+    ['A6m: the free plan on file and a second membership on the 97.00 plan with no renewal price, beside a real 97.00 for it (its plan renews above 0: the payment decides)', 'mem_p6A6m', 'user_p6A6m', 'payment', 'mem_p6A6mx', true],
+    ['PDv: a payment\'s id on file, the membership found through the Whop user past_due and marked not valid by v2, after a failed renewal, the first payment real', 'pay_p6PDv', 'user_p6PDv', 'user', 'mem_p6PDv', true],
   ]
   const judge6 = async (onFile, user) => {
     paidWhop()
@@ -3847,6 +3912,7 @@ console.log('\n=== The owner\'s paid plan and payment (2026-10-26): a course pay
       paidWhop()
       if (more.down) whop.answer = () => 'throw'
       const db = readyDb(membership, more.db ?? {}, user, SID)
+      if (more.failWhen) db.failWhen = more.failWhen
       const r = await quiet(() => post(route, path, body))
       const stored = db.rows(MEMBERSHIP_DISCOUNTS_TABLE).find((x) => x.student_id === SID) ?? null
       out.push({ name, status: r.value.status, error: r.value.body.error ?? null, state: r.value.body.state ?? null,
@@ -3863,6 +3929,7 @@ console.log('\n=== The owner\'s paid plan and payment (2026-10-26): a course pay
       admin_config: [{ key: 'curriculum_reset_at', value: '2026-10-19T14:33:00.000Z' }],
       ...(more.tables ?? {}),
     }, user, SID)
+    if (more.failWhen) db.failWhen = more.failWhen
     const made = promoCodes.length
     const r = await quiet(() => approve(more.override === true))
     return { status: r.value.status, code: r.value.body.code ?? null, error: r.value.body.error ?? null, made: promoCodes.length - made,
@@ -3957,6 +4024,21 @@ console.log('\n=== The owner\'s paid plan and payment (2026-10-26): a course pay
     ok(map.status === 200 && map.body.membershipUnpaid === true && map.body.membershipDiscounted === false && !/promo_|renewal|97\.00|\b97\b/.test(show({ u: map.body.membershipUnpaid, d: map.body.membershipDiscounted })),
        'a refused trial, its answer stored by the request route: /api/student/data says membershipUnpaid, two flags and never the code or the price', show({ unpaid: map.body.membershipUnpaid, discounted: map.body.membershipDiscounted }))
     ok(!/"promo_code|"renewal_price|plan_renewal_price/.test(show(map.body)), 'the payload carries no column of the stored row')
+    // Two stored rows holding a code and a price (a coupon's; a real payer's own 30% on the next renewal): the payload
+    // carries neither the code's id, its name, the prices nor a column's name (the review of 2026-10-26: the check above
+    // could not fail, the trial's row holding no code and no price).
+    for (const [what, leak] of [
+      ['a coupon\'s row', { discounted: true, promo_code_id: 'promo_p6Leak', promo_code: 'leak10', renewal_price: 96.37, plan_renewal_price: 97 }],
+      ['a real payer\'s row naming their own 30%', { discounted: false, promo_code_id: 'promo_p6Leak', promo_code: 'ECOM30-LEAKED', renewal_price: 67.91, plan_renewal_price: 97 }],
+    ]) {
+      const stored = stampedBy({ student_id: SID, whop_membership_id: 'mem_p6A', checked_at: '2026-10-21T06:40:00.000Z', ...leak }, 'membership')
+      const got = await mapOf(readyDb('mem_p6A', { [MEMBERSHIP_DISCOUNTS_TABLE]: [stored] }, 'user_p6A', SID))
+      const body = show(got.body)
+      ok(got.status === 200 && got.body.membershipDiscounted === leak.discounted && got.body.membershipUnpaid === false
+           && !/promo_p6Leak|leak10|ECOM30-LEAKED|96\.37|67\.91|"promo_code|"renewal_price|plan_renewal_price/.test(body),
+         `${what}: /api/student/data sends its two flags (discounted ${leak.discounted}, unpaid false) and nothing of the row: no code, no name, no price`,
+         show({ discounted: got.body.membershipDiscounted, unpaid: got.body.membershipUnpaid, leaked: body.match(/promo_p6Leak|leak10|ECOM30-LEAKED|96\.37|67\.91/g) }))
+    }
     const [letInLive] = await routes6('mem_p6A', 'user_p6A')
     map = await mapOf(letInLive.db)
     ok(map.body.membershipUnpaid === false && map.body.membershipDiscounted === false, 'a real payer\'s stored row: membershipUnpaid false', show(map.body.membershipUnpaid))
@@ -4022,6 +4104,74 @@ console.log('\n=== The owner\'s paid plan and payment (2026-10-26): a course pay
        'paid since, the next run 2 hours later: the row rewritten from the paid membership, and the map\'s next load has no flag, so Apply is back', show({ after }))
   }
 
+  // Zs (the review of 2026-10-26): Z's converted trial, its $0 checkout stated at the plan's 97.00. A course payment
+  // naming no code below its subtotal is a coupon (T-122's fifth fix round), so this real payer on a paid plan is
+  // refused with the coupon's line. Whether Whop states a trial's checkout so has not been read: the cron's dry run lists
+  // such students in refused_by_subtotal (billing_reason subscription_create) for the owner to rule on. Z, stated at
+  // 0.00, is let in above.
+  {
+    const j = await judge6('mem_p6Zs', 'user_p6Zs')
+    ok(j.ok && j.source === 'payment' && j.row.discounted === true && j.noRealPayment === false && j.noPaidPlan === false
+         && j.bySubtotal?.price === 0 && j.bySubtotal?.subtotal === 97 && j.bySubtotal?.billingReason === 'subscription_create',
+       'Zs: a $0 checkout stated at 97.00, then 97.00: a coupon by its subtotal (refused_by_subtotal, 0.00 of 97.00), not a real payer let in', show(j))
+    const rs = await routes6('mem_p6Zs', 'user_p6Zs')
+    ok(rs.every((x) => x.status === 400 && x.error === LINE && x.state === 'not-eligible' && x.written === 0 && x.rpc === 0),
+       'Zs: both request routes refuse it with the coupon\'s line, nothing written (the owner\'s call after the dry run)', show(brief6(rs)))
+  }
+
+  // The copy of v113 in production's tree (cac0c07) takes the r5 values alone. Pasted before this tree's copy, its
+  // check refuses the r6 stamp with Postgres's 23514 (v113.test.mjs reads the words on a real Postgres). Since the
+  // review of 2026-10-26 the row is written again without the stamp (membership-discount.ts refusesThisStamp), where
+  // every write failed: nothing was stored, so the map had no flag and offered Apply, Check Whop again answered 500 and
+  // the cron 500 on every run.
+  {
+    const CHECK_WORDS = 'new row for relation "student_membership_discounts" violates check constraint "student_membership_discounts_source_check"'
+    const r5Only = (q) => (q.table === MEMBERSHIP_DISCOUNTS_TABLE && q.op === 'upsert'
+      && [].concat(q.values).some((v) => typeof v.source === 'string' && !v.source.startsWith('r5-')) ? { code: '23514', message: CHECK_WORDS } : null)
+    ok(MD6.refusesThisStamp({ code: '23514', message: CHECK_WORDS }) && !MD6.refusesThisStamp({ code: '23514', message: 'violates check constraint "discount_requests_status_check"' })
+         && !MD6.refusesThisStamp({ code: '23505', message: CHECK_WORDS }) && !MD6.refusesThisStamp(null) && !MD6.lacksSourceColumn({ code: '23514', message: CHECK_WORDS }),
+       'refusesThisStamp: a check violation (23514) on v113\'s check of source, and nothing else')
+    const dataOf = async (db) => (await quiet(async () => {
+      installDb(db)
+      const res = await dataRoute(new Request('http://app/api/student/data', { headers: { authorization: 'Bearer tok-1' } }))
+      return res.json()
+    })).value
+    const unstamped = (row) => row !== null && (row.source ?? null) === null && (row.source_checked_at ?? null) === null
+    // The trial: refused in the one sentence, nothing written, its answer stored without the stamp; the map takes the flag.
+    let rs = await routes6('mem_p6T', 'user_p6T', { failWhen: r5Only })
+    ok(refused6(rs) && rs.every((x) => x.stored !== null && rowShowsUnpaid(x.stored) && unstamped(x.stored) && x.lines.some((l) => l.includes('v113\'s check refuses this rule\'s r6 stamp'))),
+       'on the r5-only check, the trial: both request routes 400 in the one sentence, nothing written, the answer stored without the stamp and a line saying why', show(brief6(rs)))
+    ok((await dataOf(rs[0].db)).membershipUnpaid === true, 'and /api/student/data sends its flag from that row, so the map shows no Apply')
+    // A real payer: let in, the row stored without the stamp.
+    rs = await routes6('mem_p6A', 'user_p6A', { failWhen: r5Only })
+    const payerRow = rs[0].stored
+    ok(letIn6(rs) && rs.every((x) => unstamped(x.stored) && x.stored.renewal_price === 97), 'a real payer on it: both request routes 200, the row stored without the stamp', show(brief6(rs)))
+    // Whop down then: no stamp, so the stored row answers nothing: the 503, as for any row this rule did not stamp.
+    rs = await routes6('mem_p6A', 'user_p6A', { down: true, failWhen: r5Only, db: { [MEMBERSHIP_DISCOUNTS_TABLE]: payerRow ? [payerRow] : [] } })
+    ok(rs.every((x) => x.status === 503 && x.error === LINE_503 && x.written === 0), 'Whop down with that row: the 503, nothing written', show(brief6(rs)))
+    // Check Whop again: Whop's answer stored, 200.
+    paidWhop()
+    const cdb = checkDb('mem_p6T', {}, 'user_p6T')
+    cdb.failWhen = r5Only
+    const c = await quiet(() => checkAgain())
+    ok(c.value.status === 200 && show(c.value.body) === show({ discounted: false, code: null, unpaid: true }) && rowShowsUnpaid(cdb.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]) && unstamped(cdb.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]),
+       'Check Whop again on it: 200, the trial unpaid, stored without the stamp (it answered 500)', show(c.value))
+    // The cron in write mode: every row written without the stamp, stamp_refused saying so, ok (it answered 500).
+    const cid = (k) => `5a1b2c3d-0000-4000-8000-${String(700 + k).padStart(12, '0')}`
+    const three = [['mem_p6T', 'user_p6T'], ['mem_p6A', 'user_p6A'], ['mem_p6F2', 'user_p6F2']]
+    for (const [label, failWhen, stamped] of [['the r5-only check', r5Only, false], ['this tree\'s v113', null, true]]) {
+      paidWhop()
+      const db = new FakeDb({ students: three.map(([membership, user], i) => ({ id: cid(i), first_paid_at: PAID, membership_status: 'active', whop_membership_id: membership, whop_user_id: user })) })
+      db.failWhen = failWhen
+      installDb(db)
+      const r = await quiet(() => cron('?mode=write'))
+      const rows = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)
+      ok(r.value.status === 200 && r.value.body.ok === true && r.value.body.written === 3 && r.value.body.stamp_refused === !stamped && r.value.body.no_real_payment === 1 && r.value.body.no_paid_plan === 1
+           && rows.length === 3 && rows.every((x) => (stamped ? x.source === R6(x.renewal_price === null ? 'payment' : 'membership') : unstamped(x))),
+         `the cron in write mode on ${label}: 200, ok, 3 written ${stamped ? 'with the stamp, stamp_refused false' : 'without the stamp, stamp_refused true'}, the trial and the free plan counted unpaid`, show({ status: r.value.status, body: { ok: r.value.body.ok, written: r.value.body.written, stamp_refused: r.value.body.stamp_refused, error: r.value.body.error }, sources: rows.map((x) => x.source ?? null) }))
+    }
+  }
+
   // The cron over every case: each counted by its half, each stored as the rule says.
   {
     const cid = (k) => `5a1b2c3d-0000-4000-8000-${String(600 + k).padStart(12, '0')}`
@@ -4038,6 +4188,50 @@ console.log('\n=== The owner\'s paid plan and payment (2026-10-26): a course pay
          && b.by_source.payment === refusedCases.length + paidCases.filter((c) => c[3] === 'payment').length && b.user_list_unusable === 1,
        `the cron: ${all.length} students, ${wantNone} with no real course payment and ${wantPlan} with a payment and no paid plan counted apart, every unpaid one from the payments`, show(b))
     ok(all.every(([kind], i) => rowShowsUnpaid(rows.get(cid(i))) === (kind === 'refused')), 'each stored as the rule says: unpaid for the refused, a price for the paid')
+  }
+
+  // A window that has closed, its stored row unpaid (the review of 2026-10-26): the panel keeps "This closed on ...",
+  // which stays true and is what the server says, where it read the unpaid sentence; the cron reads the row only while
+  // the window is open, so that sentence stayed after a payment the student made later. Last in the file: the clock
+  // moves past the window and is put back.
+  {
+    const CV6 = await import('./_gen/checkpointView.ts')
+    const LATE = Date.parse('2026-11-20T09:00:00.000Z')
+    const late = { now: new RealDate(LATE), firstPaidAt: PAID, lessons: LESSONS, videoDoneIds: new Set(['a1l01', 'a1l02']), requests: [] }
+    const st = discountState({ ...late, membershipUnpaid: true })
+    ok(st.kind === 'expired' && show(st) === show(discountState(late)) && discountState({ ...late, videoDoneIds: new Set(), membershipUnpaid: true }).kind === 'expired'
+         && discountState({ ...late, now: at(NOW), membershipUnpaid: true }).reason === 'unpaid'
+         && discountState({ ...late, membershipUnpaid: true, membershipDiscounted: true }).reason === 'has-discount',
+       'past the deadline with the stored row unpaid: "expired", as with no flag (it read "unpaid" until the review); in the window the flag still closes it, and a coupon keeps its own line', show(st))
+    const cv = checkpointView(st, LATE, 3, 3)
+    const panel = `This closed on ${cv.deadline}. ${CV6.expiredRuleLine(st.endsAt, 'Video Ads II')}`
+    ok(cv.label.tail === 'Closed' && cv.deadline !== null && panel.startsWith('This closed on ') && panel.endsWith('The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining.')
+         && !panel.includes(PAID_LINE) && !BANNED.test(panel),
+       'its panel: "This closed on" the deadline and the rule its window had, never the unpaid sentence', panel)
+    // End to end: the cron stores the trial's unpaid row in the window; past it the trial converts on the same
+    // membership, the cron reads it no more, the data route still sends the flag, and the map's state is the closed
+    // window's, as the request route says.
+    paidWhop()
+    const db = readyDb('mem_p6T', {}, 'user_p6T', SID)
+    db.rows('students')[0].membership_status = 'active'
+    const saved = clock
+    let r = await quiet(() => cron())
+    const inWindow = rowShowsUnpaid(db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0] ?? {})
+    clock = LATE
+    whop.payments.set('user_p6T', [...whop.payments.get('user_p6T'), pay('pay_p6Tlate', 'user_p6T', '97.00', '2026-11-19T09:00:00.000Z', { membership_id: 'mem_p6T', billing_reason: 'subscription_cycle' })])
+    whop.memberships.get('mem_p6T').status = 'active'
+    r = await quiet(() => cron())
+    const flag = (await quiet(async () => {
+      installDb(db)
+      const res = await dataRoute(new Request('http://app/api/student/data', { headers: { authorization: 'Bearer tok-1' } }))
+      return res.json()
+    })).value.membershipUnpaid
+    const mapState = discountState({ ...late, membershipUnpaid: flag === true })
+    const asked = await quiet(() => post(requestRoute, 'request', { studentId: SID }))
+    clock = saved
+    ok(inWindow && r.value.body.in_window === 0 && r.value.body.checked === 0 && flag === true && mapState.kind === 'expired'
+         && asked.value.status === 400 && asked.value.body.error === 'Your deadline for the 30% has passed.' && asked.value.body.state === 'expired',
+       'stored unpaid in the window, paid after it: the cron reads it no more and the flag stays, but the map says the window closed, as the request route does', show({ inWindow, cron: { in_window: r.value.body.in_window, checked: r.value.body.checked }, flag, map: mapState.kind, asked: asked.value }))
   }
 }
 

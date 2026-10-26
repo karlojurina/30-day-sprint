@@ -196,6 +196,13 @@
  *      went through." and nothing about videos, days or a deadline, "Closed"
  *      in its eyebrow, no Apply, grey; Esc closes it with nothing sent. At
  *      1440x900, and the phone's sheet at 390x844 says the same
+ *  31  the review of 2026-10-26 (?discount=unpaid-expired): the window has
+ *      closed and the stored coupon answer says the student is unpaid. The
+ *      panel says "This closed on" its deadline and the rule, as
+ *      ?discount=expired does, never the unpaid sentence (it came first
+ *      until the review, and stayed after a payment made once the window
+ *      had closed); "Closed" in its eyebrow, no Apply. At 1440x900, and the
+ *      phone's sheet at 390x844 says the same
  *  Rows 24 to 27 load their pages in Europe/Zagreb (page.emulateTimezone),
  *  so they read the same on any machine.
  *
@@ -237,6 +244,8 @@
  *   phone-sheet-eighty.png  one short of the 80%, and at it (row 29)
  *   panel-unpaid-1440.png, phone-sheet-unpaid.png  no paid course plan and
  *                         payment that went through (row 30)
+ *   panel-unpaid-expired-1440.png, phone-sheet-unpaid-expired.png  the same,
+ *                         its window closed: "This closed on" (row 31)
  *
  * What a row reads:
  *   hooks      window.__worldReady, __worldFrame, __worldScrollFor(depth),
@@ -1756,6 +1765,29 @@ try {
     await page.close()
     const p = await phoneSheet(r, 'unpaid', null, 'phone-sheet-unpaid.png')
     r.check('phone (390x844): the sheet says the same, no Apply', (p.text ?? '').includes(LINE) && !/Apply by|days left|Watch 80%/.test(p.text ?? '') && p.apply === null, p)
+  })
+
+  // The review of 2026-10-26: the unpaid line only while the window is open. A window that has closed keeps "This
+  // closed on ...", which stays true and is what the request routes say; the stored row is read again only while the
+  // window is open, so the unpaid line stayed after a payment made once it had closed.
+  await runRow(31, "unpaid-expired (the window closed, the stored row unpaid): the panel says \"This closed on\" its deadline and the rule, never the unpaid sentence, with no Apply; 1440x900 and the phone's sheet at 390x844", async (r) => {
+    const UNPAID = 'The 30% needs a paid course plan and a payment that went through.'
+    const CLOSED = /This closed on \w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./
+    const page = await r.open({ discount: 'unpaid-expired' }, '', { width: 1440, height: 900 })
+    let s = await page.evaluate(SNAP)
+    r.check('no chip in the header; the tag and the cache closed', s.chip === null && s.chipState === null && s.tag?.state === 'closed' && s.cp?.look === 'closed', { chip: s.chip, tag: s.tag?.state, look: s.cp?.look })
+    const via = await click(page, FIND.tag, 'row 31: the tag')
+    await parked(page, 'row 31')
+    s = await page.evaluate(SNAP)
+    r.check('a real click on the tag opens the panel, the camera parked at the cache', via === 'mouse' && s.panel?.title === '30% off your next month' && s.park?.id === 'checkpoint', { via, panel: s.panel?.title, park: s.park })
+    r.check('it says "This closed on" the deadline and the rule its window had, as ?discount=expired does, never the unpaid sentence', CLOSED.test(s.panel?.text ?? '') && !(s.panel?.text ?? '').includes(UNPAID), s.panel?.text)
+    const eyebrow = await page.evaluate(EYEBROW)
+    r.check('its eyebrow ends "Closed"', eyebrow?.at(-1) === 'Closed', eyebrow)
+    r.check('no Apply', (await page.evaluate(FIND.apply)) === null)
+    await page.screenshot({ path: path.join(OUT, 'panel-unpaid-expired-1440.png') })
+    await page.close()
+    const p = await phoneSheet(r, 'unpaid-expired', null, 'phone-sheet-unpaid-expired.png')
+    r.check('phone (390x844): the sheet says the same, no Apply', CLOSED.test(p.text ?? '') && !(p.text ?? '').includes(UNPAID) && p.apply === null, p)
   })
 } finally {
   await browser.close()

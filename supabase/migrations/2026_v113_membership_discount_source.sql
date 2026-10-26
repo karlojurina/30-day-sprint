@@ -35,7 +35,10 @@
 --      here until the r6 one replaces it. Empty on the rows written before,
 --      and on a "no coupon" the check judged without the user's list of
 --      memberships (it can miss a code on a second, canceled or expired
---      membership), which the fallback never answers with.
+--      membership), which the fallback never answers with; an unpaid answer
+--      (no coupon, no code and no price: no real course payment, which the
+--      list cannot change) is stamped all the same, and the fallback answers
+--      with it.
 --   2. Adds `source_checked_at`: the checked_at of the write that set
 --      `source`. A build from before T-122 writes neither column, so its
 --      write over a row keeps the stamp with a new checked_at, and the
@@ -49,8 +52,12 @@
 --      be added; on production the column is new and nothing is emptied. A
 --      database that holds the copy of this file taking the r5 words alone
 --      (the copy in the tree production runs, cac0c07) gets the six on a
---      paste of this one, its r5 rows kept: the r6 build's writes fail on
---      that copy's check (23514) until then, its cron answering 500.
+--      paste of this one, its r5 rows kept. Until then that copy's check
+--      refuses the r6 build's stamp (23514): the r6 build writes its rows
+--      again without the stamp, as on a database without this file, and its
+--      cron says so (stamp_refused), so no stored "no coupon" answers when
+--      Whop does not (those writes failed, the cron answering 500, until the
+--      review of 2026-10-26).
 --   4. Shows what it made.
 --
 -- WHAT CHANGES FOR ANYONE
@@ -108,7 +115,7 @@ alter table public.student_membership_discounts
   check (source is null or source in ('r5-membership', 'r5-user', 'r5-payment', 'r6-membership', 'r6-user', 'r6-payment'));
 
 comment on column public.student_membership_discounts.source is
-  'T-122 (v113): the rule''s version and the step that answered. r6-membership = the Whop membership on file; r6-user = a course membership found through the student''s Whop user; r6-payment = a course payment (a code on it, a discount it shows, the price of the first real one, or no real course payment and paid course plan); the rule since 2026-10-26. r5-membership, r5-user and r5-payment = the same steps by the rule before it, which stored a no coupon for a paid membership with no real payment. Empty on rows written before v113, and on a no coupon judged without the user''s list of memberships, which the stored fallback never answers with. A stored no coupon answers for a Whop that gives none only when this column carries the current version and source_checked_at is checked_at.';
+  'T-122 (v113): the rule''s version and the step that answered. r6-membership = the Whop membership on file; r6-user = a course membership found through the student''s Whop user; r6-payment = a course payment (a code on it, a discount it shows, the price of the first real one, or no real course payment and paid course plan); the rule since 2026-10-26. r5-membership, r5-user and r5-payment = the same steps by the rule before it, which stored a no coupon for a paid membership with no real payment. Empty on rows written before v113, and on a no coupon judged without the user''s list of memberships, which the stored fallback never answers with, an unpaid answer (no coupon, no code and no price) excepted: it is stamped all the same. A stored no coupon answers for a Whop that gives none only when this column carries the current version and source_checked_at is checked_at.';
 
 comment on column public.student_membership_discounts.source_checked_at is
   'T-122 (v113): the checked_at of the write that set source. A build that writes no source and writes over the row changes checked_at alone, so the two differ and the row is no answer for the stored fallback.';

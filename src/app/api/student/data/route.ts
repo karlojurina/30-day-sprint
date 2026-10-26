@@ -232,6 +232,10 @@ export async function GET(request: NextRequest) {
   // first load after the row is read again: the coupon cron reads every
   // student whose 30% window is open, active or past_due, every 2 hours (at
   // :40), and a membership put on file since leaves the old row out at once.
+  // The map says the unpaid line only while the window is open (discountState
+  // checks the deadline first since the review of 2026-10-26): the cron stops
+  // reading the row once the window closes, and the closed window's own line
+  // stays true.
   if (membershipDiscountRes.error) {
     console.error(`[student/data] student_membership_discounts read failed: ${membershipDiscountRes.error.message}`);
   }

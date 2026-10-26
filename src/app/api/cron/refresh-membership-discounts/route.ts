@@ -46,7 +46,11 @@
  * one and no course membership on a paid plan; their rows are what the map
  * reads to show that line with no Apply. Every row this cron writes carries
  * the rule's stamp (v113: `source` "r6-" and the step since that day, "r5-"
- * until then; `source_checked_at` its checked_at). The first dry run on
+ * until then; `source_checked_at` its checked_at), unless the database has no
+ * v113, or since the review of that day holds a copy of v113 whose check
+ * refuses "r6-" (the copy in production's tree takes the r5 values alone):
+ * then the rows are written without it and `stamp_refused` is true, where
+ * every run answered 500 until then. The first dry run on
  * production (2026-10-21, before T-122) could not read 46 of 290: 22 payment
  * ids where the membership's belongs, 24 memberships with no plan or no
  * renewal price.

@@ -990,6 +990,17 @@ if (wanted('thirty')) {
     await settled()
     expect((await rowText(await row('Jonah Pereira'))).includes(NO_PAYMENT) && (await calls()).some((c) => c.name === 'checkCoupon' && c.args[0] === 'r-jonah'),
       'Check Whop again: the notice says Whop still does not show both, and the row read again says the same', await rowText(await row('Jonah Pereira')))
+    // Sofia: her stored row says the same, and Whop shows her paid now (the review of 2026-10-26). The notice names the
+    // payment that went through alone: where the plan cannot be known the payment decides, so "a paid course plan" was
+    // not always true. The rule decides her row again.
+    expect((await rowText(await row('Sofia Marin'))).includes(NO_PAYMENT), 'Sofia: her stored row says the student is unpaid, so her verdict does')
+    await press(await buttonIn(await row('Sofia Marin'), 'Check Whop again'))
+    await page.waitForFunction(() => document.body.innerText.includes('Whop shows a payment that went through for Sofia Marin now. The 30% rule decides this request again.'), { timeout: 10000 })
+    await settled()
+    const sofiaNow = await rowText(await row('Sofia Marin'))
+    expect(!sofiaNow.includes(NO_PAYMENT) && (await calls()).some((c) => c.name === 'checkCoupon' && c.args[0] === 'r-sofia')
+        && !(await page.evaluate(() => document.body.innerText)).includes('Whop shows a paid course plan'),
+      'Check Whop again on Sofia: the notice names the payment alone, never a paid course plan, and her row read again is the rule\'s', sofiaNow)
     // Maya: the stored row is clean, so her row says yes until Approve asks Whop.
     const loads = (await calls()).filter((c) => c.name === 'loadThirty').length
     expect((await rowText(await row('Maya Lindqvist'))).includes(YES_EVERY), 'Maya: her stored row is a clean one, so the verdict is the rule\'s yes')

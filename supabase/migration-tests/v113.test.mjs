@@ -224,15 +224,21 @@ console.log('\n=== v113 on a database that holds an earlier copy of it ===')
 
 console.log('\n=== v113 on a database that holds the copy taking the r5 values alone ===')
 {
-  // The copy in the tree production runs: pasted there before this one, the r6 build's writes are refused until this
-  // copy is pasted over it, which takes the six and keeps the r5 rows.
+  // The copy in the tree production runs: pasted there before this one, the r6 build's stamp is refused until this
+  // copy is pasted over it, which takes the six and keeps the r5 rows. Since the review of 2026-10-26 the r6 build
+  // writes the row again without the stamp on that refusal (membership-discount.ts refusesThisStamp, which reads the
+  // code and the check's name in the message, as Postgres gives them here); its writes failed until then.
   const prod = await database()
   await paste(V113_R5, prod)
   const at = '2026-10-26T10:40:00Z'
   const r5Row = await as('service_role', upsert({ student_id: A, whop_membership_id: 'mem_devA', discounted: false, renewal_price: 97, checked_at: at, source: 'r5-membership', source_checked_at: at }), {}, prod)
   const r6Refused = await as('service_role', upsert({ student_id: B, whop_membership_id: 'mem_devB', discounted: false, checked_at: at, source: 'r6-payment', source_checked_at: at }), {}, prod)
-  ok(V113_R5 !== V113 && !r5Row.code && r6Refused.code === '23514',
-     'on the r5-only copy: production\'s r5 build writes, and the r6 build\'s write is refused (23514): it logs it and keeps its live answer, its cron answering 500', show({ r5: r5Row.code ?? 'ok', r6: r6Refused.code }))
+  ok(V113_R5 !== V113 && !r5Row.code && r6Refused.code === '23514' && /\bstudent_membership_discounts_source_check\b/.test(r6Refused.message ?? ''),
+     'on the r5-only copy: production\'s r5 build writes, and the r6 build\'s stamp is refused (23514, the message naming student_membership_discounts_source_check, which the build reads)', show({ r5: r5Row.code ?? 'ok', r6: r6Refused.code, message: r6Refused.message }))
+  const unstamped = await as('service_role', upsert({ student_id: B, whop_membership_id: 'mem_devB', promo_code_id: null, promo_code: null, renewal_price: null, plan_renewal_price: null, discounted: false, checked_at: at }), {}, prod)
+  const unstampedRow = (await prod.query(`select discounted, promo_code_id, renewal_price, source from public.student_membership_discounts where student_id = '${B}'`)).rows[0]
+  ok(!unstamped.code && show(unstampedRow) === show({ discounted: false, promo_code_id: null, renewal_price: null, source: null }),
+     'and its write again without the stamp is taken: the row is stored (the map and the 30% page read it) with no source, so no stored no coupon answers with it', show({ code: unstamped.code ?? 'ok', row: unstampedRow }))
   const out = await paste(V113, prod)
   const kept = (await prod.query(`select source from public.student_membership_discounts where student_id = '${A}'`)).rows[0]?.source
   const r6Now = await as('service_role', upsert({ student_id: B, whop_membership_id: 'mem_devB', discounted: false, checked_at: at, source: 'r6-payment', source_checked_at: at }), {}, prod)

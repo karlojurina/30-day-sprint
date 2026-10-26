@@ -47,7 +47,11 @@
  *                     Approve; Maya's stored row is a clean one and Whop says
  *                     so only now, so her Approve is refused with code
  *                     "rule", the answer stored, and her row then reads the
- *                     same. Approve anyway passes both
+ *                     same. Approve anyway passes both. Sofia's stored row
+ *                     says so too, but Whop shows her paid now (the review
+ *                     of 2026-10-26): Check Whop again says "Whop shows a
+ *                     payment that went through for Sofia Marin now." and
+ *                     the rule decides her row again
  *
  * The Approved rows' coupon is what Whop says now (liveCoupons, as
  * GET /api/admin/thirty asks it): Ethan was approved before the coupon rule
@@ -300,12 +304,17 @@ function staleCouponDb(): FixtureDb {
 /**
  * The full fixture, with Whop showing no paid course plan and payment that
  * went through for Jonah (stored) and for Maya (only now, so her stored row is
- * still a clean one): the owner's rule of 2026-10-26.
+ * still a clean one): the owner's rule of 2026-10-26. Sofia's stored row says
+ * the same, and Whop shows her paid now (the review of that day: Check Whop
+ * again's notice names the payment alone).
  */
 function unpaidDb(): FixtureDb {
   const db = fullDb();
   db.people.find((p) => p.id === "p-jonah")!.stored = UNPAID;
   db.people.find((p) => p.id === "p-maya")!.live = UNPAID;
+  const sofia = db.people.find((p) => p.id === "p-sofia")!;
+  sofia.stored = UNPAID;
+  sofia.live = CLEAN;
   return db;
 }
 

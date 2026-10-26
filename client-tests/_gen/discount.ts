@@ -299,7 +299,12 @@ export interface DiscountInput {
    * unpaid row, membership-discount.ts rowShowsUnpaid; /api/student/data
    * carries it to the map, 2026-10-26). Left out or false: nothing stored
    * tells, so the map offers what the rule says and the server decides live.
-   * It closes the offer as membershipDiscounted does, right after it.
+   * It closes an open window's offer, after the requests, the dates, a coupon,
+   * the gate and the deadline: a request already made still decides, and a
+   * closed window keeps its own words, "expired" among them (since the review
+   * of 2026-10-26; it came right after membershipDiscounted until then, so a
+   * window that had closed read the unpaid line, which no later read of the
+   * row could take back).
    */
   membershipUnpaid?: boolean;
 }
@@ -426,8 +431,6 @@ export function discountState(input: DiscountInput): DiscountState {
   if ("closed" in open) return { kind: "not-eligible", reason: open.closed };
   // A discount already on the next renewal: no 30% on top, however many videos are done (D5).
   if (input.membershipDiscounted === true) return { kind: "not-eligible", reason: "has-discount" };
-  // No paid course plan and payment that went through (the owner, 2026-10-26): nothing to take the 30% off.
-  if (input.membershipUnpaid === true) return { kind: "not-eligible", reason: "unpaid" };
   if (!gateLessonId(lessons)) return { kind: "not-eligible", reason: "no-gate" };
 
   const required = requiredLessons(lessons);
@@ -446,6 +449,11 @@ export function discountState(input: DiscountInput): DiscountState {
   if (now.getTime() > open.endsAt.getTime()) {
     return { kind: "expired", endsAt, window: open.window, lessonsLeft: short };
   }
+  // No paid course plan and payment that went through (the owner, 2026-10-26): nothing to take the 30% off. Only while
+  // the window is open (the review of the same day): a closed window keeps "This closed on ...", which stays true, as the
+  // server says it (the request routes judge the deadline first), and the stored row is read again only while the window
+  // is open, so the line would stay after a payment the student makes later.
+  if (input.membershipUnpaid === true) return { kind: "not-eligible", reason: "unpaid" };
   if (short === 0) {
     return { kind: "ready", endsAt, window: open.window, lessonsDone: done, lessonsNeeded: needed, lessonsTotal: required.length };
   }

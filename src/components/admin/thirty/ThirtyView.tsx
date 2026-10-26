@@ -422,7 +422,9 @@ export function ThirtyView({
             : `Whop still doesn't show both a paid course plan and a payment that went through for ${name}.`
           : wasCoupon
             ? `Whop shows no discount on ${name}'s membership now. The 30% rule decides this request again.`
-            : `Whop shows a paid course plan and a payment that went through for ${name} now. The 30% rule decides this request again.`,
+            : // What is known for sure: a payment that went through. The plan can be one Whop gives no price for, where
+              // the payment decides (membership-discount.ts, THE PAID PLAN AND THE PAYMENT; the review of 2026-10-26).
+              `Whop shows a payment that went through for ${name} now. The 30% rule decides this request again.`,
     });
     await reload();
     return null;

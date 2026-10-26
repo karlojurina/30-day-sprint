@@ -31,7 +31,8 @@
 //                      /api/discounts/approve, the real routes on stub-server.ts's
 //                      stand-in database: at 48 both request routes refuse and
 //                      write nothing, at 49 and 61 each writes one request and
-//                      Approve approves it with one code
+//                      Approve makes its one code and puts it on the student's
+//                      membership (since the 30% that applies itself, T-137)
 //   6. no payment      first_paid_at empty (since the first-paid fix, no real
 //                      payment): no window at all, so the map offers no Apply,
 //                      both request routes refuse in the map's own sentence and
@@ -64,9 +65,13 @@
 //
 // build.mjs copies the modules and the two request routes (run it first; `npm
 // run test:client` does). The approve route is copied here with the team's
-// login and Whop's promo code pointed at stub-admin.ts, as
-// admin-discounts.test.mjs does, so a founder, an admin and a csm can press
-// it. Every student, id and code here is made up.
+// login pointed at stub-admin.ts, as admin-discounts.test.mjs does, so a
+// founder, an admin and a csm can press it; since the 30% that applies itself
+// (T-137) its step (thirty-apply.ts, build.mjs's copy) makes the code with
+// stub-admin.ts's stand-in and attaches it on a stand-in for Whop's API (the
+// student's membership read and the attach; every other read gets a 503, so
+// the coupon check's stored row answers it, as before). Every student, id and
+// code here is made up.
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
@@ -130,18 +135,44 @@ function copyRoute(rel, out, rewrites) {
   if (s.includes('@/')) throw new Error(`an unrewritten @/ import remains in ${rel}`)
   fs.writeFileSync(here(`./_gen/${out}`), s)
 }
+// Since T-137 the route's checks and its promo code live in thirty-apply.ts (build.mjs's copy, its create at stub-admin.ts).
 copyRoute('src/app/api/discounts/approve/route.ts', 'eighty-approve-route.ts', [
   ['from "next/server"', 'from "./stub-server.ts"'],
   ['from "@/lib/admin-auth"', 'from "./stub-admin.ts"'],
-  ['from "@/lib/whop"', 'from "./stub-admin.ts"'],
-  ['from "@/lib/catalog-tables"', 'from "./stub-server.ts"'],
-  ['from "@/lib/constants"', 'from "./constants.ts"'],
-  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
-  ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
-  ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+  ['from "@/lib/thirty-apply"', 'from "./thirty-apply.ts"'],
 ])
 const { POST: approveRoute } = await import('./_gen/eighty-approve-route.ts')
 const { setTeam, promoCodes } = await import('./_gen/stub-admin.ts')
+
+// Whop, standing in (T-137: Approve makes the code and attaches it). The student's course membership answers its
+// pinned read and takes a code by its name, the code's id the one stub-admin.ts's create gave it; every other read
+// (the coupon check's user list and payments) gets a 503, so the coupon check gives no answer and the stored row this
+// rule wrote answers it, as it did here before. No request leaves the machine.
+process.env.WHOP_API_KEY = 'whop-test-key'
+process.env.WHOP_COMPANY_ID = 'biz_devCompany'
+process.env.WHOP_PRODUCT_ID = 'prod_devCourse'
+const whopApi = { members: new Map(), applies: [] }
+const whopJson = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+/** The membership as Whop's pinned read gives it. */
+const pinned = (m) => ({ id: m.id, status: 'active', user_id: 'user_1', product_id: 'prod_devCourse', plan_id: 'plan_devMonthly97', promo_code_id: m.promo, renewal_price: { amount: '97.00', currency: 'usd' }, cancel_at_period_end: false })
+globalThis.fetch = async (url, init = {}) => {
+  const u = new URL(String(url))
+  if (u.hostname !== 'api.whop.com') throw new Error(`the suite let a request go to ${u.hostname}`)
+  const attach = u.pathname.match(/^\/api\/v1\/memberships\/([^/]+)\/apply_promo_code$/)
+  if ((init.method ?? 'GET') === 'POST' && attach) {
+    const m = whopApi.members.get(decodeURIComponent(attach[1]))
+    if (!m) return whopJson(404, { error: { message: 'Membership not found.' } })
+    const name = String(JSON.parse(init.body).promo_code).toLowerCase()
+    const made = promoCodes.findLastIndex((p) => String(p.code).toLowerCase() === name)
+    if (made < 0) return whopJson(400, { error: { message: 'Promo code not found.' } })
+    m.promo = `promo_${made + 1}`
+    whopApi.applies.push({ membership: m.id, promo: m.promo })
+    return whopJson(200, pinned(m))
+  }
+  const one = u.pathname.match(/^\/api\/v1\/memberships\/([^/]+)$/)
+  if (one && whopApi.members.has(decodeURIComponent(one[1]))) return whopJson(200, pinned(whopApi.members.get(decodeURIComponent(one[1]))))
+  return whopJson(503, { error: { message: 'Service unavailable' } })
+}
 
 // The admin's copy button, compiled as Next compiles it (types out, JSX to react/jsx-runtime).
 function compile(rel, out, rewrites = []) {
@@ -395,6 +426,9 @@ function freshDb(paid, done = [], doneAt = WATCHED, requests = [], whop = 'clean
     admin_config: [{ key: 'curriculum_reset_at', value: SWITCH }],
   }, { 'tok-1': 'auth-1' })
   installDb(db)
+  // Their membership on Whop, holding no code yet (none for the student Whop shows no payment for).
+  whopApi.members = new Map(noPayment ? [] : [['mem_devEighty', { id: 'mem_devEighty', promo: null }]])
+  whopApi.applies = []
   // submit_discount_with_feedback (v29), standing in as discount-september.test.mjs has it.
   db.functions.submit_discount_with_feedback = async (args, client) => {
     const { data: existing } = await client.from('discount_requests').select('id')
@@ -415,14 +449,23 @@ const post = (route, path, body) => hush(async () => {
 })
 const apply = () => post(requestRoute, '/api/discounts/request', { studentId: 's1' })
 const submit = () => post(feedbackRoute, '/api/discounts/submit-feedback', { studentId: 's1', answers: [{ question_id: 'q1', answer_scale: 9 }] })
-/** The team presses Approve (or Approve anyway, `override`) on `id` as `role`. */
+/**
+ * The team presses Approve (or Approve anyway, `override`) on `id` as `role`. `codes`: the codes asked of Whop;
+ * `attached`: whether the one code went on the student's membership, by the id the request holds (T-137).
+ */
 const press = (db, id, role, override = false) => hush(async () => {
   setTeam({ id: `team-${role}`, role })
   const codes = promoCodes.length
+  const applies = whopApi.applies.length
   const res = await approveRoute(new Request('http://app/api/discounts/approve', {
     method: 'POST', headers: { authorization: 'Bearer team', 'content-type': 'application/json' }, body: JSON.stringify({ requestId: id, override }),
   }))
-  return { status: res.status, body: await res.json(), codes: promoCodes.length - codes, row: db.rows('discount_requests').find((r) => r.id === id) }
+  const row = db.rows('discount_requests').find((r) => r.id === id)
+  const on = whopApi.applies.slice(applies)
+  return {
+    status: res.status, body: await res.json(), codes: promoCodes.length - codes, row,
+    attached: on.length === 1 && on[0].membership === 'mem_devEighty' && on[0].promo === row?.whop_promo_id,
+  }
 })
 const SENT = '2026-10-22T10:00:00.000Z'
 for (const n of [48, 49, 61]) {
@@ -438,8 +481,8 @@ for (const n of [48, 49, 61]) {
       ok((r.status === 200) && made.length === 1 && made[0].status === 'pending' && steps.some((s) => s.step === 'discount-requested'),
          `${n} of 61, ${way}: one request written, in review, the team's task made`, show({ status: r.status, made: made.length }))
       const approved = await at('2026-10-23T09:00:00.000Z', () => press(db, made[0].id, 'csm'))
-      ok(approved.status === 200 && approved.codes === 1 && approved.row.status === 'approved',
-         `${n} of 61, ${way}: the normal Approve (a csm's) approves it and makes one code`, show(approved.body))
+      ok(approved.status === 200 && approved.codes === 1 && approved.row.status === 'applied' && approved.attached && approved.body.status === 'applied',
+         `${n} of 61, ${way}: the normal Approve (a csm's) makes one code and puts it on their membership: applied (T-137)`, show(approved.body))
     }
   }
 }
@@ -476,7 +519,7 @@ for (const n of [48, 49, 61]) {
     // The same student with every video by the deadline: approved as before.
     const db = freshDb('2026-10-02T10:00:00.000Z', REQUIRED, '2026-10-21T10:00:00.000Z', [{ id: 'old5', status: 'pending', created_at: '2026-10-05T10:00:00.000Z' }])
     const r = await at(OCT_27, () => press(db, 'old5', 'csm'))
-    ok(r.status === 200 && r.codes === 1 && r.row.status === 'approved', 'the same with all 61 by the deadline: approved, one code', show(r.body))
+    ok(r.status === 200 && r.codes === 1 && r.row.status === 'applied' && r.attached, 'the same with all 61 by the deadline: approved, one code, on their membership (applied)', show(r.body))
   }
   {
     // A first payment at the launch (its own window, over on 22 October) and a pending request from before it, which
@@ -490,7 +533,7 @@ for (const n of [48, 49, 61]) {
     // A window ending at the 80% rule's first moment (paid 11 October 23:00 UTC), 49 of 61, applied before its end: approved.
     const db = freshDb('2026-10-11T23:00:00.000Z', REQUIRED.slice(0, 49), '2026-10-24T10:00:00.000Z', [{ id: 'edge', status: 'pending', created_at: '2026-10-25T10:00:00.000Z' }])
     const r = await at(OCT_27, () => press(db, 'edge', 'csm'))
-    ok(r.status === 200 && r.codes === 1 && r.row.status === 'approved', 'a window ending at 00:00 on 26 October in Croatia, 49 of 61: approved, the 80% is its rule', show(r.body))
+    ok(r.status === 200 && r.codes === 1 && r.row.status === 'applied' && r.attached, 'a window ending at 00:00 on 26 October in Croatia, 49 of 61: approved and on their membership, the 80% is its rule', show(r.body))
   }
 }
 
@@ -527,8 +570,8 @@ console.log('\n=== 6. No 30% without a real payment (first_paid_at empty) ===')
   for (const role of ['admin', 'founder']) {
     const db = pending()
     const r = await at('2026-10-23T09:00:00.000Z', () => press(db, 'np', role, true))
-    ok(r.status === 200 && r.codes === 1 && r.row.status === 'approved' && r.row.reviewed_by === `team-${role}`,
-       `Approve anyway by ${role === 'admin' ? 'an admin' : 'a founder'}: approved past it, one code, the row naming the login`, show(r.body))
+    ok(r.status === 200 && r.codes === 1 && r.row.status === 'applied' && r.attached && r.row.reviewed_by === `team-${role}` && r.row.applied_by === `team-${role}`,
+       `Approve anyway by ${role === 'admin' ? 'an admin' : 'a founder'}: approved past it, one code on their membership, the row naming the login as reviewer and as who applied it`, show(r.body))
   }
   {
     const db = pending()
@@ -572,7 +615,8 @@ console.log('\n=== 6. No 30% without a real payment (first_paid_at empty) ===')
   for (const role of ['admin', 'founder']) {
     const db = gap()
     const r = await at('2026-10-23T09:00:00.000Z', () => press(db, 'gp', role, true))
-    ok(r.status === 200 && r.codes === 1 && r.row.status === 'approved', `Approve anyway by ${role === 'admin' ? 'an admin' : 'a founder'}: approved past it, one code`, show(r.body))
+    ok(r.status === 200 && r.codes === 1 && r.row.status === 'approved' && !r.attached && r.body.reason === 'no_membership',
+       `Approve anyway by ${role === 'admin' ? 'an admin' : 'a founder'}: approved past it, one code, left approved (Whop shows no membership to put it on)`, show(r.body))
   }
   {
     const db = gap()

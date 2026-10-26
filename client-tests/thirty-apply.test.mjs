@@ -18,8 +18,10 @@
 // the app's own attempt_failed rows; the trigger's events are v116.test.mjs's.
 //
 // The approve route's checks moved into thirtyApprovalChecks: the last
-// section runs the route as it is (it keeps its own copy until work item 3)
-// and the moved checks on the same rows, and holds every answer equal.
+// section runs the route as it was at a031e8a (its own copy of the checks,
+// taken from git), the route now (which calls the moved checks since work
+// item 3) and the moved checks themselves on the same rows, and holds every
+// answer equal.
 //
 // The clock is the suite's, as in membership-discount.test.mjs: `new Date()`
 // and `Date.now()` answer it and setTimeout moves it, so the 4-a-second pace
@@ -1177,8 +1179,30 @@ console.log('\n=== STUB_STRICT_NULL: a value read as NULL is matched with .is() 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n=== thirtyApprovalChecks: the approve route\'s checks, moved, every answer as the route gave it ===')
 {
-  // The route keeps its own copy of these checks until work item 3 points it here, so each row is run through the
-  // route as it is and through the moved checks, on the same database, and the two answers are held equal.
+  // The route kept its own copy of these checks until work item 3 pointed it here. Each row is run through the route
+  // as it was then (a031e8a, from git), the route now and the moved checks, on the same database, and the answers are
+  // held equal: every refusal's status and body, every pass a pass (the route now goes on to put the 30% on, which
+  // with no Whop key here leaves the request approved), and the same log lines.
+  const OLD = 'a031e8a'
+  {
+    let s = execFileSync('git', ['show', `${OLD}:src/app/api/discounts/approve/route.ts`], { cwd: here('..'), encoding: 'utf8' })
+    for (const [from, to] of [
+      ['from "next/server"', 'from "./stub-server.ts"'],
+      ['from "@/lib/admin-auth"', 'from "./stub-server.ts"'],
+      ['from "@/lib/constants"', 'from "./constants.ts"'],
+      ['from "@/lib/whop"', 'from "./stub-server.ts"'],
+      ['from "@/lib/catalog-tables"', 'from "./stub-server.ts"'],
+      ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+      ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+      ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+    ]) {
+      if (!s.includes(from)) throw new Error(`the approve route at ${OLD} has no ${from}`)
+      s = s.split(from).join(to)
+    }
+    if (s.includes('@/')) throw new Error(`an unrewritten @/ import remains in the approve route at ${OLD}`)
+    fs.writeFileSync(here(`./_gen/discount-approve-route.${OLD}.ts`), s)
+  }
+  const { POST: oldApproveRoute } = await import(`./_gen/discount-approve-route.${OLD}.ts`)
   delete process.env.WHOP_API_KEY // the stored rows answer the coupon check here (no live read)
   const T0 = '2026-10-25T08:00:00.000Z'
   const STORED = {
@@ -1243,27 +1267,36 @@ console.log('\n=== thirtyApprovalChecks: the approve route\'s checks, moved, eve
     ['the old course: done in time', oldCourse(), {}, 200],
   ]
   const results = []
-  for (const [label, make, body, want] of ROWS) {
-    const routeDb = make()
-    installDb(routeDb)
-    const viaRoute = await quiet(async () => {
-      const res = await approveRoute(new Request('http://app/api/discounts/approve', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'r1', ...body }) }))
+  /** One press of a route on a fresh database: its status and body, and its log lines. */
+  const pressOn = async (route, make, body) => {
+    installDb(make())
+    return quiet(async () => {
+      const res = await route(new Request('http://app/api/discounts/approve', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ requestId: 'r1', ...body }) }))
       return { status: res.status, body: await res.json() }
     })
+  }
+  for (const [label, make, body, want] of ROWS) {
+    const viaOld = await pressOn(oldApproveRoute, make, body)
+    const viaRoute = await pressOn(approveRoute, make, body)
     const checksDb = make()
     installDb(checksDb)
     const request = checksDb.rows('discount_requests').find((r) => r.id === 'r1')
     const viaChecks = await quiet(() => thirtyApprovalChecks(fakeClient(checksDb), { id: request.id, student_id: request.student_id, created_at: request.created_at },
       { override: body.override, overrideCoupon: body.overrideCoupon, teamMemberId: 'team-1' }))
     const c = viaChecks.value
-    const same = c && (c.ok ? viaRoute.value.status === 200 : c.status === viaRoute.value.status && show(c.body) === show(viaRoute.value.body))
-    const routeLines = viaRoute.lines.filter((l) => l.startsWith('[discount approve]'))
+    const sameAs = (v) => c && (c.ok ? v.value.status === 200 : c.status === v.value.status && show(c.body) === show(v.value.body))
+    const linesOf = (v) => show(v.lines.filter((l) => l.startsWith('[discount approve]')))
     const checkLines = viaChecks.lines.filter((l) => l.startsWith('[discount approve]'))
-    results.push({ label, want, route: viaRoute.value.status, checks: c ? (c.ok ? 200 : c.status) : viaChecks.error, same, lines: show(routeLines) === show(checkLines), checkLines, coupon: c?.ok ? c.coupon : undefined, body: c?.ok ? null : c?.body })
+    results.push({ label, want, old: viaOld.value.status, route: viaRoute.value.status, checks: c ? (c.ok ? 200 : c.status) : viaChecks.error,
+      same: sameAs(viaOld) && sameAs(viaRoute), lines: linesOf(viaOld) === show(checkLines) && linesOf(viaRoute) === show(checkLines),
+      checkLines, coupon: c?.ok ? c.coupon : undefined, body: c?.ok ? null : c?.body, now: viaRoute.value.body })
   }
-  const off = results.filter((x) => !x.same || !x.lines || x.route !== x.want)
-  ok(off.length === 0 && results.length === 21, `${results.length} rows through the route and the moved checks: every refusal's status and body the same, every pass a pass, and the same log lines (the override's naming the member)`,
-     show(off.length ? off : results.map((x) => [x.label, x.route])))
+  const off = results.filter((x) => !x.same || !x.lines || x.route !== x.want || x.old !== x.want)
+  ok(off.length === 0 && results.length === 21, `${results.length} rows through the route at ${OLD}, the route now and the moved checks: every refusal's status and body the same, every pass a pass, and the same log lines (the override's naming the member)`,
+     show(off.length ? off : results.map((x) => [x.label, x.old, x.route])))
+  const passes = results.filter((x) => x.want === 200)
+  ok(passes.length === 5 && passes.every((x) => x.now.success === true && x.now.status === 'approved' && x.now.reason === 'whop_no_answer' && x.now.step === 'membership'),
+     'every pass, the route now: the code made and the request approved, Whop (no key here) not asked where to put it', show(passes.map((x) => [x.label, x.now.status, x.now.reason])))
   const byLabel = Object.fromEntries(results.map((x) => [x.label, x]))
   const anyway = results.filter((x) => x.label.startsWith('Approve anyway'))
   ok(anyway.length === 3 && anyway.every((x) => x.checkLines.some((l) => l.startsWith('[discount approve] OVERRIDE by team member team-1, request r1,')))

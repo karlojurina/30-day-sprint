@@ -499,7 +499,13 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
   // date read from admin_config, the rule, then Whop's promo code (a stand-in
   // that records what it is asked for) and the row's update. Since 2026-10-20
   // no ads tick: `switched` still sets students.ad_submissions_verified, to
-  // show it decides nothing.
+  // show it decides nothing. Since the 30% that applies itself (T-137) the
+  // route then puts the 30% on (putThirtyOn), which needs the course's product
+  // named (a made-up one, for this block alone): with no Whop key here the
+  // code is made under its random name and the request left approved, Whop
+  // never asked where to attach it.
+  const hadProduct = process.env.WHOP_PRODUCT_ID
+  process.env.WHOP_PRODUCT_ID = 'prod_devCourse'
   const RESET = '2026-10-19T05:00:00.000Z'
   const OLD = '2026-10-06T10:00:00.000Z'
   const switched = (db, adsVerified) => {
@@ -614,6 +620,8 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
     ok(r.status === 500 && r.body.error === "Couldn't read the course switch date, so nothing was approved. Try again." && r.codes === 0 && r.row.status === 'pending',
        'the switch\'s date cannot be read: 500, nothing approved, no code (the date can change the verdict now)', r.body.error)
   }
+  if (hadProduct === undefined) delete process.env.WHOP_PRODUCT_ID
+  else process.env.WHOP_PRODUCT_ID = hadProduct
 }
 
 console.log('\n=== What a student\'s browser gets of their request: never the promo code (2026-10-17) ===')

@@ -1,110 +1,138 @@
 import { NextRequest, NextResponse } from "./stub-server.ts";
+import { randomUUID } from "crypto";
 import { requireTeam, isAuthFailure } from "./stub-admin.ts";
-import { DISCOUNT_WINDOW_DAYS } from "./constants.ts";
-import { createWhopPromoCode } from "./stub-admin.ts";
-import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
-import { getCurriculumResetAt } from "./curriculum-reset.ts";
-import { checkMembershipDiscount, teamThirtyCodeFor } from "./membership-discount.ts";
-import {
-  UNPAID_APPROVAL,
-  approvalVerdict,
-  couponApprovalRefusal,
-  couponUncheckedApprovalRefusal,
-  explainOldCourseRequest,
-  loadDiscountReads,
-} from "./discount-server.ts";
+import { putThirtyOn, thirtyApprovalChecks, type ThirtyResult } from "./thirty-apply.ts";
 
 /**
- * Approve a pending discount request.
+ * Approve a pending discount request, or Try again on an approved one.
  *
- * Flow (one click for Astrid):
- *   0. The coupon (admin rebuild 2, D5): a student who already has a coupon
- *      gets no 30%, whatever the rule says and with `override` too. Whop is
- *      asked now (checkMembershipDiscount, the owner's rule since T-122's
- *      third fix round: a code other than the student's own 30% on any
- *      course membership or course payment, since the fifth a discount a
- *      payment naming no code shows, then with neither anywhere the price of
- *      the first real course payment, under 97.00 since the fourth); when it
- *      does not answer, the stored row decides if it is a coupon, or no
- *      coupon written by that rule and nothing since (its source carrying
- *      the rule's version, v113, since the fifth) naming no code but the
- *      student's own, the student's row read. The refusal is a 400 with code
- *      "has-discount"
- *      and names the code. `overrideCoupon` skips it (below). With neither
- *      an answer from Whop nor a stored row that answers, the normal Approve
- *      is refused since T-122's fourth fix round, once the rule below has had
- *      its say (503, code "rule", the reason in the team's words:
- *      couponUncheckedApprovalRefusal); until then it went on. Approve
- *      anyway (`override`, a founder's or an admin's) still goes on, which
- *      the page offers on that refusal. Since 2026-10-26 a no coupon for
- *      which Whop does not show both a paid course plan and a course payment
- *      that went through (the check's unpaid, the owner's rule of that day:
- *      "If they don't have a payment and a paid plan - no applying to 30%
- *      off"; a student whose first_paid_at the rule below can still find
- *      filled) refuses the normal Approve before the rule, a 400 with code
- *      "rule" (UNPAID_APPROVAL), so only Approve anyway passes it. Until the
- *      owner's answers of that day only no real payment beside no membership
- *      renewing above 0 refused it.
- *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
- *      the ads are not checked (the owner's decision: the 30% already asks
- *      for the videos, 80% of them since 2026-10-26, 49 of today's 61, and
- *      every one for a deadline before that day, the owner's B), so
- *      students.ad_submissions_verified decides nothing here. A refusal of
- *      the rule, or of a read it needs (the check could not run), carries
- *      code "rule": the 30% page then offers Approve anyway, which
- *      `override` is.
+ * APPROVE (a pending request; founder, admin or csm):
+ *   0. The checks (thirtyApprovalChecks, src/lib/thirty-apply.ts, moved there
+ *      from this file by the 30% that applies itself, T-137, so the job runs
+ *      the same ones before it makes a new code; every refusal's status and
+ *      body as this route gave them):
+ *      - the coupon (admin rebuild 2, D5): a student who already has a coupon
+ *        gets no 30%, whatever the rule says and with `override` too. Whop is
+ *        asked now (checkMembershipDiscount, the owner's rule since T-122's
+ *        third fix round), then the stored row this rule wrote. The refusal is
+ *        a 400 with code "has-discount" naming the code. With neither an
+ *        answer from Whop nor a stored row that answers, the normal Approve is
+ *        refused once the rule has had its say (503, code "rule"). Since
+ *        2026-10-26 a no coupon for which Whop does not show both a paid
+ *        course plan and a course payment that went through refuses the
+ *        normal Approve too (400, code "rule", UNPAID_APPROVAL).
+ *      - the course's 30% rule (approvalVerdict at the request's own date,
+ *        the course switch read): a refusal carries code "rule".
+ *   1. Approve anyway (`override`, `overrideCoupon`) is recorded as an
+ *      `override` event (discount_request_events, v116: actor team, the member,
+ *      detail {rule, coupon}).
+ *   2. The 30% goes on (putThirtyOn, the team as the actor): the request is
+ *      claimed, its code made on Whop under a random name (ECOM30- and 6
+ *      characters), approved, attached to the student's course membership,
+ *      and marked applied once Whop names the code there. A trial and a code
+ *      with the old per-student name, which the app leaves alone, go on for
+ *      the team.
+ *
+ * TRY AGAIN (an approved request; every team role): no checks; putThirtyOn
+ * asks Whop where the code is, attaches it (the old per-student name too) and
+ * marks it applied when it is on the student's own membership. It replaced
+ * Mark code applied (POST /api/discounts/mark-applied, deleted).
  *
  * APPROVE ANYWAY (the owner's review, 2026-10-21: a founder or an admin can
  * approve past any check). `override` skips the 30% rule; `overrideCoupon`
- * skips the coupon check, so a code is made for a student whose membership
- * already has a discount (what Whop does with the two codes on one
- * membership has not been checked). Each is
- * a founder's or an admin's: a csm sending either is refused with a 403
- * before anything is read. The page sends `override` alone after a refusal
- * of the rule, and both on a row the coupon refuses; its confirm names what
- * is skipped.
- *   2. Call Whop API to generate a 30%-off, 1-month, single-use promo code
- *   3. Store promo_code + whop_promo_id + status='approved' on our row
- *   4. Return the code so the admin UI can show it for copy-paste
+ * skips the coupon check. Each is a founder's or an admin's: a csm sending
+ * either is refused with a 403 before anything is read. Anything else than a
+ * pending or an approved request: 400 "Request already processed".
  *
- * If Whop API generation fails, we DO NOT mark the row approved —
- * Astrid retries. Better than approving without a code.
+ * Every 200 answers { success, status, promoCode, whopPromoId, reason, step,
+ * membershipStatus, message }: success when the request ended approved or
+ * applied, and with the reason (and Whop's words) when the code is not on the
+ * membership yet. The other answers (PRD §9.4's table): the create refused
+ * (Whop's 4xx) 502 with Whop's words, the request still pending; the app
+ * claiming the request right now 409; the request decided while Whop made the
+ * code 409 (the code must be deleted in Whop); Whop attaching the code after
+ * the request was rejected 409; the code made but its saving failed 500;
+ * v116 not pasted 503; the request decided already 400. A database failure
+ * the step has no answer for is a 500 asking for a refresh.
  *
- * Step 3 writes only while the row is still pending. If someone else
- * decided the request while Whop made the code, nothing is approved: 409,
- * and the code that was made has to be deleted in Whop (fix lane G1,
- * admin-4).
- *
- * After this returns, Astrid manually attaches the code to the
- * student's Whop subscription in the Whop dashboard, then calls
- * POST /api/discounts/mark-applied to close the loop.
- *
- * The app never shows the student the code, and since 2026-10-17
- * /api/student/data doesn't send it. It is no secret from them all the
- * same: a logged-in student can read their own row straight from the
- * database (the policy "Students can read own discount requests"), so what
- * the code can take off is set here, by WHOP_DISCOUNT_PLAN_IDS below.
+ * The app never shows the student the code, and /api/student/data doesn't
+ * send it. It is no secret from them all the same: a logged-in student can
+ * read their own row straight from the database (the policy "Students can
+ * read own discount requests"), so what the code can take off is set by
+ * WHOP_DISCOUNT_PLAN_IDS (thirty-apply.ts).
  *
  * Body:
  *   requestId      — id of the discount_requests row (required)
  *   override       — Approve anyway: skips the 30% rule (founder or admin)
  *   overrideCoupon — Approve anyway on a row the coupon refuses: skips the
  *                    coupon check (founder or admin)
- *   reviewerId     — ignored. The reviewer recorded (reviewed_by, and the
- *                    "Generate anyway" log line) is the logged-in team
- *                    member, never what the browser sends (admin PRD review,
- *                    2026-10-19).
+ *   reviewerId     — ignored. The reviewer recorded (reviewed_by, applied_by,
+ *                    the events and the Approve anyway log line) is the
+ *                    logged-in team member, never what the browser sends
+ *                    (admin PRD review, 2026-10-19).
  */
 
-/**
- * The refusals Approve anyway skips with `override`: the 30% rule said no, or
- * a read it needs failed, since T-122's fourth fix round the coupon check
- * gave no answer, and since 2026-10-26 Whop does not show both a paid course
- * plan and a course payment that went through (UNPAID_APPROVAL).
- */
-const RULE = { code: "rule" } as const;
+// The 30% that applies itself (T-137): the code is made and attached in this request, inside its own time limit.
+export const maxDuration = 30;
+
+/** The request's answer once the step ran, as PRD §9.4's table has it. */
+function answerFor(r: ThirtyResult): NextResponse {
+  const code = r.promoCode ?? "the code";
+  const body = (success: boolean) => ({
+    success,
+    status: r.status,
+    promoCode: r.promoCode,
+    whopPromoId: r.whopPromoId,
+    reason: r.reason,
+    step: r.step,
+    membershipStatus: r.membershipStatus,
+    message: r.message,
+  });
+  switch (r.outcome) {
+    case "applied":
+      return NextResponse.json(body(true));
+    case "waiting":
+      if (r.status === "approved") return NextResponse.json(body(true));
+      // Whop refused to make the code (a 4xx): the claim was given back, nothing was made.
+      if (r.reason === "code_not_made") {
+        return NextResponse.json(
+          { error: `Couldn't create the promo code on Whop. The request is still pending. Details: ${r.message ?? "Whop gave no reason."}` },
+          { status: 502 },
+        );
+      }
+      return NextResponse.json(body(false));
+    case "claimed_elsewhere":
+      return NextResponse.json({ error: "The app is making this code right now. Refresh in a few minutes." }, { status: 409 });
+    case "decided_meanwhile":
+      return NextResponse.json(
+        { error: `The Whop code ${code} was created, but this request had already been decided, so the code must be deleted in Whop.` },
+        { status: 409 },
+      );
+    case "ended_rejected":
+      return NextResponse.json(
+        {
+          error:
+            r.confirmed === false
+              ? `Whop may have attached ${code} after the request was rejected. Check their membership in Whop.`
+              : `Whop attached ${code} after the request was rejected. It can only come off in Whop.`,
+        },
+        { status: 409 },
+      );
+    case "write_error":
+      return NextResponse.json(
+        { error: `Whop made ${code}, but saving it failed. The app picks it up on its next try; leave it in Whop.` },
+        { status: 500 },
+      );
+    case "not_ready":
+      return NextResponse.json({ error: "The 30% update isn't finished on the database (v116). Nothing was made." }, { status: 503 });
+    case "unchanged":
+    case "planned":
+      return NextResponse.json({ error: "Request already processed" }, { status: 400 });
+  }
+}
 
 export async function POST(request: NextRequest) {
+  const startedAtMs = Date.now();
   // v75.31: TEAM-only. Previously this route was anonymous — anyone
   // who knew a requestId could trigger Whop promo code minting.
   // Now requires a founder/admin/csm team member JWT.
@@ -115,10 +143,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json();
   const { requestId, override, overrideCoupon } = body as {
     requestId?: string;
-    // v77: team can force-approve past the eligibility gates
-    // (missing first_paid_at, R1+R2 completion, window).
-    // The admin reviews every application manually and is the control —
-    // surfaced as the "Generate anyway" button in the admin UI.
+    // v77: team can force-approve past the eligibility gates.
+    // The admin reviews every application manually and is the control,
+    // surfaced as Approve anyway on the 30% page.
     override?: boolean;
     // The owner's review (2026-10-21): past the coupon check too.
     overrideCoupon?: boolean;
@@ -137,7 +164,7 @@ export async function POST(request: NextRequest) {
 
   const { data: discountReq, error: fetchError } = await supabase
     .from("discount_requests")
-    .select("*")
+    .select("id, student_id, status, created_at")
     .eq("id", requestId)
     .single();
 
@@ -145,289 +172,55 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Request not found" }, { status: 404 });
   }
 
-  if (discountReq.status !== "pending") {
-    return NextResponse.json(
-      { error: "Request already processed" },
-      { status: 400 }
-    );
-  }
+  const teamMemberId = auth.teamMember.id;
+  const actor = { kind: "team" as const, teamMemberId };
+  // One action: one correlation id on its event and on every write the step makes.
+  const correlationId = randomUUID();
+  const deadlineMs = Math.min(Date.now() + 20_000, startedAtMs + 26_000);
 
-  const { data: studentRow } = await supabase
-    .from("students")
-    .select("id, joined_at, first_paid_at")
-    .eq("id", discountReq.student_id)
-    .single();
+  let result: ThirtyResult;
+  try {
+    if (discountReq.status === "pending") {
+      const checks = await thirtyApprovalChecks(supabase, discountReq, { override, overrideCoupon, teamMemberId });
+      if (!checks.ok) return NextResponse.json(checks.body, { status: checks.status });
 
-  if (!studentRow) {
-    return NextResponse.json({ error: "Student not found" }, { status: 404 });
-  }
-
-  // D5: a discount already on the next renewal, before the rule and before
-  // `override`. No Whop code is made for this student, unless a founder or an
-  // admin pressed Approve anyway on the row the coupon refuses
-  // (`overrideCoupon`): then Whop is not asked at all. A check that gave no
-  // answer is remembered, and refuses the normal Approve after the rule.
-  let couponUnchecked: { liveFail: string | null } | null = null;
-  // No paid course plan and payment that went through (the owner, 2026-10-26): no 30%, unless Approve anyway skips it.
-  let unpaid = false;
-  if (!overrideCoupon) {
-    const coupon = await checkMembershipDiscount(supabase, discountReq.student_id);
-    if (coupon.discounted) {
-      return NextResponse.json(
-        { error: couponApprovalRefusal(coupon.code), code: "has-discount" },
-        { status: 400 },
-      );
-    }
-    if (coupon.source === "none") couponUnchecked = { liveFail: coupon.liveFail };
-    unpaid = coupon.unpaid;
-  }
-  if (unpaid && !override) {
-    console.warn(
-      `[discount approve] request ${requestId}: nothing approved, Whop does not show both a paid course plan and a course payment that went through for the student`,
-    );
-    return NextResponse.json({ error: UNPAID_APPROVAL, ...RULE }, { status: 400 });
-  }
-
-  if (CATALOG_IS_V2) {
-    // The new course: the request route's rule (src/lib/world/discount.ts),
-    // judged at the end of the student's window (their 14 days, or 23
-    // October for a first payment before the launch). `override` skips it,
-    // as it skips every gate of the old rule below.
-    if (!override) {
-      const reads = await loadDiscountReads(supabase, discountReq.student_id, LESSONS_TABLE);
-      // The course switch: a request made before it is judged by the videos
-      // the new course had at the switch, and a refusal of it over the videos
-      // says it was made on the old course. The date can change the verdict,
-      // so a failed read of it approves nothing.
-      let resetAt: string | null;
-      try {
-        resetAt = await getCurriculumResetAt(supabase);
-      } catch (e) {
-        console.error(
-          `[discount approve] request ${requestId}: nothing approved, the course switch could not be read: ${e instanceof Error ? e.message : String(e)}`,
-        );
-        return NextResponse.json(
-          { error: "Couldn't read the course switch date, so nothing was approved. Try again.", ...RULE },
-          { status: 500 },
-        );
-      }
-      // The request's id too: approvalVerdict also refuses a request the
-      // app's Apply could not have made (late, or after another counted one).
-      let verdict = approvalVerdict(reads, new Date(), discountReq.created_at, discountReq.id, resetAt);
-      if (!verdict.ok && verdict.status === 400) {
-        // A request made before the switch, refused over its videos, gets a
-        // refusal that says so; one refused over the first payment keeps its
-        // words.
-        verdict = explainOldCourseRequest(verdict, discountReq.created_at, resetAt);
-      }
-      if (!verdict.ok) {
-        if (verdict.log) console.error(`[discount approve] request ${requestId}: ${verdict.log}`);
-        return NextResponse.json({ error: verdict.error, ...RULE }, { status: verdict.status });
-      }
-    }
-  } else {
-    // v75.20: anchor on first_paid_at (original signup), not joined_at
-    // (current cycle start). Returning customers can't get a fresh
-    // 14-day discount window from a renewal.
-    // v75.26: NULL first_paid_at → block at the FINAL approval gate.
-    // This is the last line of defense if the request/feedback gates
-    // were somehow bypassed. The admin must manually verify the
-    // student's signup history and backfill first_paid_at before
-    // approving.
-    if (!override && !studentRow.first_paid_at) {
-      return NextResponse.json(
-        {
-          error:
-            "Cannot approve: student has no first_paid_at on file. Run the Whop sync (Refresh on /admin) to backfill, then retry. If still NULL, this student's Whop membership history needs manual review.",
-          ...RULE,
-        },
-        { status: 400 },
-      );
-    }
-    // `?? 0` only matters under override (first_paid_at can be null then);
-    // the resulting deadline is unused because the window check below is
-    // also override-gated.
-    const joinedAt = new Date(studentRow.first_paid_at ?? 0);
-    const deadline = new Date(
-      joinedAt.getTime() + DISCOUNT_WINDOW_DAYS * 86_400_000
-    );
-
-    // Eligibility re-check (server-side, same rule as /api/discounts/request):
-    //   - Compound action items (requires_action=true): need BOTH
-    //     completed_at AND action_completed_at.
-    //   - Other lessons: completed_at OR skipped_at counts as done.
-    const [{ data: requiredLessons }, { data: completions }] = await Promise.all([
-      supabase
-        .from("lessons")
-        .select("id, requires_action")
-        .in("region_id", ["r1", "r2"]),
-      supabase
-        .from("student_lesson_completions")
-        .select("lesson_id, completed_at, action_completed_at, skipped_at")
-        .eq("student_id", discountReq.student_id),
-    ]);
-
-    const required = requiredLessons ?? [];
-    // Fails closed (cutover PRD, C22, WI-9), as the request route does: an
-    // empty r1 + r2 list means the new course's data met a build without
-    // CATALOG_SHAPE=v2, or the read failed, and every check below would pass.
-    // "Generate anyway" skips the checks, as it does today.
-    if (!override && required.length === 0) {
-      return NextResponse.json(
-        { error: "The course changed and this check cannot run. Nothing was approved.", ...RULE },
-        { status: 409 },
-      );
-    }
-    const completionMap = new Map<
-      string,
-      {
-        completed_at: string | null;
-        action_completed_at: string | null;
-        skipped_at: string | null;
-      }
-    >();
-    for (const c of completions ?? []) {
-      completionMap.set(c.lesson_id, {
-        completed_at: c.completed_at,
-        action_completed_at: c.action_completed_at,
-        skipped_at: c.skipped_at,
-      });
-    }
-
-    let latestCompletion = joinedAt;
-    for (const lesson of required) {
-      const c = completionMap.get(lesson.id);
-      const watchDone = c?.completed_at != null;
-      const actionDone = c?.action_completed_at != null;
-      const skipped = c?.skipped_at != null;
-      const fullyDone = lesson.requires_action
-        ? watchDone && actionDone
-        : watchDone || skipped;
-      if (!override && !fullyDone) {
-        return NextResponse.json(
-          { error: "Student has not completed all required R1 + R2 lessons", ...RULE },
-          { status: 400 }
-        );
-      }
-      for (const ts of [c?.completed_at, c?.action_completed_at, c?.skipped_at]) {
-        if (ts) {
-          const d = new Date(ts);
-          if (d > latestCompletion) latestCompletion = d;
+      if (override || overrideCoupon) {
+        // Approve anyway, in the request's history. A write that fails is logged and stops nothing.
+        const { error: eventError } = await supabase.from("discount_request_events").insert({
+          request_id: discountReq.id,
+          student_id: discountReq.student_id,
+          event: "override",
+          actor: "team",
+          team_member_id: teamMemberId,
+          correlation_id: correlationId,
+          detail: { rule: override === true, coupon: overrideCoupon === true },
+        });
+        if (eventError) {
+          console.error(`[discount approve] request ${requestId}: the Approve anyway event was not written: ${eventError.message}`);
         }
       }
+
+      result = await putThirtyOn(supabase, requestId, {
+        actor,
+        correlationId,
+        membershipId: checks.coupon?.membershipId ?? null,
+        deadlineMs,
+      });
+    } else if (discountReq.status === "approved") {
+      // Try again: no checks; the code with the old per-student name is attached too.
+      result = await putThirtyOn(supabase, requestId, { actor, correlationId, deadlineMs, allowOldName: true });
+    } else {
+      return NextResponse.json({ error: "Request already processed" }, { status: 400 });
     }
-
-    if (!override && latestCompletion > deadline) {
-      return NextResponse.json(
-        { error: "Student finished R1 + R2 after the discount window closed", ...RULE },
-        { status: 400 }
-      );
-    }
-  }
-
-  // T-122's fourth fix round: the coupon check gave no answer (Whop down or
-  // refusing, nothing stored that answers), so the normal Approve makes no
-  // code for a student who may hold a coupon. Approve anyway (`override`)
-  // still goes on, its log line saying the check gave no answer.
-  if (couponUnchecked !== null && !override) {
-    console.warn(
-      `[discount approve] request ${requestId}: nothing approved, the coupon check gave no answer (${couponUnchecked.liveFail ?? "no answer"})`,
-    );
-    return NextResponse.json(
-      { error: couponUncheckedApprovalRefusal(couponUnchecked.liveFail), ...RULE },
-      { status: 503 },
-    );
-  }
-
-  if (override || overrideCoupon) {
-    const skipped = [
-      override ? "Eligibility gates skipped." : null,
-      overrideCoupon ? "The coupon check skipped." : null,
-      couponUnchecked !== null ? "The coupon check gave no answer." : null,
-      unpaid ? "Whop does not show both a paid course plan and a course payment that went through." : null,
-    ]
-      .filter(Boolean)
-      .join(" ");
-    console.warn(
-      `[discount approve] OVERRIDE by team member ${auth.teamMember.id}, request ${requestId}, student ${discountReq.student_id}. ${skipped}`,
-    );
-  }
-
-  // Generate the code via Whop API.
-  // Format: ECOM30-{first 6 chars of student id, uppercased}. Stable
-  // per-student so a re-run would collide on Whop's side rather than
-  // silently mint a duplicate. teamThirtyCodeFor makes it, and the coupon
-  // check reads a code by that name on this student's membership or payment
-  // as their own 30%, never a coupon (T-122's third fix round).
-  const code = teamThirtyCodeFor(studentRow.id);
-
-  // Optional plan scoping. If WHOP_DISCOUNT_PLAN_IDS is set, the code
-  // only works on those specific plans (comma-separated plan IDs).
-  // If unset, Whop's default is "all plans on the company" — which
-  // covers the real student plan + Karlo's $1 test plan automatically.
-  const planIds = process.env.WHOP_DISCOUNT_PLAN_IDS
-    ?.split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
-
-  let whopPromoId: string | null = null;
-  try {
-    const whopRes = await createWhopPromoCode({
-      code,
-      amount_off: 30,
-      promo_type: "percentage",
-      base_currency: "usd",
-      new_users_only: false,
-      one_per_customer: true,
-      stock: 1,
-      promo_duration_months: 1,
-      ...(planIds && planIds.length > 0 ? { plan_ids: planIds } : {}),
-    });
-    whopPromoId = whopRes.id;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.error("Whop promo code creation failed:", message);
-    return NextResponse.json(
-      {
-        error: `Couldn't create the promo code on Whop. The request is still pending. Details: ${message}`,
-      },
-      { status: 502 }
-    );
-  }
-
-  // Still pending: another team member (or another tab) may have rejected
-  // the request while Whop made the code, and their decision stands.
-  const { data: approvedRows, error: updateError } = await supabase
-    .from("discount_requests")
-    .update({
-      status: "approved",
-      promo_code: code,
-      whop_promo_id: whopPromoId,
-      reviewed_at: new Date().toISOString(),
-      reviewed_by: auth.teamMember.id,
-    })
-    .eq("id", requestId)
-    .eq("status", "pending")
-    .select("id");
-
-  if (updateError) {
-    console.error("Failed to update discount request:", updateError);
-    return NextResponse.json(
-      { error: "Code was created on Whop but the DB update failed. Check the discount_requests row and reconcile manually." },
-      { status: 500 }
-    );
-  }
-  if (!approvedRows || approvedRows.length === 0) {
+  } catch (e) {
     console.error(
-      `[discount approve] request ${requestId}: the Whop code ${code} (${whopPromoId}) was created, but the request had already been decided, so nothing was approved. Delete the code in Whop.`,
+      `[discount approve] request ${requestId}: putting the 30% on failed: ${e instanceof Error ? e.message : String(e)}`,
     );
     return NextResponse.json(
-      {
-        error: `The Whop code ${code} was created, but this request had already been decided, so the code must be deleted in Whop.`,
-      },
-      { status: 409 },
+      { error: "Something failed while putting the 30% on. Refresh the list to see where the request stands." },
+      { status: 500 },
     );
   }
 
-  return NextResponse.json({ success: true, promoCode: code, whopPromoId });
+  return answerFor(result);
 }

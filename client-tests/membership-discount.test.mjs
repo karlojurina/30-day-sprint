@@ -121,7 +121,14 @@ const whop = {
   answer: null,
   /** How long every answer takes, on the suite's clock (T-122's fourth fix round measures a slow Whop); 0 by default. */
   delayMs: 0,
+  /** Every code the 30%'s step asked Whop for (T-137): { id, code, created_at }, never cleared (each id is new). */
+  made: [],
+  /** Whether the 30%'s own calls are answered (T-137): the attach, the where read, the code list. Off by default. */
+  thirty: false,
 }
+// The 30% that applies itself (T-137): the request routes and Approve put the code on (thirty-apply.ts). Its where read
+// and its code list name the company (a made-up one).
+process.env.WHOP_COMPANY_ID = 'biz_devCompany'
 const json = (status, body, headers = {}) => new Response(typeof body === 'string' ? body : JSON.stringify(body), {
   status, headers: { 'content-type': 'application/json', ...headers },
 })
@@ -129,12 +136,36 @@ globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url))
   if (u.hostname !== 'api.whop.com') throw new Error(`the suite let a request go to ${u.hostname}`)
   const h = init.headers ?? {}
-  whop.log.push({ path: u.pathname, query: u.search, version: h['Api-Version-Date'] ?? null, auth: h.Authorization ?? null, at: Date.now() })
+  whop.log.push({ path: u.pathname, query: u.search, version: h['Api-Version-Date'] ?? null, auth: h.Authorization ?? null, at: Date.now(), method: init.method ?? 'GET' })
   if (whop.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, whop.delayMs))
   const special = whop.answer ? whop.answer(u.pathname, whop.log.length, u) : null
   if (special === 'hang') return new Promise(() => {})
   if (special === 'throw') throw new TypeError('fetch failed')
   if (special) return special
+  // T-137: the 30%'s own calls, answered for a row that turns them on (whop.thirty): the attach (POST
+  // /memberships/{id}/apply_promo_code, by the code's name; a membership holding a code takes none), the where read
+  // (the memberships holding a code) and the company's codes by creation time. Off, as for every row written before
+  // T-137, they fall through to the 404 below, as every call this stand-in does not know does.
+  const attach = u.pathname.match(/^\/api\/v1\/memberships\/([^/]+)\/apply_promo_code$/)
+  if (whop.thirty && (init.method ?? 'GET') === 'POST' && attach) {
+    const m = whop.memberships.get(decodeURIComponent(attach[1]))
+    if (!m) return json(404, { error: { message: 'Membership not found.' } })
+    if (m.promo_code_id ?? m.promo_code) return json(400, { error: { message: 'This membership already has a promo code.' } })
+    const name = String(JSON.parse(init.body).promo_code).toLowerCase()
+    const code = whop.made.findLast((c) => c.code.toLowerCase() === name)
+    if (!code) return json(400, { error: { message: 'Promo code not found.' } })
+    m.promo_code_id = code.id
+    return json(200, m)
+  }
+  if (whop.thirty && u.pathname === '/api/v1/memberships') {
+    const held = [...whop.memberships.values()].filter((m) => (m.promo_code_id ?? m.promo_code?.id ?? null) === u.searchParams.get('promo_code_ids'))
+    return json(200, { data: held.map((m) => ({ ...m, user: m.user_id ? { id: m.user_id } : null, product: m.product_id ? { id: m.product_id, title: 'The Sprint' } : null })), page_info: { has_next_page: false, end_cursor: null } })
+  }
+  if (whop.thirty && u.pathname === '/api/v1/promo_codes') {
+    const after = Date.parse(u.searchParams.get('created_after') ?? '')
+    const all = whop.made.filter((c) => Date.parse(c.created_at) > after)
+    return json(200, { data: all.slice(0, 100), page_info: { has_next_page: all.length > 100, end_cursor: all.length > 100 ? '100' : null } })
+  }
   if (u.pathname === '/api/v2/memberships') {
     // v2's pages: `per` rows a page, { current_page, total_page }. A user whose list is a number answers that status.
     const per = Number(u.searchParams.get('per') ?? 10)
@@ -293,6 +324,7 @@ function resetWhop() {
   whop.log = []
   whop.answer = null
   whop.delayMs = 0
+  whop.thirty = false
 }
 resetWhop()
 
@@ -315,7 +347,10 @@ const { checkpointView } = await import('./_gen/checkpointView.ts')
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 const { FakeDb, fakeClient, useDb: installDb, setCatalog } = await import('./_gen/stub-server.ts')
 // The codes asked of Whop: stub-admin.ts's list, the one every copy shares (thirty-apply.ts's included, T-137).
-const { promoCodes } = await import('./_gen/stub-admin.ts')
+const { promoCodes, whileWhopAnswers } = await import('./_gen/stub-admin.ts')
+// Each one made on Whop as it is asked for (stub-admin.ts names it promo_<n>), with its moment, so the stand-in's attach
+// takes it by name and its code list finds it (T-137).
+whileWhopAnswers((params) => { whop.made.push({ id: `promo_${promoCodes.length}`, code: String(params.code), created_at: new Date().toISOString() }) })
 
 /** Runs `fn` with what it logs kept off the suite's output and handed back. */
 async function quiet(fn) {
@@ -1232,6 +1267,97 @@ for (const [name, route, path, body] of [
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+console.log('\n=== The 30% that applies itself (T-137): the request routes put the code on in the same request ===')
+{
+  // Whop answering what the student's Apply asks of it: the coupon check live (mem_devFull renews at 97.00, a real
+  // 97.00 payment for it), then the 30%'s own calls (whop.thirty): the membership read, the code made (stub-admin.ts,
+  // a random name), the attach. The routes then answer the request's status: applied.
+  const thirtyEvents = (db) => db.rows('discount_request_events').map((e) => ({ event: e.event, reason: e.reason, step: e.detail?.step ?? null, actor: e.actor }))
+  const posts = () => whop.log.filter((x) => x.method === 'POST')
+  /** One Apply through `route` for a student ready to apply, Whop answering unless `before` says otherwise. */
+  const applyOnce = async (route, path, body, { membership = 'mem_devFull', user = 'user_devFullPay', tables = {}, before = null, atWrite = null } = {}) => {
+    resetWhop()
+    whop.thirty = true
+    if (before) before()
+    const db = readyDb(membership, tables, user)
+    if (atWrite) {
+      // Whop stops answering at the moment the request is written: after the coupon check, before the 30% goes on.
+      const write = db.functions.submit_discount_with_feedback
+      db.functions.submit_discount_with_feedback = async (...a) => { atWrite(); return write(...a) }
+    }
+    const made = promoCodes.length
+    const r = await quiet(() => post(route, path, body))
+    whop.thirty = false
+    return { r, db, made: promoCodes.length - made, row: db.rows('discount_requests')[0] ?? null, events: thirtyEvents(db), posts: posts() }
+  }
+  const hidden = ['promo_code', 'whop_promo_id', 'promo_claimed_at', 'audit_actor', 'audit_correlation_id', 'audit_team_member_id']
+  const NAMED = /ECOM30|promo_/
+
+  // The form path: the map's Apply while the team has questions. Its coupon answer is declared before the new course's block.
+  {
+    const a = await applyOnce(feedbackRoute, 'submit-feedback', { answers: ANSWERS })
+    ok(a.r.value.status === 200 && show(Object.keys(a.r.value.body).sort()) === show(['request_id', 'status']) && a.r.value.body.request_id === a.row?.id
+         && a.r.value.body.status === 'applied' && a.row.status === 'applied' && a.made === 1,
+       'the form path, Whop answering: 200 { request_id, status: "applied" }, the request applied in the same request, one code made', show({ body: a.r.value.body, row: a.row?.status }))
+    ok(a.posts.length === 1 && a.posts[0].path === '/api/v1/memberships/mem_devFull/apply_promo_code' && whop.memberships.get('mem_devFull').promo_code_id === a.row.whop_promo_id
+         && /^ECOM30-[A-HJ-NP-Z2-9]{6}$/.test(a.row.promo_code) && a.row.applied_by === null && a.row.reviewed_by === null && a.events.length === 0,
+       'one attach, to the membership the coupon check read, with the request\'s own random code; nobody on the team named, no failure recorded', show({ posts: a.posts.map((x) => x.path), row: a.row }))
+    const src = read('../src/app/api/discounts/submit-feedback/route.ts')
+    ok(src.indexOf('let coupon: CouponCheck | null = null;') > 0 && src.indexOf('let coupon: CouponCheck | null = null;') < src.indexOf('if (CATALOG_IS_V2) {')
+         && src.indexOf('coupon = await checkMembershipDiscount(supabase, studentId);') > src.indexOf('if (CATALOG_IS_V2) {') && /export const maxDuration = 30;/.test(src),
+     'in the source, the coupon answer is declared before the new course\'s block and set inside it; maxDuration 30')
+  }
+  // The plain path: the map's Apply when the team has no question.
+  {
+    const a = await applyOnce(requestRoute, 'request', { studentId: 's1' })
+    const answered = a.r.value.body
+    ok(a.r.value.status === 200 && answered.id === a.row?.id && answered.status === 'applied' && a.row.status === 'applied' && a.made === 1 && a.posts.length === 1,
+       'the plain path, Whop answering: 200 with the row, applied, the code made and attached in the same request', show(answered))
+    ok(hidden.every((k) => !(k in answered)) && !NAMED.test(show(answered)) && typeof answered.created_at === 'string',
+       'the row it answers holds none of the three hidden fields (the code, its Whop id, the claim\'s time), nor the audit columns: no code is named', show(Object.keys(answered)))
+    ok(/export const maxDuration = 30;/.test(read('../src/app/api/discounts/request/route.ts')), 'maxDuration 30 on the plain route too')
+  }
+  for (const [name, route, path, body] of [['the plain path', requestRoute, 'request', { studentId: 's1' }], ['the form path', feedbackRoute, 'submit-feedback', { answers: ANSWERS }]]) {
+    // Whop answers the coupon check, then stops answering: the request is written, nothing goes on, one failure recorded.
+    const down = await applyOnce(route, path, body, { atWrite: () => { whop.answer = () => 'throw' } })
+    const status = down.r.value.body.status
+    ok(down.r.value.status === 200 && status === 'pending' && down.row.status === 'pending' && down.made === 0 && down.posts.length === 0
+         && show(down.events) === show([{ event: 'attempt_failed', reason: 'whop_no_answer', step: 'membership', actor: 'auto' }]),
+       `${name}, Whop down after the coupon check: 200 pending, no code made, nothing attached, one attempt_failed (whop_no_answer at the membership read); never applied`, show({ status, events: down.events }))
+    // Whop down from the start, the stored row this rule wrote answering the coupon check: the request goes in, and the
+    // app makes no code on a stored answer.
+    const stored = await applyOnce(route, path, body, {
+      before: () => { whop.answer = () => 'throw' },
+      tables: { [MEMBERSHIP_DISCOUNTS_TABLE]: [stampedBy({ student_id: 's1', whop_membership_id: 'mem_devFull', promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-20T08:40:00.000Z' }, 'membership')] },
+    })
+    ok(stored.r.value.status === 200 && stored.r.value.body.status === 'pending' && stored.row.status === 'pending' && stored.made === 0 && stored.posts.length === 0
+         && show(stored.events) === show([{ event: 'attempt_failed', reason: 'whop_no_answer', step: 'coupon_stored', actor: 'auto' }]),
+       `${name}, a stored coupon answer (Whop down): 200 pending, no code made, one attempt_failed (whop_no_answer, coupon_stored); never applied`, show({ events: stored.events }))
+  }
+  // The switch (R7): off, false, 0 or no, in any case, pauses the automatic part; unset or anything else, it runs.
+  {
+    const had = process.env.THIRTY_AUTO_APPLY
+    const results = []
+    for (const value of ['off', 'OFF', 'false', '0', 'no', ' No ', undefined, 'on']) {
+      for (const [name, route, path, body] of [['plain', requestRoute, 'request', { studentId: 's1' }], ['form', feedbackRoute, 'submit-feedback', { answers: ANSWERS }]]) {
+        if (value === undefined) delete process.env.THIRTY_AUTO_APPLY
+        else process.env.THIRTY_AUTO_APPLY = value
+        const a = await applyOnce(route, path, body)
+        results.push({ value: value ?? 'unset', name, http: a.r.value.status, status: a.row?.status, made: a.made, posts: a.posts.length, events: a.events.length })
+      }
+    }
+    if (had === undefined) delete process.env.THIRTY_AUTO_APPLY
+    else process.env.THIRTY_AUTO_APPLY = had
+    const paused = results.filter((x) => !['unset', 'on'].includes(x.value))
+    const running = results.filter((x) => ['unset', 'on'].includes(x.value))
+    ok(paused.length === 12 && paused.every((x) => x.http === 200 && x.status === 'pending' && x.made === 0 && x.posts === 0 && x.events === 0),
+       'THIRTY_AUTO_APPLY off, OFF, false, 0, no and " No ": both routes write the request and stop there, pending, no code made, no Whop write, nothing recorded', show(paused))
+    ok(running.length === 4 && running.every((x) => x.http === 200 && x.status === 'applied' && x.made === 1 && x.posts === 1),
+       'unset, or anything else ("on"): the 30% goes on, applied in the same request', show(running))
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 console.log('\n=== The approve route: Whop now; Approve anyway on the coupon\'s row passes it (the owner\'s review) ===')
 function approveDb(membership, more = {}) {
   const db = readyDb(membership, {
@@ -1258,21 +1384,26 @@ async function approve(override = false, overrideCoupon = false) {
     ok(promoCodes.length === made && db.rows('discount_requests')[0].status === 'pending', 'no Whop code is made, the request stays pending')
   }
   // The owner's review (2026-10-21): a founder or an admin approves past any check. Approve anyway on the coupon's row
-  // sends overrideCoupon with override (a founder here: the stand-in's login), and the code is made.
+  // sends overrideCoupon with override (a founder here: the stand-in's login), and the code is made. Since the 30% that
+  // applies itself (T-137) the route then reads the membership to put it on: evolve10 is on it, so no attach, and the
+  // request is left approved with membership_has_code. The coupon check itself still never reads Whop.
+  /** One read of the membership on file and nothing else: no coupon read, no attach. */
+  const oneMembershipRead = () => whop.log.length === 1 && whop.log[0].method === 'GET' && whop.log[0].path === '/api/v1/memberships/mem_devEvolve'
   {
     resetWhop()
     const db = approveDb('mem_devEvolve', { student_lesson_completions: [] })
     const made = promoCodes.length
     const r = await quiet(() => approve(true, true))
-    ok(r.value.status === 200 && promoCodes.length === made + 1 && db.rows('discount_requests')[0].status === 'approved' && whop.log.length === 0,
-       'Approve anyway on the coupon\'s row (override and overrideCoupon): approved and the code made past evolve10 and the rule (no video watched), Whop not asked', show(r.value.body))
+    ok(r.value.status === 200 && promoCodes.length === made + 1 && db.rows('discount_requests')[0].status === 'approved'
+         && oneMembershipRead() && r.value.body.reason === 'membership_has_code',
+       'Approve anyway on the coupon\'s row (override and overrideCoupon): approved and the code made past evolve10 and the rule (no video watched); no coupon read; one membership read, no attach, left approved with membership_has_code', show(r.value.body))
     ok(r.lines.some((l) => l.includes('OVERRIDE') && l.includes('Eligibility gates skipped.') && l.includes('The coupon check skipped.')),
        'the log line says both checks were skipped, and who skipped them', show(r.lines))
     resetWhop()
     const db2 = approveDb('mem_devEvolve')
     const r2 = await quiet(() => approve(false, true))
-    ok(r2.value.status === 200 && db2.rows('discount_requests')[0].status === 'approved' && whop.log.length === 0,
-       'overrideCoupon alone, the rule saying yes: approved, Whop not asked', show(r2.value.body))
+    ok(r2.value.status === 200 && db2.rows('discount_requests')[0].status === 'approved' && oneMembershipRead() && r2.value.body.reason === 'membership_has_code',
+       'overrideCoupon alone, the rule saying yes: approved; no coupon read; one membership read, no attach, left approved with membership_has_code', show(r2.value.body))
     resetWhop()
     const db3 = approveDb('mem_devFull', { student_lesson_completions: [] })
     const r3 = await quiet(() => approve(false, true))
@@ -1858,9 +1989,11 @@ const cron = async (q = '', secret = process.env.CRON_SECRET) => {
   ok(show(b.refused_by_price) === show([{ student_id: 's-no-course', price: 87.3, billing_reason: null }]) && b.user_list_unusable === 0,
      'the answer lists the student the price alone refused (s-no-course\'s first real payment, 87.30 naming no code), with its price and billing_reason, and counts no unusable user list (T-122\'s fourth fix round)', show({ refused: b.refused_by_price, unusable: b.user_list_unusable }))
   ok([...rows.values()].filter((x) => x.student_id !== 's-down').every((x) => x.checked_at >= new RealDate(started).toISOString()), 'every row written carries the moment it was read')
-  // The stand-in gives cron_runs rows no id, so cron-auth.ts's finish (an update by id) is not seen here; the start is.
-  ok(db.rows('cron_runs').some((x) => x.route_name === 'refresh-membership-discounts' && x.auth_status === 'ok' && x.status === 'running'),
-     'cron_runs: the run opens its row, as every cron does')
+  // Since T-137 the stand-in gives a cron_runs row its id at the insert, so cron-auth.ts's finish (an update by that id)
+  // lands on it, as on Supabase; until then only the start was seen here.
+  const run = db.rows('cron_runs').find((x) => x.route_name === 'refresh-membership-discounts')
+  ok(run?.auth_status === 'ok' && run.status === 'success' && typeof run.finished_at === 'string' && run.rows_affected === b.written && run.error_message === null,
+     'cron_runs: the run opens its row and closes it, success, with the rows written, as every cron does', show(run))
   ok(!/mem_|promo_|pay_|@/.test(show(b)), 'the answer names no Whop id and no email')
 
   // The next run: those never read come first, then the oldest read.
@@ -2119,9 +2252,25 @@ console.log('\n=== vercel.json, the migration and its undo ===')
 {
   const v = JSON.parse(read('../vercel.json'))
   const entry = v.crons.find((c) => c.path === '/api/cron/refresh-membership-discounts')
-  const minute = (s) => s.split(' ')[0]
-  const others = v.crons.filter((c) => c !== entry).map((c) => minute(c.schedule))
-  ok(entry?.schedule === '40 */2 * * *' && !others.includes('40'), 'every 2 hours at minute 40, a minute no other cron uses', show(v.crons.map((c) => c.schedule)))
+  /**
+   * The minutes a schedule runs at: its minute field with its lists, ranges and steps spelled out ("3,13,23,33,43,53",
+   * the 30% job's since T-137, is six minutes; "*\/20" is 0, 20 and 40), so a minute inside a list is seen.
+   */
+  const minutes = (s) => {
+    const out = new Set()
+    for (const part of s.split(' ')[0].split(',')) {
+      const [range, stepBy] = part.split('/')
+      const by = stepBy === undefined ? 1 : Number(stepBy)
+      const [from, to] = range === '*' ? [0, 59] : range.includes('-') ? range.split('-').map(Number) : [Number(range), stepBy === undefined ? Number(range) : 59]
+      for (let m = from; m <= to; m += by) out.add(m)
+    }
+    return out
+  }
+  ok(show([...minutes('3,13,23,33,43,53 * * * *')]) === show([3, 13, 23, 33, 43, 53]) && show([...minutes('*/20 * * * *')]) === show([0, 20, 40])
+       && show([...minutes('10-12 * * * *')]) === show([10, 11, 12]) && show([...minutes('40 */2 * * *')]) === show([40]) && !['0,40'].includes('40') && minutes('0,40 * * * *').has(40),
+     'the minute field read in full: a list, a step and a range spelled out (the field read whole missed a 40 inside "0,40")')
+  const others = v.crons.filter((c) => c !== entry).map((c) => minutes(c.schedule))
+  ok(entry?.schedule === '40 */2 * * *' && others.every((m) => !m.has(40)), 'every 2 hours at minute 40, a minute no other cron uses', show(v.crons.map((c) => c.schedule)))
   ok(show(v.functions['src/app/api/cron/refresh-membership-discounts/route.ts']) === show({ regions: ['iad1'] }), 'its function pinned to iad1, next to Whop')
   const route = read('../src/app/api/cron/refresh-membership-discounts/route.ts')
   ok(/export const maxDuration = 300;/.test(route) && REFRESH_START_BUDGET_MS === 240_000, 'maxDuration 300, no request started after 240 s')
@@ -2988,9 +3137,15 @@ console.log('\n=== T-122\'s fourth fix round: stored rows, the v2 list, ended me
     whop.answer = r4answer
     return judgeStudentDiscount({ id: SID, whop_membership_id: onFile, whop_user_id: user, first_paid_at: PAID, ...more }, newReadContext(KEY))
   }
-  /** Both request routes for the student: what each answered, wrote and stored, its Whop reads, and how long it took. */
+  /**
+   * Both request routes for the student: what each answered, wrote and stored, its Whop reads, and how long it took.
+   * These time the coupon check's own budgets, so the 30% that applies itself (T-137), whose Whop calls come after it,
+   * is switched off around them (THIRTY_AUTO_APPLY=off).
+   */
   async function routes4(membership, user, more = {}) {
     const out = []
+    const hadSwitch = process.env.THIRTY_AUTO_APPLY
+    process.env.THIRTY_AUTO_APPLY = 'off'
     for (const [name, route, path, body] of [['request', requestRoute, 'request', { studentId: SID }], ['submit-feedback', feedbackRoute, 'submit-feedback', { answers: ANSWERS }]]) {
       round4Whop()
       whop.answer = more.down ? () => 'throw' : r4answer
@@ -3004,6 +3159,8 @@ console.log('\n=== T-122\'s fourth fix round: stored rows, the v2 list, ended me
         stored: stored && { discounted: stored.discounted, source: stored.source ?? null, membership: stored.whop_membership_id },
         asked: whop.log.length, ms: Date.now() - t0, lastStart: whop.log.length ? Math.max(...whop.log.map((x) => x.at)) - t0 : null, lines: r.lines })
     }
+    if (hadSwitch === undefined) delete process.env.THIRTY_AUTO_APPLY
+    else process.env.THIRTY_AUTO_APPLY = hadSwitch
     whop.delayMs = 0
     return out
   }
@@ -3489,9 +3646,15 @@ console.log('\n=== T-122\'s fifth fix round: the rule stamp, an unread student, 
     whop.answer = r5answer
     return judgeStudentDiscount({ id: SID, whop_membership_id: onFile, whop_user_id: user, first_paid_at: PAID, ...more }, newReadContext(KEY))
   }
-  /** Both request routes for the student: what each answered, wrote and stored, its Whop reads and when they started. */
+  /**
+   * Both request routes for the student: what each answered, wrote and stored, its Whop reads and when they started.
+   * These time the coupon check's own reads, so the 30% that applies itself (T-137), whose Whop calls come after it, is
+   * switched off around them (THIRTY_AUTO_APPLY=off).
+   */
   async function routes5(membership, user, more = {}) {
     const out = []
+    const hadSwitch = process.env.THIRTY_AUTO_APPLY
+    process.env.THIRTY_AUTO_APPLY = 'off'
     for (const [name, route, path, body] of [['request', requestRoute, 'request', { studentId: SID }], ['submit-feedback', feedbackRoute, 'submit-feedback', { answers: ANSWERS }]]) {
       round5Whop()
       whop.answer = more.down ? () => 'throw' : r5answer
@@ -3507,6 +3670,8 @@ console.log('\n=== T-122\'s fifth fix round: the rule stamp, an unread student, 
         stored: stored && { discounted: stored.discounted, source: stored.source ?? null, sameWrite: stored.source_checked_at === stored.checked_at, membership: stored.whop_membership_id },
         asked: whop.log.length, starts: whop.log.map((x) => x.at - t0), ms: Date.now() - t0, lines: r.lines })
     }
+    if (hadSwitch === undefined) delete process.env.THIRTY_AUTO_APPLY
+    else process.env.THIRTY_AUTO_APPLY = hadSwitch
     whop.delayMs = 0
     return out
   }

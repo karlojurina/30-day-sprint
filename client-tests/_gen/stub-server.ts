@@ -219,6 +219,14 @@ const DEFS: Record<string, { columns: Record<string, () => unknown>; unique?: st
       actor: none, team_member_id: none, correlation_id: none, reason: none, detail: () => ({}), created_at: now,
     },
   },
+  // v82's run log (src/lib/cron-auth.ts): a run's row gets its id at the insert, so the run's finish (an update by
+  // that id) lands on it, as on Supabase (the 30% job's suite, apply-thirty-cron.test.mjs, reads it, T-137).
+  cron_runs: {
+    columns: {
+      id: newId, route_name: none, auth_status: none, status: none, started_at: now, finished_at: none,
+      error_message: none, rows_affected: none,
+    },
+  },
 };
 DEFS.lessons_next = DEFS.lessons;
 

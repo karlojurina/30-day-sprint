@@ -12,3 +12,5 @@ _gen/world-light.ts
 _gen/light-d0ebe76.ts
 # The night as it stood before the morning (morning-clock.test.mjs takes it from git on every run):
 _gen/light-eab2330.ts
+# The approve route as it was before T-137's work item 3 (thirty-apply.test.mjs takes it from git on every run):
+_gen/discount-approve-route.a031e8a.ts

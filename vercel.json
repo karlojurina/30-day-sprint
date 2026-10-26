@@ -32,6 +32,10 @@
     {
       "path": "/api/cron/refresh-membership-discounts",
       "schedule": "40 */2 * * *"
+    },
+    {
+      "path": "/api/cron/apply-thirty",
+      "schedule": "3,13,23,33,43,53 * * * *"
     }
   ]
 }

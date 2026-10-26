@@ -19,10 +19,21 @@
 // calls it with its service-role client (17 October). What the database
 // itself does with two inserts is proven in the migration harness, section
 // 26, and the real v107 in section 27.
+//
+// The 30% that applies itself (T-137): on the new course the plain Apply
+// writes through the same function too, with no answers (a JSON array, never
+// the string "[]": the stand-in refuses anything but an array, as v107's
+// jsonb_array_elements does), so the database refuses a student who already
+// holds a pending, approved or applied request. A second Apply that reaches it
+// after the first went through is answered with the request as it stands now,
+// in the map's words. After the write the route puts the 30% on (putThirtyOn),
+// which needs the course's product named (a made-up one here): with no Whop
+// key the coupon check's stored answer is all there is, so the step holds the
+// request for the job (coupon_stored) and it stays pending.
 import { inspect } from 'node:util'
 import { POST as requestRoute } from './_gen/discount-request-route.ts'
 import { POST as feedbackRoute } from './_gen/discount-submit-feedback-route.ts'
-import { ALREADY_APPLIED, SAVE_FAILED, secondPendingRequest } from './_gen/discount-server.ts'
+import { ALREADY_APPLIED, SAVE_FAILED, discountRefusalMessage, secondPendingRequest } from './_gen/discount-server.ts'
 import { COMING_SOON_MESSAGE } from './_gen/student-app-gate.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
 import { FakeDb, createClient, useDb as installDb, steps, setCatalog } from './_gen/stub-server.ts'
@@ -31,6 +42,8 @@ import { FakeDb, createClient, useDb as installDb, steps, setCatalog } from './_
 // function's stand-in can tell the service role's client from a student's.
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key'
 process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'test-anon-key'
+process.env.WHOP_PRODUCT_ID = 'prod_devCourse'
+delete process.env.WHOP_API_KEY
 /** A client made with the service role's key and no student token, as the database tells by the request's token. */
 const asServiceRole = (madeWith) => madeWith?.[1] === process.env.SUPABASE_SERVICE_ROLE_KEY && !madeWith?.[2]?.global?.headers?.Authorization
 /** What PostgREST answers a caller the function is not granted to (v107: everyone but the service role). */
@@ -106,6 +119,8 @@ function newCourseDb() {
     discount_requests: [],
   }, { 'tok-1': 'auth-1' })
   installDb(db)
+  // Both routes write through the function on the new course (the plain Apply since T-137).
+  feedbackFunction(db)
   steps.length = 0
   return db
 }
@@ -130,13 +145,16 @@ function oldCourseDb() {
   return db
 }
 
+/** What Postgres says when jsonb_array_elements is handed anything but an array (the string "[]" among them). */
+const NOT_AN_ARRAY = { code: '22023', message: 'cannot extract elements from a scalar' }
 /**
  * submit_discount_with_feedback as v107 leaves it, standing in: anyone but the
  * service role is refused before it runs, then v29's duplicate check, the
- * request, then the answers. After its check each call waits until `together`
- * calls have checked, as two sessions do: neither sees the other's row before
- * it commits, so both checks pass and v106's index decides between the
- * inserts.
+ * request, then the answers, walked as v107 walks them (jsonb_array_elements:
+ * anything but an array is refused, and nothing is written). After its check
+ * each call waits until `together` calls have checked, as two sessions do:
+ * neither sees the other's row before it commits, so both checks pass and
+ * v106's index decides between the inserts.
  */
 function feedbackFunction(db, together = 1) {
   let checked = 0
@@ -144,6 +162,7 @@ function feedbackFunction(db, together = 1) {
   const allChecked = new Promise((r) => { release = r })
   db.functions.submit_discount_with_feedback = async (args, client, madeWith) => {
     if (!asServiceRole(madeWith)) return { data: null, error: NOT_GRANTED }
+    if (!Array.isArray(args.p_answers)) return { data: null, error: NOT_AN_ARRAY }
     const { data: existing } = await client.from('discount_requests').select('id')
       .eq('student_id', args.p_student_id).in('status', ['pending', 'approved', 'applied']).limit(1).maybeSingle()
     if (++checked >= together) release()
@@ -202,16 +221,56 @@ ok(secondPendingRequest({ code: '23505', message: 'duplicate key value violates 
 
 console.log('\n=== Apply, new course: two clicks at the same moment ===')
 {
+  // Since T-137 the plain Apply writes through the database function, as the questions form does.
   const db = newCourseDb()
+  feedbackFunction(db, 2)
   const [won, lost] = split(await Promise.all([apply(), apply()]))
-  ok(db.calls('discount_requests', 'insert').length === 2, 'both clicks passed the route\'s checks and reached the insert, as a real double submit does')
+  ok(db.calls('submit_discount_with_feedback', 'rpc').length === 2 && db.calls('discount_requests', 'insert').length === 2,
+     'both clicks passed the route\'s checks and the function\'s, and reached the insert, as a real double submit does')
   ok(won.status === 200 && won.body.status === 'pending' && won.body.student_id === 's1', 'the first request is made', show(won))
   ok(lost.status === 400 && same(lost.body, IN_REVIEW), 'the second: 400, "You already applied for the discount. We\'re reviewing it.", state pending (it was 500 "Failed to create request")', show(lost))
   ok(!dbWords(lost.body), 'none of the database\'s words reach the student')
   ok(db.rows('discount_requests').length === 1 && same(stepNames(), ['discount-requested']), 'one request stands, and the team\'s hook ran for it alone', show(stepNames()))
   const later = await apply()
   ok(later.status === lost.status && same(later.body, lost.body), 'word for word what a later click is told once the request is pending', show(later))
-  ok(db.calls('discount_requests', 'insert').length === 2, 'and that later click writes nothing')
+  ok(db.calls('discount_requests', 'insert').length === 2 && db.calls('submit_discount_with_feedback', 'rpc').length === 2, 'and that later click writes nothing, the function never called')
+}
+
+console.log('\n=== Apply, new course: the function is called with a JSON array, and refuses a request already held (T-137) ===')
+{
+  const db = newCourseDb()
+  const r = await apply()
+  const calls = db.calls('submit_discount_with_feedback', 'rpc')
+  const [, key, opts] = calls[0]?.options ?? []
+  ok(r.status === 200 && calls.length === 1 && Array.isArray(calls[0].values.p_answers) && calls[0].values.p_answers.length === 0
+       && calls[0].values.p_student_id === 's1' && key === process.env.SUPABASE_SERVICE_ROLE_KEY && opts?.global?.headers?.Authorization === undefined,
+     'the plain Apply calls the function once, as the server, with the student from the token and an empty JSON array of answers', show(calls[0]?.values))
+  ok(r.body.id === db.rows('discount_requests')[0]?.id && r.body.status === 'pending'
+       && ['promo_code', 'whop_promo_id', 'promo_claimed_at', 'audit_actor'].every((k) => !(k in r.body)),
+     'it answers the row read again after the step, without the code, the claim\'s time or the audit columns', show(r.body))
+  // The stand-in refuses anything but an array, as v107's jsonb_array_elements does: the string "[]" among them.
+  const asString = await createClient('http://db.test', process.env.SUPABASE_SERVICE_ROLE_KEY).rpc('submit_discount_with_feedback', { p_student_id: 's1', p_answers: '[]' })
+  ok(same(asString.error, NOT_AN_ARRAY) && db.rows('discount_requests').length === 1,
+     'control: the same function handed the string "[]" refuses it, nothing written (so the route\'s 200 above proves it sent an array)', show(asString.error))
+}
+{
+  // A second tab's Apply, whose reads came before the first request was written, reaches the function after the first
+  // went through (applied in its own request, within seconds). v106 limits pending requests alone; the function refuses
+  // any pending, approved or applied one, so nothing is written and the student reads the request as it stands now.
+  const db = newCourseDb()
+  const standIn = db.functions.submit_discount_with_feedback
+  db.functions.submit_discount_with_feedback = async (args, client, madeWith) => {
+    await client.from('discount_requests').insert({
+      id: 'first', student_id: 's1', status: 'applied', created_at: iso(Date.now() - 60_000), promo_code: 'ECOM30-ABCDEF',
+      whop_promo_id: 'promo_devFirst', reviewed_at: iso(Date.now() - 55_000), applied_at: iso(Date.now() - 50_000),
+    })
+    return standIn(args, client, madeWith)
+  }
+  const { r, log } = await heard(apply)
+  ok(r.status === 400 && same(r.body, { error: discountRefusalMessage({ kind: 'applied' }), state: 'applied' })
+       && db.rows('discount_requests').length === 1 && db.rows('discount_requests')[0].id === 'first' && db.calls('submit_discount_with_feedback', 'rpc').length === 1,
+     'the function refuses (a request already held): 400, the applied request\'s own sentence, state applied, nothing written', show(r))
+  ok(!pgWords(r.body) && !dbWords(r.body) && !log.includes('saving the request failed'), 'none of the database\'s words reach the student, and it is no failure in the log', show({ body: r.body, log }))
 }
 
 console.log('\n=== Apply, old course: two clicks at the same moment ===')

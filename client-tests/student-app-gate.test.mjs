@@ -256,7 +256,7 @@ const teamFiles = [
   ...walk('src/app/api/client-event'),
   'src/app/api/discounts/approve/route.ts',
   'src/app/api/discounts/reject/route.ts',
-  'src/app/api/discounts/mark-applied/route.ts',
+  // POST /api/discounts/mark-applied went with the 30% that applies itself (T-137): Try again marks a request applied.
   'src/lib/admin-auth.ts',
   'src/components/auth/TeamGuard.tsx',
 ].filter((f) => /\.(ts|tsx)$/.test(f))

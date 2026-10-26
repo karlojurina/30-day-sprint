@@ -6,6 +6,7 @@ import { onDiscountRequested } from "./stub-server.ts";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
 import { checkMembershipDiscount } from "./membership-discount.ts";
 import { requiredAnswersRefusal } from "./discount-feedback.ts";
+import { putThirtyOn, thirtyAutoApplyPaused, type ThirtyResult } from "./thirty-apply.ts";
 import {
   SAVE_FAILED,
   decideDiscountRequest,
@@ -15,6 +16,22 @@ import {
   secondPendingRequest,
   unpaidRefusal,
 } from "./discount-server.ts";
+
+// The 30% that applies itself (T-137): the code is made and attached in this request, inside its own time limit.
+export const maxDuration = 30;
+
+/**
+ * The request as the student's map reads it back: the row, without its code
+ * (promo_code, whop_promo_id), the claim's time (promo_claimed_at) or the
+ * three audit columns (empty at rest), so no answer of this route names a code.
+ */
+const STUDENT_ROW_COLUMNS =
+  "id, student_id, status, reviewed_by, reviewed_at, rejection_reason, applied_at, applied_by, created_at, gate_lesson_id";
+
+/** v107's own refusal: the student already holds a pending, approved or applied request, of any date. */
+function holdsARequest(error: { code?: string | null; message?: string | null }): boolean {
+  return error.code === "P0001" && (error.message ?? "").includes("A discount request already exists for this student");
+}
 
 /**
  * The new course (2026-10-14): on a deployment that reads the v2 catalog
@@ -59,10 +76,22 @@ import {
  * since, so the rule's own "no-payment" missed them. Until the owner's answers
  * of that day only no real payment beside no membership renewing above 0 was
  * refused, in the map's sentence for no first payment.
+ * The 30% that applies itself (T-137): the request is written through
+ * submit_discount_with_feedback (v107) with no answers, where it was an
+ * insert, so the database refuses a student who already holds a pending,
+ * approved or applied request of any date (v106 limits pending ones alone): a
+ * second Apply from another tab, sent after the first went through, is
+ * answered with the student's request as it stands now, in the map's words,
+ * and nothing is written. Then, unless THIRTY_AUTO_APPLY pauses it, the 30%
+ * goes on in this request (putThirtyOn, src/lib/thirty-apply.ts): its code
+ * made and attached to the student's course membership within 12 seconds (26
+ * from the route's start at most); anything it cannot finish, a throw
+ * included, waits for the job (GET /api/cron/apply-thirty). The answer is the
+ * row read again after it, without its code.
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */
-async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string) {
+async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string, startedAtMs: number) {
   const reads = await loadDiscountReads(supabase, studentId, LESSONS_TABLE);
   const decision = decideDiscountRequest(reads, new Date());
   if (!decision.grant) {
@@ -93,25 +122,64 @@ async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string
     return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
   }
 
-  const { data, error } = await supabase
-    .from("discount_requests")
-    .insert({ student_id: studentId })
-    .select()
-    .single();
+  // A JSON array, never the string "[]": v107 walks it with jsonb_array_elements.
+  const { data, error } = await supabase.rpc("submit_discount_with_feedback", { p_student_id: studentId, p_answers: [] });
 
   if (error) {
     // A second Apply sent with the first (v106 refuses it): the first stands.
     const twice = secondPendingRequest(error);
     if (twice) return NextResponse.json(twice, { status: 400 });
+    // The function's own refusal, a request already held (one that went through since this route read the student's
+    // requests): the student's request as it stands now, in the map's words. Nothing was written.
+    if (holdsARequest(error)) {
+      const now = decideDiscountRequest(await loadDiscountReads(supabase, studentId, LESSONS_TABLE), new Date());
+      if (!now.grant) {
+        console.warn(`[discounts/request] student ${studentId}: nothing written, the student already holds a request (now ${now.state})`);
+        return NextResponse.json({ error: now.error, state: now.state }, { status: now.status });
+      }
+    }
     // Anything else: one plain sentence for the student, the real error for the log.
     console.error(`[discounts/request] student ${studentId}: saving the request failed`, error);
+    return NextResponse.json({ error: SAVE_FAILED }, { status: 500 });
+  }
+  const requestId = typeof data === "string" ? data : null;
+  if (requestId === null) {
+    console.error(`[discounts/request] student ${studentId}: saving the request gave no request id`, data);
     return NextResponse.json({ error: SAVE_FAILED }, { status: 500 });
   }
 
   // CSM W2.6 admin task (best-effort).
   await onDiscountRequested(supabase, studentId);
 
-  return NextResponse.json(data);
+  // The 30% goes on now (T-137), unless the switch pauses it. A throw is logged, and the request waits for the job.
+  let step: ThirtyResult | null = null;
+  if (!thirtyAutoApplyPaused()) {
+    try {
+      step = await putThirtyOn(supabase, requestId, {
+        actor: { kind: "auto" },
+        correlationId: requestId,
+        membershipId: coupon.membershipId,
+        couponSource: coupon.source,
+        deadlineMs: Math.min(Date.now() + 12_000, startedAtMs + 26_000),
+      });
+    } catch (e) {
+      console.error(
+        `[discounts/request] student ${studentId}: request ${requestId} is saved, but putting the 30% on failed, so it waits for the job: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  const { data: row, error: rowError } = await supabase
+    .from("discount_requests")
+    .select(STUDENT_ROW_COLUMNS)
+    .eq("id", requestId)
+    .maybeSingle();
+  if (rowError || !row) {
+    // Saved all the same: the map shows it as sent until its next read brings the row.
+    console.error(`[discounts/request] student ${studentId}: request ${requestId} is saved, but reading it back failed${rowError ? `: ${rowError.message}` : ""}`);
+    return NextResponse.json({ id: requestId, status: step?.status ?? "pending" });
+  }
+  return NextResponse.json(row);
 }
 
 /**
@@ -126,6 +194,7 @@ async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string
  * The body.studentId is ignored.
  */
 export async function POST(request: NextRequest) {
+  const startedAtMs = Date.now();
   const authHeader = request.headers.get("authorization");
   if (!authHeader?.startsWith("Bearer ")) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -171,7 +240,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: unanswered.error }, { status: unanswered.status });
   }
 
-  if (CATALOG_IS_V2) return requestUnderNewCourse(supabase, studentId);
+  if (CATALOG_IS_V2) return requestUnderNewCourse(supabase, studentId, startedAtMs);
 
   // Duplicate check
   const { data: existing } = await supabase

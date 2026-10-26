@@ -209,6 +209,9 @@ console.log('\n=== The 30%: Approve anyway wherever a check refuses, for a found
 // ── The approve route: the rule's refusals carry code "rule", and override passes them ──
 console.log('\n=== The approve route: code "rule" on a check\'s refusal, override past it ===')
 delete process.env.WHOP_API_KEY
+// The 30% that applies itself (T-137): after the checks the route puts the 30% on (putThirtyOn), which needs the course's
+// product named (a made-up one). With no Whop key here the code is made and the request left approved, Whop not asked.
+process.env.WHOP_PRODUCT_ID = 'prod_devCourse'
 delete process.env.STUDENT_APP_CLOSED
 process.env.SUPABASE_SERVICE_ROLE_KEY = 'test-service-role-key'
 const PAID = new Date(Date.now() - 2 * 86_400_000).toISOString()

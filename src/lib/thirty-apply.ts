@@ -13,6 +13,8 @@
  *   settleClaim           a claim whose answer was lost: is its code on Whop?
  *   whereIsCode           whose membership holds a code, if any.
  *   thirtyCodeName        a new code's name: ECOM30- and 6 random characters.
+ *   thirtyAutoApplyPaused THIRTY_AUTO_APPLY, the switch the request routes and
+ *                         the job read before they put the 30% on.
  *
  * THE CLAIM. A code is made by one actor only. The request is claimed first
  * (promo_code set to the new name, promo_claimed_at to now, only while it is
@@ -83,6 +85,16 @@ import type { ThirtyReason } from "@/lib/thirty-words";
 
 /** A claim younger than this is another actor's work in progress: left alone (§6). */
 export const CLAIM_IN_PROGRESS_MS = 300_000;
+
+/**
+ * The switch (R7): THIRTY_AUTO_APPLY set to off, false, 0 or no (any case,
+ * spaces around it ignored) pauses the automatic part, the 30% put on in the
+ * student's own request and the job; unset, or anything else, it runs. The
+ * team's Approve, Try again and Reject work either way.
+ */
+export function thirtyAutoApplyPaused(value: string | undefined = process.env.THIRTY_AUTO_APPLY): boolean {
+  return value !== undefined && ["off", "false", "0", "no"].includes(value.trim().toLowerCase());
+}
 /** A lost claim's code is looked for among the codes made from this long before the claim. */
 const CLAIM_LOOKBACK_MS = 5 * 60_000;
 /** With less than this left before the deadline, no Whop call starts. */

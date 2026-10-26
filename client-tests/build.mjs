@@ -549,20 +549,19 @@ gen('../src/lib/thirty-apply.ts', './_gen/thirty-apply.ts', [
   ['from "@/lib/world/discount"', 'from "./discount.ts"'],
   ['from "@/lib/thirty-words"', 'from "./thirty-words.ts"'],
 ])
-// The job (GET /api/cron/apply-thirty), once its route is written (T-137's
-// work item 3): the shared step's copy above, the real cron-auth.ts on
-// stub-server.ts (as the coupon cron's copy above), Next and the service
-// client from stub-server.ts.
-if (fs.existsSync(fileURLToPath(new URL('../src/app/api/cron/apply-thirty/route.ts', import.meta.url)))) {
-  gen('../src/app/api/cron/apply-thirty/route.ts', './_gen/apply-thirty-route.ts', [
-    ['from "@/lib/cron-auth"', 'from "./cron-auth.stub-server.ts"'],
-    THIRTY_APPLY,
-    ['from "@/lib/thirty-words"', 'from "./thirty-words.ts"'],
-    ['from "@/lib/world/discount"', 'from "./discount.ts"'],
-    ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
-    ...toStub('next/server', '@/lib/supabase-server', '@/lib/catalog-tables'),
-  ])
-}
+// The job (GET /api/cron/apply-thirty, T-137's work item 3,
+// apply-thirty-cron.test.mjs): the shared step's copy above, the real
+// cron-auth.ts on stub-server.ts (as the coupon cron's copy above), the pages
+// helper and the rule's dates (copied above), Next and the service client from
+// stub-server.ts.
+gen('../src/app/api/cron/apply-thirty/route.ts', './_gen/apply-thirty-route.ts', [
+  ['from "@/lib/cron-auth"', 'from "./cron-auth.stub-server.ts"'],
+  THIRTY_APPLY,
+  ['from "@/lib/thirty-words"', 'from "./thirty-words.ts"'],
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+  ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+  ...toStub('next/server', '@/lib/supabase-server'),
+])
 
 // ── Admin rebuild 2, lane WI-5 and WI-6 (Tasks, All students, the student page,
 // the journey), for admin-tasks.test.mjs and admin-people.test.mjs. The tasks

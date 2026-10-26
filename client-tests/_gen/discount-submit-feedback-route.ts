@@ -19,7 +19,8 @@
  *     ]
  *   }
  *
- * Returns: { request_id } on success.
+ * Returns: { request_id, status } on success: the request's status once the
+ * 30% that applies itself (T-137) has run, "applied" when the code went on.
  *
  * The legacy /api/discounts/request route is still wired and works
  * (the W2.6 hook + admin queue still depend on a pending row landing
@@ -46,6 +47,14 @@
  * course payment that went through (the check's unpaid, the owner's rule of
  * that day), in one sentence, "The 30% needs a paid course plan and a payment
  * that went through." (unpaidRefusal), as the request route refuses it.
+ *
+ * The 30% that applies itself (T-137): on the new course, once the request is
+ * written and unless THIRTY_AUTO_APPLY pauses it, the 30% goes on in this
+ * request (putThirtyOn, src/lib/thirty-apply.ts), with the coupon check's
+ * answer, declared before the new course's block for it: the code made and
+ * attached to the student's course membership within 12 seconds (26 from the
+ * route's start at most). Anything it cannot finish, a throw included, waits
+ * for the job (GET /api/cron/apply-thirty).
  */
 
 import { NextRequest, NextResponse } from "./stub-server.ts";
@@ -54,8 +63,9 @@ import { refuseWhileClosed } from "./student-app-gate.ts";
 import { DISCOUNT_WINDOW_DAYS } from "./constants.ts";
 import { onDiscountRequested } from "./stub-server.ts";
 import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
-import { checkMembershipDiscount } from "./membership-discount.ts";
+import { checkMembershipDiscount, type CouponCheck } from "./membership-discount.ts";
 import { requiredAnswersRefusal } from "./discount-feedback.ts";
+import { putThirtyOn, thirtyAutoApplyPaused, type ThirtyResult } from "./thirty-apply.ts";
 import {
   SAVE_FAILED,
   decideDiscountRequest,
@@ -73,7 +83,11 @@ interface IncomingAnswer {
   answer_text?: unknown;
 }
 
+// The 30% that applies itself (T-137): the code is made and attached in this request, inside its own time limit.
+export const maxDuration = 30;
+
 export async function POST(request: NextRequest) {
+  const startedAtMs = Date.now();
   // v75.31: student-self auth. Previously this route was anonymous
   // and trusted body.studentId. Now we derive studentId from the JWT.
   const authHeader = request.headers.get("authorization");
@@ -141,6 +155,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: unanswered.error }, { status: unanswered.status });
   }
 
+  // The coupon check's answer, declared here so the 30% that applies itself can use it after the write.
+  let coupon: CouponCheck | null = null;
   if (CATALOG_IS_V2) {
     // The new course: the same rule and the same refusals as
     // /api/discounts/request (src/lib/world/discount.ts), decided before
@@ -160,7 +176,7 @@ export async function POST(request: NextRequest) {
     // so does one whose stored row says no coupon without this rule's stamp,
     // naming a code that is not the student's own, or for a student whose
     // row could not be read.
-    const coupon = await checkMembershipDiscount(supabase, studentId);
+    coupon = await checkMembershipDiscount(supabase, studentId);
     if (coupon.discounted) {
       const refusal = membershipDiscountRefusal();
       return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
@@ -252,5 +268,32 @@ export async function POST(request: NextRequest) {
   // CSM W2.6 admin task (best-effort).
   if (requestId) await onDiscountRequested(supabase, studentId);
 
-  return NextResponse.json({ request_id: requestId });
+  // The 30% goes on now (T-137), unless the switch pauses it. A throw is logged, and the request waits for the job.
+  let step: ThirtyResult | null = null;
+  const tried = CATALOG_IS_V2 && coupon !== null && requestId !== null && !thirtyAutoApplyPaused();
+  if (tried && coupon !== null && requestId !== null) {
+    try {
+      step = await putThirtyOn(supabase, requestId, {
+        actor: { kind: "auto" },
+        correlationId: requestId,
+        membershipId: coupon.membershipId,
+        couponSource: coupon.source,
+        deadlineMs: Math.min(Date.now() + 12_000, startedAtMs + 26_000),
+      });
+    } catch (e) {
+      console.error(
+        `[discounts/submit-feedback] student ${studentId}: request ${requestId} is saved, but putting the 30% on failed, so it waits for the job: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+  }
+
+  // The request's status now (the map reads the row again itself): pending when the step did not run, its answer when
+  // it did, and the row's own when it ran and gave none (a throw).
+  let status: string | null = requestId === null ? null : (step?.status ?? "pending");
+  if (tried && step?.status == null && requestId !== null) {
+    const { data: row } = await supabase.from("discount_requests").select("status").eq("id", requestId).maybeSingle();
+    status = (row as { status?: string } | null)?.status ?? "pending";
+  }
+
+  return NextResponse.json({ request_id: requestId, status });
 }

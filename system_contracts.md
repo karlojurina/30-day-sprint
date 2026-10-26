@@ -36,7 +36,11 @@ When adding a new table, append it here. When deleting a field, scan
   `AuthContext`, `StudentContext`, all student API routes, all CSM
   cron jobs, admin UI (the 30% page's list, `loadThirtyData` in
   `src/lib/admin/thirty-data.ts`, reads `discord_username` and, since
-  2026-10-26, `discord_user_id` for its Copy @ and Copy ID), and
+  2026-10-26, `discord_user_id` for its Copy username and Copy Discord
+  ID; `discord_username` holds the Whop username after every Whop
+  sign-in and every payment, the login and the webhook writing it, and
+  the Discord one only once the 2-hour sync wrote it since, the only
+  writer of a Discord name, so the page never calls it Discord), and
   `src/lib/student-app-gate.ts` (T-078, only
   while `STUDENT_APP_CLOSED=true`: `whop_user_id` by `supabase_user_id`
   for a student route or the Field Journal, `supabase_user_id` by
@@ -1119,6 +1123,9 @@ When adding a new table, append it here. When deleting a field, scan
   file (`first_paid_at` empty) is no window at all, so neither request
   route writes a row for such a student and the normal Approve refuses
   one (code `rule`; Approve anyway, a founder's or an admin's, passes).
+  Since the review of 2026-10-26 the same holds when the coupon check
+  says Whop shows no real payment (`CouponCheck.noRealPayment`, "No 30%
+  without a real payment" below), whatever `first_paid_at` holds.
   `requestCounts()` (T-080) counts every request from 2026-10-08 22:00
   UTC (the launch) on. An earlier one counts only for a student whose
   `first_paid_at` is from 2026-09-30 22:00 UTC (1 October in Croatia;
@@ -1307,6 +1314,27 @@ When adding a new table, append it here. When deleting a field, scan
   founder or an admin Approve anyway, which goes on (`override`, its log
   line adding "The coupon check gave no answer."); until then the approve
   route went on with neither.
+- **No 30% without a real payment (the review of 2026-10-26; branch
+  `night/eighty`, not on production):** `checkMembershipDiscount`'s
+  answer carries `noRealPayment`: with no coupon, Whop shows no real
+  payment from the student (no course membership with a price answered,
+  and no real course payment: `judgeStudentDiscount`'s `noRealPayment`
+  on Whop's answer now, or `rowShowsNoRealPayment` on a stored no coupon
+  this rule wrote and that answers, a row with no code and no price; the
+  stored fallback reads `renewal_price` for it since then). Both request
+  routes then write nothing and answer 400 `{ error: "We can't see your
+  first payment yet. Tell the team and they'll sort it out.", state:
+  "not-eligible" }` (`noRealPaymentRefusal`), after the coupon and
+  before the request; the approve route refuses the normal Approve before
+  the rule, 400 `{ error: "Cannot approve: Whop shows no real payment
+  from this student, and the 30% needs one.", code: "rule" }`
+  (`NO_REAL_PAYMENT_APPROVAL`), so Approve anyway (`override`) passes it,
+  its log line adding "Whop shows no real payment from the student.".
+  Until then only the cron counted it (`no_real_payment`), and a student
+  whose `first_paid_at` was filled before the first-paid fix could apply
+  and be approved. It is false whenever a course membership with a price
+  answers, whatever the payments, and with no answer from Whop or the
+  stored row (the 503s above stand).
 - **Required questions are enforced on the server (the owner's review,
   2026-10-21; branch `night/admin3`, not on production):** before
   anything is written, `POST /api/discounts/request` and
@@ -1400,18 +1428,24 @@ When adding a new table, append it here. When deleting a field, scan
   discounted` only; answers `membershipDiscounted`, never the code or the
   prices, and a failed read is `false`, never a 500), the request and
   approve routes (their fallback when Whop does not answer: `whop_membership_id,
-  promo_code_id, promo_code, discounted, checked_at, source,
-  source_checked_at`, read again without the last two on a database
-  without v113; a stored coupon answers, a stored no coupon only when
+  promo_code_id, promo_code, renewal_price, discounted, checked_at, source,
+  source_checked_at`, `renewal_price` since 2026-10-26, read again without
+  the last two on a database without v113; a stored coupon answers, a
+  stored no coupon only when
   `source` names a step, since T-122's third fix round, since its fourth
   only when it names no code or the student's own 30% by the promo id on
   their own approved or applied request, and since its fifth only with this
   rule's stamp from one write, `source` carrying the rule's version and
   `source_checked_at` equal to `checked_at`, and only when the student's
-  own row could be read), and
+  own row could be read; such a no coupon with no code and no price is
+  the rule's "no real payment" answer, `rowShowsNoRealPayment`, on which
+  both request routes and the normal Approve refuse since the review of
+  2026-10-26), and
   `GET /api/admin/thirty` (every column, for the coupon on a row and the
-  verdict on a pending one; on an Approved row only when Whop gives no
-  answer to the route's own live read, since the review's fix round).
+  verdict on a pending one, a row with no coupon, no code and no price
+  giving the verdict `no-real-payment` since the same review; on an
+  Approved row only when Whop gives no answer to the route's own live
+  read, since the review's fix round).
 - **Stable contract:** `student_id`, `whop_membership_id` (the membership
   the row was read from: a row counts only while the student holds that
   membership; since T-122, when the student's Whop id on file is not a
@@ -1440,7 +1474,8 @@ When adding a new table, append it here. When deleting a field, scan
   total less a tax added on top, in its own currency (null when its total
   does not read), and `plan_renewal_price` its subtotal when it names a
   code or shows a discount naming none, 97.00 when the price judged it,
-  else null, both null with no real payment; until T-122's third fix round
+  else null, both null with no real payment (the one answer of the rule
+  that stores no price, which `rowShowsNoRealPayment` reads); until T-122's third fix round
   a payment in another currency was held against 97.00 at its
   `usd_total`'s rate, and until its first `discounted` was its total under
   97.00; the code is the payment's), the step's word alone until the fifth
@@ -2499,13 +2534,20 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     rejectionReason`, `student` (`id, name, email, username, discordId,
     status, whopPulled`; no plan, no ads tick; `discordId` is
     `discord_user_id`, since 2026-10-26, which with `username` is what
-    the page's Copy ID and Copy @ copy), `facts` and `verdict` on a
+    the page's Copy Discord ID and Copy username copy, "Copy ID" and
+    "Copy @" until the review of the same day), `facts` and `verdict` on a
     pending row (null on the others; since the 80% rule of 2026-10-26
     `facts` carries `videosNeeded`, the 80% of `videosTotal`, and the
     verdict says yes exactly when `videosDone` reaches it, its sentences
     naming the 80%; no first payment on file reads "There is no real
-    payment on file for this student, and the 30% needs one."), `coupon` (`code, promoCodeId, discounted,
-    ours, renewalPrice, planRenewalPrice, checkedAt`, or null) for the
+    payment on file for this student, and the 30% needs one."; since the
+    review of the same day a stored coupon row showing no real payment
+    gives the verdict reason `no-real-payment`, "Whop shows no real
+    payment from this student, and the 30% needs one.", after the
+    coupon's and before the rule's, and `facts.secondsLeft` is the
+    shortest videos' length), `coupon` (`code, promoCodeId, discounted,
+    noRealPayment` (since the review), `ours, renewalPrice,
+    planRenewalPrice, checkedAt`, or null) for the
     membership the student holds now (`ours`, since the render review's
     fix round: an Approved or Code Applied row's coupon is the request's
     own 30% code, an ECOM30 code or its own `whop_promo_id`, which the

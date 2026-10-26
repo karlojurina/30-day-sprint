@@ -35,7 +35,8 @@ the older builds' writes made as PostgREST makes them, an earlier round's
 refused whole and one from before T-122 keeping the stamp with a new
 `checked_at`, the undo dropping both columns and keeping every row, and v113
 on a database without v111), then `v114.test.mjs` (below), with
-`--experimental-strip-types` because it imports `src/lib/progress.ts`. On
+`--experimental-strip-types` because it imports `src/lib/progress.ts`, then
+`eighty-closed-windows.test.mjs` (below, since 2026-10-26). On
 `night/admin2` with the 5 lanes merged:
 `PASS 702 FAIL 0`, then `PASS 22 FAIL 0`. On `night/achievements`: the same
 two, then `PASS 65 FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`,
@@ -103,6 +104,34 @@ students under 30 days or left live). The one left, the stamp writing over
 a stamp already there, changes nothing the test can reach: the stamp picks
 only students with none, so it guards only a stamp another session writes
 in between, and the harness has one connection.
+
+`eighty-closed-windows.test.mjs` (2026-10-26, run last, with
+`--experimental-strip-types` because it runs the app's own rule) holds
+`supabase/diagnostics/eighty-closed-windows.sql`, the read-only count of
+the students the owner's 80% rule would reach back to (a window of the 30%
+that closed while the app asked for every video, with 80% or more watched
+in time and not every video), to `src/lib/world/discount.ts` and
+`discount-server.ts`, copied to a temporary folder with their import lines
+pointed at each other. Its database is the five tables the count reads,
+with the columns the app reads there: the real course from
+`course_catalog.json`, a video for every lesson the development page's
+lengths file has, and 34 made-up students at each edge of the rule (a
+first payment at 1 October's first moment and a millisecond before it, at
+the launch and a millisecond before it, own 14 days ending a millisecond
+before 26 October in Croatia and at it, still open at the count and a
+millisecond past it; 47, 48, 49 and 60 videos in time, one at the
+deadline's own millisecond, one a millisecond late, lessons past the gate,
+a row with no `completed_at`; requests none, rejected, pending, approved,
+applied, from before the launch in the shared window and in their own 14
+days, two of them). The file's one `now()` is pinned, and its five lines
+are held to the rule's count, students, active or past_due, first and last
+deadline in Croatia and ids, on the real course and on one where a lesson
+does not count, one is a quiz and one has no video. It is one select and
+leaves every table as it was. Each of 16 breaks of the count (the time in
+time, the request that counts, 80% rounded down, every video counted in,
+the rule's date, the clock, each of the three catalog filters, the gate
+itself, the newest request, the shared deadline, the first day, the
+launch, the memberships, the line's match) fails it.
 
 `v112.test.mjs` (2026-10-21, the badges for the new course) builds its own
 database: `base.sql`, Supabase's default privileges, the badge tables made

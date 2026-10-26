@@ -118,9 +118,22 @@ anyway passes for a founder and an admin and is refused for a csm). The
 approve route is copied here with its login and Whop's promo code pointed at
 stub-admin.ts, as admin-discounts.test.mjs copies it, so the three roles can
 press it. It also checks the map's words and counts (`discountRule`,
-`checkpointCounts`), the 30% page's video line (`videoLine`) and what Copy @
-and Copy ID copy (`discordCopies`), and renders the admin's `CopyButton`,
-compiled as Next compiles it, greyed and not.
+`checkpointCounts`), the 30% page's video line (`videoLine`) and what Copy
+Discord ID and Copy username copy (`studentCopies`; "Copy ID" and "Copy @"
+until the review of 2026-10-26), and renders the admin's `CopyButton`,
+compiled as Next compiles it, greyed, with a tip and plain. Since the review
+of 2026-10-26 it also runs the owner's applicant: a `first_paid_at` on file
+while the coupon check's stored row says Whop shows no real payment, through
+both request routes (refused, nothing written), the approve route (the
+normal Approve refused with code `rule`, Approve anyway passing for a
+founder and an admin, a csm's refused) and the 30% page's own list
+(`loadThirtyData` and `buildThirtyView`, the verdict `no-real-payment`);
+the refusal one short of the 49 naming the shortest video left ("about 2
+minutes", where the next in course order took 2.9 hours); and the closed
+line of a window that ended before the 80% rule (`expiredRuleLine`: the
+shared deadline and 24 October read "was for finishing every video", 26
+October the 80%). `membership-discount.test.mjs` runs Whop's live answer
+for the same student, and `discount.test.mjs` `shortestSeconds`.
 
 `whop-catchup.test.mjs` (T-089, 2026-10-20) runs `POST /api/admin/whop-catchup`
 through its own `POST`: the route, the run (`src/lib/whop-catchup.ts`) and the
@@ -424,7 +437,13 @@ the decided reads is listed once, as decided. Its controls, written into
 that, skip paging or page without a unique order; each must fail the same
 check, and does. With 100 a read, a completion deleted between two pages of a
 read drops another student's row (the check fails for that student); with the
-real loader nothing is asked for twice and nothing differs.
+real loader nothing is asked for twice and nothing differs. Since the review
+of 2026-10-26 its coupon fixture also holds C7, a student with no membership
+on file whose stored row is the coupon check's "no real payment" answer (the
+verdict `no-real-payment`, the count still on its line, Approve anyway
+skipping it as it skips the rule), and C8, the same row holding a 97.00
+first payment (the rule's yes); and B's time left is the 4 shortest videos
+not watched, where it was the next 4 in course order.
 
 `admin-routes.test.mjs` (admin rebuild, work item 3, 2026-10-20; until
 admin rebuild 2 `admin-today-routes.test.mjs`) runs the rebuilt admin's

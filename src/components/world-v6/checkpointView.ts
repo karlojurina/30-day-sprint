@@ -116,9 +116,22 @@ export function deadlineAt(iso: string): string {
  *                 through Video Ads II within 2 weeks of joining." Until the
  *                 review they read the 80% line, a rule the app never asked
  *                 of them.
- *   beforeLaunch  a first payment before 1 October.
+ *   beforeLaunch  a first payment before 1 October: "Your 2 weeks have
+ *                 passed." alone. Those 2 weeks all ended before 15
+ *                 October, before the 80% rule, and the owner's B (2026-10-26)
+ *                 is that the map never tells a window the 80% rule it did
+ *                 not have; until the review of the same day the line went on
+ *                 with `closed`, the 80% line. No rule is named either, since
+ *                 a student whose stored first payment is still a free
+ *                 membership's earlier date can read this line while their
+ *                 real window is open (CONTEXT.md).
  *   ready         above Apply, once the student has met it ("at least": a
  *                 student who watched them all reads it too).
+ *   openEvery, readyEvery  open and ready for a window that ends before the
+ *                 80% rule, which asks for every video (discount.ts
+ *                 videosNeededFor): only a clock before 26 October can see
+ *                 one open, as the dev page's ?discount=october does
+ *                 (liveRuleLine).
  * "The videos": an action item counts by its video alone. "Through": Video
  * Ads II's own videos are counted. The 2 weeks are DISCOUNT_WINDOW_DAYS,
  * written as words, so client-tests/discount.test.mjs fails if that is ever
@@ -132,15 +145,18 @@ export function discountRule(after: string): {
   closedBefore: string;
   beforeLaunch: string;
   ready: string;
+  openEvery: string;
+  readyEvery: string;
 } {
   const share = `${DISCOUNT_VIDEO_SHARE}%`;
-  const closed = `The ${DISCOUNT_PERCENT}% is for watching ${share} of the videos through ${after} within 2 weeks of joining.`;
   return {
     open: `Watch ${share} of the videos through ${after} within 2 weeks of joining to apply.`,
-    closed,
+    closed: `The ${DISCOUNT_PERCENT}% is for watching ${share} of the videos through ${after} within 2 weeks of joining.`,
     closedBefore: `The ${DISCOUNT_PERCENT}% was for finishing every video through ${after} within 2 weeks of joining.`,
-    beforeLaunch: `Your 2 weeks have passed. ${closed}`,
+    beforeLaunch: "Your 2 weeks have passed.",
     ready: `You've watched at least ${share} of the videos through ${after}. Apply now and the team confirms within 48 hours.`,
+    openEvery: `Finish every video through ${after} within 2 weeks of joining to apply.`,
+    readyEvery: `You've watched every video through ${after}. Apply now and the team confirms within 48 hours.`,
   };
 }
 
@@ -149,12 +165,26 @@ export function discountRule(after: string): {
  * student's window had. One that closed before the 80% rule
  * (discount.ts DISCOUNT_EIGHTY_FROM, closedBeforeEighty) asked for every
  * video, so it reads `closedBefore`; one that closed since reads `closed`.
- * Whether the 80% reaches back to the early windows is the owner's call:
- * until he makes it, the line says what the app asked of them.
+ * The owner's B (2026-10-26): the 80% counts from 26 October, a window that
+ * closed before it stays closed, and the map never tells it the 80% rule.
  */
 export function expiredRuleLine(endsAt: string, after: string): string {
   const rule = discountRule(after);
   return closedBeforeEighty(endsAt) ? rule.closedBefore : rule.closed;
+}
+
+/**
+ * The rule line of a window still open: above the counts while locked, above
+ * Apply once ready. The 80% for every window that ends from the 80% rule on,
+ * which is every window open today; every video for one that ends before it
+ * (discount.ts videosNeededFor), which only a clock before 26 October can see
+ * open, so its counts and its line say the same rule.
+ */
+export function liveRuleLine(state: Extract<DiscountState, { kind: "locked" | "ready" }>, after: string): string {
+  const rule = discountRule(after);
+  const every = closedBeforeEighty(state.endsAt);
+  if (state.kind === "locked") return every ? rule.openEvery : rule.open;
+  return every ? rule.readyEvery : rule.ready;
 }
 
 /**

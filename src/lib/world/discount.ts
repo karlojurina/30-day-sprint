@@ -6,7 +6,9 @@
  * Trail Hut) and Static Ads (the Boathouse), in time. Since 2026-10-26 (the
  * owner: "They have to watch 80% of the 61 videos, or whatever amount of
  * videos we have, until the end of video ads 2.") that is 80% of them,
- * rounded up (videosNeeded: 49 of 61); until then it was every one. Who can
+ * rounded up (videosNeeded: 49 of 61); until then it was every one, and a
+ * window that closed before then keeps that rule (videosNeededFor, the
+ * owner's call of the same day, DISCOUNT_EIGHTY_FROM below). Who can
  * earn it, and by when (the owner, 2026-10-16, T-080; the first date moved from
  * 9 September to 1 October by the owner on 2026-10-19; every date from midnight
  * in Croatia):
@@ -48,10 +50,11 @@ export const DISCOUNT_VIDEO_SHARE = 80;
 /**
  * How many of `total` videos meet the 30%: DISCOUNT_VIDEO_SHARE of them,
  * rounded up, so never less than 80% (61 videos: 49; 3: 3; 10: 8). The one
- * place the number is worked out: discountState reads it, and through it the
- * map, POST /api/discounts/request, POST /api/discounts/submit-feedback and
- * the approval (discount-server.ts); the 30% page's count reads it too
- * (thirty-view.ts). 0 for no videos, or a count that is not a whole number.
+ * place the number is worked out: videosNeededFor reads it for every window
+ * that ends from the 80% rule on, and through it discountState (the map, POST
+ * /api/discounts/request, POST /api/discounts/submit-feedback and the
+ * approval, discount-server.ts) and the 30% page's count (thirty-view.ts).
+ * 0 for no videos, or a count that is not a whole number.
  */
 export function videosNeeded(total: number): number {
   if (!Number.isInteger(total) || total <= 0) return 0;
@@ -62,15 +65,26 @@ export function videosNeeded(total: number): number {
 /**
  * When the 80% took over from every video: the start of the owner's day, 26
  * October 2026 in Croatia, 00:00 CET (UTC+1, the clocks went back on 25
- * October), which is 25 October 23:00 UTC. A window that closed before it was
- * judged by every video, and the map's line for it says so in the past
- * (checkpointView.ts expiredRuleLine). Whether the 80% reaches back to those
- * windows is the owner's call, not made here: nothing else reads this date,
- * so the approval judges every request by the 80%, and a student whose window
- * closed has no Apply either way. supabase/diagnostics/eighty-closed-windows.sql
- * counts the students it leaves out. The 80% build went live after this
- * moment, so a window that closed between the two shows the 80% line although
- * the app asked that student for every video; the count lists them too.
+ * October), which is 25 October 23:00 UTC.
+ *
+ * THE OWNER'S CALL (2026-10-26), asked whether a window that closed before
+ * this moment could still apply, judged at its deadline by the 80% (A), or
+ * whether the 80% counts from this moment, those windows staying closed and
+ * the map never telling them a rule their window did not have (B): "B and 80%
+ * of the first 61 videos, not all videos." So a window that ended before it
+ * keeps the rule it had, every video (videosNeededFor): the approval and the
+ * 30% page judge any request of such a window by every video (the branch
+ * before the review of the same day judged it by the 80%, which reached back
+ * to them), its closed line says that rule in the past (checkpointView.ts
+ * expiredRuleLine), and a first payment before 1 October reads no rule at all
+ * (discountRule's beforeLaunch). Nobody whose window closed before it gets a
+ * new path.
+ *
+ * The 80% build goes live after this moment, so a window that closes between
+ * the two had the 80% by the owner's call while production still asked that
+ * student for every video, and it shows the 80% line once closed.
+ * supabase/diagnostics/eighty-closed-windows.sql lists those students (its
+ * lines d and e, each with its deadline); what they get is the owner's call.
  */
 export const DISCOUNT_EIGHTY_FROM = "2026-10-25T23:00:00.000Z";
 
@@ -78,6 +92,24 @@ export const DISCOUNT_EIGHTY_FROM = "2026-10-25T23:00:00.000Z";
 export function closedBeforeEighty(endsAt: string): boolean {
   const t = Date.parse(endsAt);
   return Number.isFinite(t) && t < Date.parse(DISCOUNT_EIGHTY_FROM);
+}
+
+/**
+ * How many of `total` videos a window ending at `endsAt` asks for: the one
+ * place the rule a window has is worked out. Every one of them for a window
+ * that ended before the 80% rule (closedBeforeEighty: the owner's B of
+ * 2026-10-26, DISCOUNT_EIGHTY_FROM above), else videosNeeded. 0 for no
+ * videos, or a count that is not a whole number. discountState reads it, so
+ * the map, both request routes and the approval give one answer; so does the
+ * 30% page's count (thirty-view.ts). A window open today ends after the 80%
+ * rule began, so the map and the request routes ask what they asked: the
+ * answer moves only for a window that has closed, which the approval judges
+ * at its end.
+ */
+export function videosNeededFor(total: number, endsAt: Date): number {
+  if (!Number.isInteger(total) || total <= 0) return 0;
+  const t = endsAt.getTime();
+  return Number.isFinite(t) && t < Date.parse(DISCOUNT_EIGHTY_FROM) ? total : videosNeeded(total);
 }
 
 /**
@@ -174,10 +206,12 @@ export type DiscountState =
    * its next renewal (DiscountInput.membershipDiscounted, D5).
    *
    * The counts (since the 80% rule, 2026-10-26): `lessonsTotal` is the videos
-   * up to the checkpoint, `lessonsNeeded` videosNeeded of them, `lessonsDone`
-   * how many of them are watched, and `lessonsLeft` how many more the 80%
-   * still needs (lessonsNeeded less lessonsDone, never below 0). Until then
-   * `lessonsLeft` was every video not watched.
+   * up to the checkpoint, `lessonsNeeded` what the window asks of them
+   * (videosNeededFor: 80%, or every one for a window that ended before
+   * DISCOUNT_EIGHTY_FROM), `lessonsDone` how many of them are watched, and
+   * `lessonsLeft` how many more it still needs (lessonsNeeded less
+   * lessonsDone, never below 0). Until then `lessonsLeft` was every video not
+   * watched.
    */
   | { kind: "not-eligible"; reason: "no-payment" | "before-launch" | "no-gate" | "has-discount" }
   | { kind: "expired"; endsAt: string; window: DiscountWindow; lessonsLeft: number }
@@ -371,8 +405,9 @@ export function discountState(input: DiscountInput): DiscountState {
   if (required.length === 0) return { kind: "not-eligible", reason: "no-gate" };
   const left = required.filter((l) => !videoDoneIds.has(l.id));
   const done = required.length - left.length;
-  // The 80% (videosNeeded): how many more the student still has to watch.
-  const needed = videosNeeded(required.length);
+  // What the window asks (videosNeededFor: the 80%, or every video for one that ended before the 80% rule), and how
+  // many more the student still has to watch.
+  const needed = videosNeededFor(required.length, open.endsAt);
   const short = Math.max(0, needed - done);
 
   const endsAt = open.endsAt.toISOString();
@@ -390,7 +425,7 @@ export function discountState(input: DiscountInput): DiscountState {
     lessonsDone: done,
     lessonsNeeded: needed,
     lessonsTotal: required.length,
-    // The shortest of the videos not watched: any of them counts toward the 80%.
+    // The shortest of the videos not watched: any of them counts toward the 80% (every one is needed otherwise).
     secondsLeft: shortestSeconds(left, short),
     nextLessonId: left[0]?.id ?? null,
   };

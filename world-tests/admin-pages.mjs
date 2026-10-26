@@ -674,12 +674,17 @@ if (wanted('thirty')) {
   const COUPON_LINE = 'This student already has a discount on their membership (evolve10).'
   // The verdict sentences (thirty-view.ts VERDICT_TEXT) since the 80% rule of 2026-10-26.
   const YES = 'At least 80% of the videos up to the checkpoint were watched in time.'
+  // A deadline before 26 October keeps every video (the owner's B, 2026-10-26): Maya's and Tara's windows end before it.
+  const YES_EVERY = 'Every video up to the checkpoint was watched in time.'
+  const EVERY_LINE = '61 of 61 videos · 61 needed, every video for a deadline before Mon 26 Oct'
   const NOT_YET = 'Fewer than 80% of the videos up to the checkpoint are watched so far.'
   // Copy Discord ID's and Copy username's tips, and the line with neither on file (thirty-view.ts, the review of 2026-10-26).
   const NO_USERNAME = 'No username on file for this student.'
   const NO_ID = 'No Discord ID on file for this student.'
   const USERNAME_TIP = "The username on file. It can be the student's Whop username, and on Discord that name may belong to someone else."
   const NO_LINE = 'No Discord ID or username on file.'
+  // Beside the buttons with a username and no Discord ID: a phone shows no tip (the review of 2026-10-26).
+  const USERNAME_NOTE = 'This username may be their Whop one.'
   // The verdict for a student Whop shows no real payment from (the same review).
   const NO_PAYMENT = 'Whop shows no real payment from this student, and the 30% needs one.'
   /** The map's sentence for a discount already on the account: since the render review's second round, the reason a coupon row's Reject starts with. */
@@ -819,8 +824,8 @@ if (wanted('thirty')) {
     })
     expect(head.link === '/admin/students/p-maya' && JSON.stringify(head.parts) === JSON.stringify(['Maya Lindqvist', '@maya.lq', 'Active']),
       'the top line: the name (to the student page), @username, Active', JSON.stringify(head))
-    expect((await rowText(maya)).includes('Applied Mon 19 Oct') && (await rowText(maya)).includes(YES) && (await rowText(maya)).includes('61 of 61 videos · 49 needed for 80%'),
-      'then the date applied and the verdict line with the count and what the 80% needs', await rowText(maya))
+    expect((await rowText(maya)).includes('Applied Mon 19 Oct') && (await rowText(maya)).includes(YES_EVERY) && (await rowText(maya)).includes(EVERY_LINE),
+      'then the date applied and the verdict line with the count and what the window needs: every video, her shared deadline being before 26 October (the owner\'s B)', await rowText(maya))
     const jonah = await rowText(await row('Jonah Pereira'))
     expect(jonah.includes(YES) && jonah.includes('49 of 61 videos · 49 needed for 80%'),
       'Jonah, 49 of the 61, the least the 80% takes: the yes', jonah)
@@ -902,6 +907,10 @@ if (wanted('thirty')) {
       })
       expect(wrong.length === 0,
         `${size.join('x')}: every Applied row has Copy Discord ID then Copy username, 44px tall; greyed with its tip where there is none on file (Hugo the id, Leo the username), still in the keyboard's path; the username's tip says it can be the Whop one`, JSON.stringify(wrong.map(([n]) => [n, got[n]])))
+      const notes = {}
+      for (const name of Object.keys(want)) notes[name] = await (await row(name)).evaluate((r) => r.querySelector('[data-username-note]')?.textContent ?? null)
+      expect(Object.entries(notes).every(([n, t]) => (n === 'Hugo Lindahl' ? t === USERNAME_NOTE : t === null)),
+        `${size.join('x')}: Hugo, a username and no Discord ID: the line "${USERNAME_NOTE}" beside the buttons, shown on a phone too; nobody with a Discord ID has it`, JSON.stringify(notes))
       const priya = await row('Priya Raman')
       expect((await copies(priya)).length === 0 && (await noLine(priya)) === NO_LINE && (await rowText(priya)).includes(NO_LINE),
         `${size.join('x')}: Priya, neither on file: no copy button, the line "${NO_LINE}" in their place (a phone shows no tip)`, JSON.stringify({ buttons: await copies(priya), line: await noLine(priya) }))
@@ -969,9 +978,16 @@ if (wanted('thirty')) {
       await check(`30% off, no real payment, ${size.join('x')}`, `thirty-nopayment-${size[0]}`)
     }
     await viewport([1280, 720])
+    // Check Whop again on the no-real-payment row too (the review of 2026-10-26): Whop still shows none, so it stays.
+    expect(!(await isNull(await buttonIn(await row('Jonah Pereira'), 'Check Whop again'))), 'Jonah\'s row has Check Whop again, as the coupon\'s row does')
+    await press(await buttonIn(await row('Jonah Pereira'), 'Check Whop again'))
+    await page.waitForFunction(() => document.body.innerText.includes('Whop still shows no real payment from Jonah Pereira.'), { timeout: 10000 })
+    await settled()
+    expect((await rowText(await row('Jonah Pereira'))).includes(NO_PAYMENT) && (await calls()).some((c) => c.name === 'checkCoupon' && c.args[0] === 'r-jonah'),
+      'Check Whop again: the notice says Whop still shows no real payment, and the row read again says the same', await rowText(await row('Jonah Pereira')))
     // Maya: the stored row is clean, so her row says yes until Approve asks Whop.
     const loads = (await calls()).filter((c) => c.name === 'loadThirty').length
-    expect((await rowText(await row('Maya Lindqvist'))).includes(YES), 'Maya: her stored row is a clean one, so the verdict is the rule\'s yes')
+    expect((await rowText(await row('Maya Lindqvist'))).includes(YES_EVERY), 'Maya: her stored row is a clean one, so the verdict is the rule\'s yes')
     await press(await buttonIn(await row('Maya Lindqvist'), 'Approve'))
     const REFUSED = 'Not approved: the 30% rule says no for this request now. Its row shows why.'
     await page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, REFUSED)
@@ -995,11 +1011,11 @@ if (wanted('thirty')) {
     const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
     expect(JSON.stringify(sent.at(-1)) === JSON.stringify(['r-jonah', true, false]) && (await tabCounts())[1] === 'Approved 3',
       'Approve anyway: one approve call with override, the code made past it, Jonah on Approved', JSON.stringify(sent))
-    // A csm: no Approve anyway, so Jonah's row has Reject alone.
+    // A csm: no Approve anyway, so Jonah's row has Check Whop again and Reject.
     await open('?state=nopayment&role=csm')
     await waitReady()
     const csm = await (await row('Jonah Pereira')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)))
-    expect(JSON.stringify(csm) === JSON.stringify(['Reject']), 'a csm: Jonah\'s row has Reject alone', JSON.stringify(csm))
+    expect(JSON.stringify(csm) === JSON.stringify(['Check Whop again', 'Reject']), 'a csm: Jonah\'s row has Check Whop again and Reject (Reject alone until the review of 2026-10-26)', JSON.stringify(csm))
   }
 
   console.log('\n30% off: Approve on the rule\'s yes, and on Hugo, whose coupon Whop names only now (D5)')
@@ -1092,7 +1108,7 @@ if (wanted('thirty')) {
     tara = await row('Tara Quinn')
     const t = await rowText(tara)
     const approveOn = !(await isNull(await buttonIn(tara, 'Approve'))) && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled))
-    expect(t.includes(YES) && t.includes('61 of 61 videos') && !t.includes(COUPON_LINE) && approveOn && (await isNull(await buttonIn(tara, CHECK))),
+    expect(t.includes(YES_EVERY) && t.includes('61 of 61 videos') && !t.includes(COUPON_LINE) && approveOn && (await isNull(await buttonIn(tara, CHECK))),
       'the coupon is gone: the row is the rule\'s again, its yes and its count, with Approve on and no Check Whop again', t)
     for (const size of SIZES) {
       await viewport(size)
@@ -1228,8 +1244,18 @@ if (wanted('thirty')) {
   {
     await open('')
     await waitReady()
+    // The example reason says the rule the window had (the review of 2026-10-26): every video for a deadline before
+    // 26 October (Sofia's shared window, the owner's B), the 80% from then on (Jonah's).
+    const hint = async (name) => (await row(name)).evaluate((r) => r.querySelector('input[placeholder^="For example"]')?.getAttribute('placeholder') ?? null)
+    await press(await buttonIn(await row('Sofia Marin'), 'Reject'))
+    await page.waitForSelector('input[placeholder^="For example"]')
+    const sofiaHint = await hint('Sofia Marin')
+    await press(await buttonIn(await row('Sofia Marin'), 'Cancel'))
     await press(await buttonIn(await row('Jonah Pereira'), 'Reject'))
     await page.waitForSelector('input[placeholder^="For example"]')
+    const jonahHint = await hint('Jonah Pereira')
+    expect(sofiaHint === 'For example: not every video was watched by the deadline' && jonahHint === 'For example: fewer than 80% of the videos were watched by the deadline',
+      'the example reason: every video on Sofia\'s row (a deadline before 26 October), the 80% on Jonah\'s', JSON.stringify({ sofiaHint, jonahHint }))
     expect((await bodyText()).includes('The student sees this reason on their map, and cannot ask for the 30% again.'), 'the panel says the student sees the reason and cannot ask again')
     for (const size of SIZES) {
       await viewport(size)

@@ -21,7 +21,10 @@
 // has a length for (61 up to the gate, as on production). Since the 80% rule
 // (2026-10-26) 49 of the 61 meet it, so the students who are not there yet
 // sit under 49 (B 45, I 48 by its deadline, the even Js 48), where they sat
-// at 50 or 60. Students, names, dates and links are made up. Two controls then show the parity check can
+// at 50 or 60. A deadline before 26 October keeps every video (the owner's B
+// of the same day, Facts.everyVideo): the shared window and the own windows
+// of first payments up to 11 October, so A, I, R and most Js are judged by
+// all 61 and their verdicts say every video. Students, names, dates and links are made up. Two controls then show the parity check can
 // fail: the loader with a read that skips paging, and with its completions
 // ordered on a key that is not unique.
 import fs from 'node:fs'
@@ -32,7 +35,7 @@ import {
   VERDICT_TEXT, anywaySkip, buildThirtyView, couponOf, judgeRequest, studentAppView, videoLine, whopPulled,
 } from './_gen/thirty-view.ts'
 import { approvalVerdict, couponApprovalRefusal, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
-import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, discountState, requiredLessons } from './_gen/discount.ts'
+import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, closedBeforeEighty, discountState, requiredLessons } from './_gen/discount.ts'
 import { clockLabel, dayLabel, dayTimeLabel, deadlineLabel } from './_gen/croatia-dates.ts'
 import { FakeDb, MAX_ROWS, fakeClient, setCatalog } from './_gen/stub-server.ts'
 
@@ -313,12 +316,15 @@ async function bothWays(db, nowIso, { load = loadThirtyData, skip = new Set(), r
 const request = (view, id) => view.requests.find((r) => r.id === id)
 
 /**
- * "The verdict says yes exactly when the shown count reaches what the 80% needs" (it was "is full" until
- * 2026-10-26), but for the two refusals about how the request was made.
+ * "The verdict says yes exactly when the shown count reaches what the window needs" (it was "is full" until
+ * 2026-10-26), but for the two refusals about how the request was made: 80% of the videos, and every one for a
+ * deadline before 26 October (the owner's B, everyVideo, which the deadline alone decides).
  */
 function countMatchesVerdict(view) {
   return view.requests.filter((r) => r.status === 'pending' && !['late-request', 'another-request'].includes(r.verdict.reason))
-    .filter((r) => r.verdict.ok !== (r.facts.videosTotal > 0 && r.facts.videosNeeded === Math.ceil(r.facts.videosTotal * 0.8) && r.facts.videosDone >= r.facts.videosNeeded))
+    .filter((r) => r.facts.everyVideo !== (r.facts.deadline != null && closedBeforeEighty(r.facts.deadline))
+      || r.verdict.ok !== (r.facts.videosTotal > 0 && r.facts.videosNeeded === (r.facts.everyVideo ? r.facts.videosTotal : Math.ceil(r.facts.videosTotal * 0.8))
+        && r.facts.videosDone >= r.facts.videosNeeded))
     .map((r) => r.id)
 }
 
@@ -368,11 +374,12 @@ ok(!W.data.students.some((s) => ['s-e', 's-v', 's-w', 's-x', 's-b', 's-m'].inclu
 
 {
   const a = request(wv, 'r-a')
-  ok(a.status === 'pending' && a.verdict.ok && a.verdict.reason === null && a.verdict.text === VERDICT_TEXT.yes && !a.verdict.oldCourse,
-     'A: shared window, all 61 done, pending: the verdict is yes', show(a.verdict))
-  ok(a.facts.videosDone === 61 && a.facts.videosTotal === 61 && a.facts.videosNeeded === 49 && a.facts.window === 'shared' && a.facts.deadline === DISCOUNT_SHARED_DEADLINE
-       && !a.facts.deadlinePassed && !a.facts.countedByDeadline && a.facts.secondsLeft === 0 && a.facts.firstPaidAt === '2026-10-02T10:00:00.000Z',
-     'A: "61 of 61 videos", 49 needed for the 80%, deadline Fri 23 Oct, not passed', show(a.facts))
+  ok(a.status === 'pending' && a.verdict.ok && a.verdict.reason === null && a.verdict.text === VERDICT_TEXT.yesEvery && !a.verdict.oldCourse,
+     'A: shared window, all 61 done, pending: the verdict is yes, every video (the shared deadline is before 26 October, the owner\'s B)', show(a.verdict))
+  ok(a.facts.videosDone === 61 && a.facts.videosTotal === 61 && a.facts.videosNeeded === 61 && a.facts.everyVideo === true && a.facts.window === 'shared' && a.facts.deadline === DISCOUNT_SHARED_DEADLINE
+       && !a.facts.deadlinePassed && !a.facts.countedByDeadline && a.facts.secondsLeft === 0 && a.facts.firstPaidAt === '2026-10-02T10:00:00.000Z'
+       && show(videoLine(a, a.verdict)) === show(['61 of 61 videos', '61 needed, every video for a deadline before Mon 26 Oct']),
+     'A: "61 of 61 videos", every one needed (49 for the 80% on the branch before the review), deadline Fri 23 Oct, not passed', show(a.facts))
   ok(!('submissions' in a) && !('answers' in a) && a.coupon === null,
      'A: no action items, no survey answers on the row (D4), and no coupon stored', Object.keys(a).join())
   ok(show(a.student) === show({ id: 's-a', name: 'Ana Example', email: 's-a@example.com', username: 'ana.example', discordId: '100000000000000001', status: 'active', whopPulled: true }),
@@ -381,11 +388,16 @@ ok(!W.data.students.some((s) => ['s-e', 's-v', 's-w', 's-x', 's-b', 's-m'].inclu
 {
   // B, C, D, E and M hold no request: Can still earn went with D4, so nobody without one is read.
   const b = studentAppView(W.per.get('s-b'), new Date(WED))
-  // The review of 2026-10-26: the 4 shortest of the 16 not watched, any of them counting (the next 4 in course order until then).
+  ok(b.state.kind === 'locked' && b.state.lessonsLeft === 16 && b.facts.videosDone === 45 && b.facts.videosTotal === 61 && b.facts.videosNeeded === 61 && b.facts.everyVideo
+       && b.facts.secondsLeft === secondsOf(REQUIRED.slice(45)) && b.state.secondsLeft === b.facts.secondsLeft && !request(wv, 'r-b'),
+     'B: 45 of 61, the shared window, so every video: 16 short, all 16 as the time left (the map\'s own number), no request, on no tab', show(b.facts))
+  // The review of 2026-10-26: on a window that has the 80% (the same reads, a first payment on 15 October), the 4
+  // shortest of the 16 not watched, any of them counting (the next 4 in course order until then).
+  const b80 = studentAppView({ ...W.per.get('s-b'), student: { data: { first_paid_at: '2026-10-15T12:00:00.000Z' }, error: null } }, new Date(WED))
   const shortest4 = REQUIRED.slice(45).map((id) => SECONDS[id]).sort((x, y) => x - y).slice(0, 4).reduce((sum, n) => sum + n, 0)
-  ok(b.state.kind === 'locked' && b.state.lessonsLeft === 4 && b.facts.videosDone === 45 && b.facts.videosTotal === 61 && b.facts.videosNeeded === 49
-       && b.facts.secondsLeft === shortest4 && b.state.secondsLeft === shortest4 && shortest4 < secondsOf(REQUIRED.slice(45, 49)) && !request(wv, 'r-b'),
-     'B: 45 of 61 by the rule, 4 short of the 49, the 4 shortest videos not watched as the time left (the map\'s own number), no request, on no tab', show({ facts: b.facts, shortest4, next4: secondsOf(REQUIRED.slice(45, 49)) }))
+  ok(b80.state.kind === 'locked' && b80.state.lessonsLeft === 4 && b80.facts.videosNeeded === 49 && !b80.facts.everyVideo
+       && b80.facts.secondsLeft === shortest4 && b80.state.secondsLeft === shortest4 && shortest4 < secondsOf(REQUIRED.slice(45, 49)),
+     'B\'s 45 on a window ending 29 October: 4 short of the 49, the 4 shortest videos not watched as the time left', show({ facts: b80.facts, shortest4, next4: secondsOf(REQUIRED.slice(45, 49)) }))
 }
 ok(studentAppView(W.per.get('s-c'), new Date(WED)).state.kind === 'ready' && studentAppView(W.per.get('s-d'), new Date(WED)).state.kind === 'locked',
    'C ready and D locked by the rule, neither listed')
@@ -410,7 +422,7 @@ ok(app(W.per.get('s-m'), new Date(WED)).kind === 'locked' && !W.data.students.so
 ok(request(wv, 'r-n').verdict.reason === 'no-payment' && request(wv, 'r-n').verdict.text === VERDICT_TEXT.noPayment, 'no first payment on file: the verdict says so')
 ok(request(wv, 'r-p2').verdict.reason === 'another-request' && request(wv, 'r-p2').facts.videosDone === 61,
    'a second request after a rejected one: refused as another request, every video done')
-ok(request(wv, 'r-r').verdict.ok && request(wv, 'r-r').verdict.reason === null && request(wv, 'r-r').verdict.text === VERDICT_TEXT.yes,
+ok(request(wv, 'r-r').verdict.ok && request(wv, 'r-r').verdict.reason === null && request(wv, 'r-r').verdict.text === VERDICT_TEXT.yesEvery,
    'R: every video done, the ads never ticked: the verdict is yes, as the rule says (it waited for the ads tick until 2026-10-20)', show(request(wv, 'r-r').verdict))
 {
   const t = request(wv, 'r-t')
@@ -424,8 +436,9 @@ ok(app(W.per.get('s-w'), new Date(WED)).kind === 'approved' && !request(wv, 'r-w
 {
   const jays = wv.requests.filter((r) => r.id.startsWith('r-j-'))
   ok(jays.length === 250 && jays.filter((r) => r.verdict.ok).length === 125
-       && jays.filter((r) => !r.verdict.ok).every((r) => r.verdict.reason === 'locked' && r.facts.videosDone === 48 && r.facts.videosTotal === 61 && r.facts.videosNeeded === 49),
-     'J: all 250 requests judged, 125 yes and 125 at 48 of 61, one short of the 80%, read from 15,250 completion rows in pages')
+       && jays.filter((r) => !r.verdict.ok).every((r) => r.verdict.reason === 'locked' && r.facts.videosDone === 48 && r.facts.videosTotal === 61 && r.facts.videosNeeded === (r.facts.everyVideo ? 61 : 49))
+       && jays.some((r) => !r.verdict.ok && r.facts.everyVideo) && jays.some((r) => !r.verdict.ok && !r.facts.everyVideo),
+     'J: all 250 requests judged, 125 yes and 125 at 48 of 61, one short of the 80% where the deadline is from 26 October, every video needed where it is before (the owner\'s B), read from 15,250 completion rows in pages')
 }
 ok(countMatchesVerdict(wv).length === 0, 'every pending row: the verdict says yes exactly when the count shown reaches the 80% (but for another-request and late-request)')
 
@@ -446,9 +459,9 @@ ok(app(M.per.get('s-d'), new Date(MON)).kind === 'expired' && app(M.per.get('s-b
    'D: deadline passed, nothing asked: expired (B too: the shared deadline passed)')
 {
   const i = request(mv, 'r-i')
-  ok(i.verdict.reason === 'locked' && i.verdict.text === VERDICT_TEXT.lockedClosed && i.facts.videosDone === 48 && i.facts.videosTotal === 61
-       && i.facts.videosNeeded === 49 && i.facts.countedByDeadline && i.facts.deadlinePassed,
-     'I: the gate finished the morning after the deadline does not count: 48 of 61 "by the deadline", one short of the 49', show({ v: i.verdict.text, f: i.facts }))
+  ok(i.verdict.reason === 'locked' && i.verdict.text === VERDICT_TEXT.lockedClosedEvery && i.facts.videosDone === 48 && i.facts.videosTotal === 61
+       && i.facts.videosNeeded === 61 && i.facts.everyVideo && i.facts.countedByDeadline && i.facts.deadlinePassed,
+     'I: the gate finished the morning after the deadline does not count: 48 of 61 "by the deadline", and its window (over on 23 October) needs every one', show({ v: i.verdict.text, f: i.facts }))
   const later = studentAppView(M.data.reads.get('s-i'), new Date(MON))
   ok(later.facts.videosDone === 49, 'I: while the student app, which counts every video watched, says 49', show(later.facts.videosDone))
 }
@@ -487,8 +500,8 @@ console.log('\n=== A video loaded after the switch, and requests made on the old
   ok(L2.differences.length === 0, 'both ways agree for every student', L2.differences.join(', '))
   const v = L2.view
   const o1 = request(v, 'r-o1')
-  ok(o1.verdict.reason === 'locked' && o1.verdict.oldCourse && o1.verdict.text === `${VERDICT_TEXT.oldCourse} ${VERDICT_TEXT.lockedOpen}`
-       && o1.facts.videosTotal === 60 && o1.facts.videosDone === 0,
+  ok(o1.verdict.reason === 'locked' && o1.verdict.oldCourse && o1.verdict.text === `${VERDICT_TEXT.oldCourse} ${VERDICT_TEXT.lockedOpenEvery}`
+       && o1.facts.videosTotal === 60 && o1.facts.videosNeeded === 60 && o1.facts.videosDone === 0,
      'asked on the old dashboard, nothing watched: "Asked on the old course", judged by the 60 videos there were at the switch', show({ t: o1.verdict.text, f: o1.facts }))
   const o2 = request(v, 'r-o2')
   ok(o2.verdict.ok && o2.facts.videosTotal === 60 && o2.facts.videosDone === 60 && studentAppView(L2.data.reads.get('s-o2'), new Date(THU)).facts.videosTotal === 61,
@@ -749,7 +762,8 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
   // C8: the same with a first real payment of 97.00 stored (a price, so a real payment).
   for (const [id, done] of [['s-c1', 61], ['s-c2', 61], ['s-c3', 61], ['s-c4', 41], ['s-c5', 61], ['s-c6', 61], ['s-c7', 61], ['s-c8', 61]]) {
     // C7 and C8 have no membership on file, as a student who never had one (so their row counts, storedRowApplies).
-    f.person(id, `${id} Example`, '2026-10-10T10:00:00.000Z', id === 's-c7' || id === 's-c8' ? { whop_membership_id: null } : {})
+    // A first payment on 15 October: its 14 days end on the 29th, so the window has the 80%.
+    f.person(id, `${id} Example`, '2026-10-15T10:00:00.000Z', id === 's-c7' || id === 's-c8' ? { whop_membership_id: null } : {})
     f.watched(id, REQUIRED.slice(0, done), FROM_WHOP)
   }
   for (const id of ['s-c1', 's-c2', 's-c3', 's-c4', 's-c6', 's-c7', 's-c8']) f.request(id, `r-${id.slice(2)}`, '2026-10-20T10:00:00.000Z')

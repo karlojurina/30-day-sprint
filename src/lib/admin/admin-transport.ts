@@ -51,7 +51,7 @@ export interface ThirtyTransport {
    * row the stored coupon refuses): Whop now for that one student, stored.
    * `code` names the code on the membership, when there is one.
    */
-  checkCoupon(requestId: string): Promise<Answer<{ discounted: boolean; code: string | null }>>;
+  checkCoupon(requestId: string): Promise<Answer<{ discounted: boolean; code: string | null; noRealPayment: boolean }>>;
 }
 
 const NO_SERVER = "Couldn't reach the server. Check the connection and try again.";
@@ -140,9 +140,16 @@ export const adminTransport: ThirtyTransport = {
   },
 
   async checkCoupon(requestId) {
-    const r = await send<{ discounted?: unknown; code?: unknown }>("POST", "/api/admin/thirty/check-coupon", () => ({ requestId }));
+    const r = await send<{ discounted?: unknown; code?: unknown; noRealPayment?: unknown }>("POST", "/api/admin/thirty/check-coupon", () => ({ requestId }));
     return r.ok
-      ? { ...r, data: { discounted: r.data?.discounted === true, code: typeof r.data?.code === "string" ? r.data.code : null } }
+      ? {
+          ...r,
+          data: {
+            discounted: r.data?.discounted === true,
+            code: typeof r.data?.code === "string" ? r.data.code : null,
+            noRealPayment: r.data?.noRealPayment === true,
+          },
+        }
       : r;
   },
 };

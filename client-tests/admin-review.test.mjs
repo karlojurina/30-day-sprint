@@ -453,9 +453,11 @@ console.log("\n=== The 30% page: every row's coupon check ===")
   // was kept on, for the route to refuse), and Reject is that row's one action, raised.
   // Since the render review's second round "Check Whop again" stands on the coupon's row. Since the owner's review
   // (2026-10-21) a founder's or an admin's Approve anyway stands in Approve's place wherever a check refuses, the
-  // coupon's row too (admin-owner-review.test.mjs holds that round's rules).
+  // coupon's row too (admin-owner-review.test.mjs holds that round's rules). Since the review of 2026-10-26 Check Whop
+  // again stands on the no-real-payment row as well (`recheck`).
   ok(/disabled=\{locked \|\| \(busy !== null && busy !== "approve"\)\}/.test(pending) && !/disabled=\{!verdict\.ok/.test(pending)
-       && /\{coupon && \(\s*<button[\s\S]*?"Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
+       && /const recheck = coupon \|\| verdict\.reason === "no-real-payment";/.test(pending)
+       && /\{recheck && \(\s*<button[\s\S]*?"Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
        && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button/.test(pending),
      'Approve is on wherever it can approve, and gone beside the coupon\'s verdict')
   ok(/\{canOverride && \(\s*<button[\s\S]*?Approve anyway\s*<\/button>\s*\)\}\s*\{!coupon && verdict\.ok && !canOverride && \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending),

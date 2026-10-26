@@ -22,6 +22,11 @@ import type { FixtureCall } from "../fixtures";
  *          stalecoupon          a code taken off Tara's membership in Whop
  *                               since the cron stored it: Check Whop again
  *                               finds it gone (fixtures.ts)
+ *          nopayment            Whop showing no real payment from Jonah
+ *                               (stored) and Maya (only now): Jonah's
+ *                               verdict says so with no Approve, and Maya's
+ *                               Approve is refused (fixtures.ts; the review
+ *                               of 2026-10-26)
  *   ?role=admin | founder | csm   whose page (default admin): Approve anyway
  *                 is a founder's or an admin's (the owner's review,
  *                 2026-10-21), and the stand-in refuses a csm's override

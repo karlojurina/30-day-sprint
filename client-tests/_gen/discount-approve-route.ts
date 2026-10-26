@@ -44,7 +44,8 @@ import {
  *      (NO_REAL_PAYMENT_APPROVAL), so only Approve anyway passes it.
  *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
  *      the ads are not checked (the owner's decision: the 30% already asks
- *      for the videos, 80% of them since 2026-10-26, 49 of today's 61), so
+ *      for the videos, 80% of them since 2026-10-26, 49 of today's 61, and
+ *      every one for a deadline before that day, the owner's B), so
  *      students.ad_submissions_verified decides nothing here. A refusal of
  *      the rule, or of a read it needs (the check could not run), carries
  *      code "rule": the 30% page then offers Approve anyway, which
@@ -94,8 +95,9 @@ import {
 
 /**
  * The refusals Approve anyway skips with `override`: the 30% rule said no, or
- * a read it needs failed, and since T-122's fourth fix round the coupon check
- * gave no answer.
+ * a read it needs failed, since T-122's fourth fix round the coupon check
+ * gave no answer, and since 2026-10-26 Whop shows no real payment from the
+ * student (NO_REAL_PAYMENT_APPROVAL).
  */
 const RULE = { code: "rule" } as const;
 

@@ -3,7 +3,11 @@
 // 23 October in Croatia, and the lessons they finish on Whop count. The file
 // is named for the group as it began, from 9 September; Lovro moved the first
 // date to 1 October on 2026-10-19, and a September payment is now refused
-// (its own section below).
+// (its own section below). The 30% asks for 80% of the videos since
+// 2026-10-26, but this group's deadline, the end of 23 October, is before
+// that day, so its windows keep every video (the owner's B of the same day:
+// "the 80% counts from today"; videosNeededFor in discount.ts). The branch
+// before the review of that day judged them by the 80%.
 //
 // What decides is the real source, copied by build.mjs: the Whop backfill a
 // visit runs (watch-sync.ts), the Whop webhook, both routes that write a
@@ -253,12 +257,12 @@ console.log('\n=== Paid 2 October, finished on Whop and in the app by 23 October
   ok(v.ok === true, 'the team approves it on 27 October: approved, judged as of the end of 23 October', show(v))
 }
 
-console.log('\n=== The same student, 48 in time and the 49th (the gate) at 00:00:30 on 24 October: too late ===')
+console.log('\n=== The same student, the gate finished at 00:00:30 on 24 October: too late ===')
 {
-  // Since the 80% rule (2026-10-26) a student needs 49 of the 61, any 49: 48 come in from Whop in time and the
-  // 49th, the gate, after the deadline. Until then it was all 61, 60 of them in time.
+  // The shared deadline is before the 80% rule, so the window asks for all 61 (the owner's B): 60 come in from Whop
+  // in time and the gate after the deadline.
   const db = freshDb()
-  onWhop(REQUIRED.slice(0, 48))
+  onWhop(REQUIRED.slice(0, -1))
   await at('2026-10-19T07:30:00.000Z', backfill)
   const hook = await at('2026-10-23T22:00:30.000Z', () => webhookFinished(GATE))
   ok(hook === 200 && completedAt(db, GATE) === '2026-10-23T22:00:30.000Z', 'the gate comes in 30 seconds into 24 October in Croatia')
@@ -268,8 +272,9 @@ console.log('\n=== The same student, 48 in time and the 49th (the gate) at 00:00
      'Apply at 00:05 on 24 October: refused as expired, in the words every student reads (no date since 2026-10-20)', show(sent))
   ok(db.rows('discount_requests').length === 0, 'and no request is written')
   const v = await approve(db, '2026-10-27T09:00:00.000Z', null)
-  ok(!v.ok && v.status === 400 && v.error.includes('by the end of October 23') && v.error.endsWith('48 of 61 watched, 49 needed.'),
-     'the approval would refuse it too: 48 of 61 by the deadline, 49 needed (only Generate anyway skips the check)', v.error)
+  ok(!v.ok && v.status === 400 && v.error.includes('by the end of October 23') && v.error.includes('a deadline before October 26 asks for every one')
+       && v.error.endsWith('60 of 61 watched, 61 needed.'),
+     'the approval would refuse it too: 60 of 61 by the deadline, every one needed (only Generate anyway skips the check)', v.error)
 }
 
 console.log('\n=== Everything finished on Whop in time, but the app first opened on 24 October ===')
@@ -378,7 +383,7 @@ console.log('\n=== Paid 2 October, already holding a request from the old course
     const refused = await approve(unwatched, '2026-10-21T09:00:00.000Z', OLD, 'old', RESET)
     const said = explainOldCourseRequest(refused, OLD, RESET)
     ok(!said.ok && said.status === 400 && said.error === `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: ${refused.error}`
-         && refused.error.endsWith('0 of 61 watched, 49 needed.'),
+         && refused.error.endsWith('0 of 61 watched, 61 needed.'),
        'the same request with nothing watched: the old-course sentence, then the new rule\'s count', said.error)
     const before = [db, unwatched].map(async (d) => explainOldCourseRequest(await approve(d, '2026-10-21T09:00:00.000Z', OLD, 'old'), OLD, RESET).error)
     const [a, b] = await Promise.all(before)
@@ -421,7 +426,7 @@ console.log('\n=== A request the database function wrote on the closed weekend, 
     const { db, made, asked } = await madeOnWeekend(OCT_2)
     const said = await team(db, asked)
     ok(made && !said.ok && said.status === 400 && said.error.startsWith(`${OLD_COURSE_REQUEST_REFUSAL} The new rule says: `)
-         && said.error.endsWith('0 of 61 watched, 49 needed.'),
+         && said.error.endsWith('0 of 61 watched, 61 needed.'),
        'paid 2 October, nothing watched yet: the old-course sentence, then the new rule\'s count', said.error)
     // Monday morning: the first visit after the switch brings every video in from Whop.
     onWhop(REQUIRED)
@@ -509,7 +514,7 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
     })))
     return { status: res.status, body: await res.json(), codes: promoCodes.length - codesBefore, row: db.rows('discount_requests').find((r) => r.id === id) }
   })
-  const OLD_UNWATCHED = `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: Student has not watched 80% of the videos up to the discount checkpoint by the end of October 23 (Croatia time), the deadline for a first payment before the launch: 0 of 61 watched, 49 needed.`
+  const OLD_UNWATCHED = `${OLD_COURSE_REQUEST_REFUSAL} The new rule says: Student has not watched every video up to the discount checkpoint by the end of October 23 (Croatia time), the deadline for a first payment before the launch (a deadline before October 26 asks for every one; the 80% counts from then on): 0 of 61 watched, 61 needed.`
   {
     // The release review's case: an early-October joiner's request from the old dashboard, decided after the switch.
     const db = switched(freshDb(OCT_2, [{ id: 'old', status: 'pending', created_at: OLD }]), true)
@@ -535,18 +540,24 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
     const db = switched(freshDb(OCT_2, [{ id: 'old', status: 'pending', created_at: OLD }]), true)
     const r = await press(db, 'old', '2026-10-21T09:00:00.000Z')
     ok(r.status === 400 && r.body.error === OLD_UNWATCHED && r.codes === 0 && r.row.status === 'pending',
-       'the same request with nothing watched: refused, the old-course sentence and then "0 of 61 watched, 49 needed", no code, still pending', r.body.error)
-    // The 80% (2026-10-26): 45 in from Whop is 4 short; 4 more make 49 and Approve approves it.
+       'the same request with nothing watched: refused, the old-course sentence and then "0 of 61 watched, 61 needed", no code, still pending', r.body.error)
+    // The shared deadline keeps every video (the owner's B): 45 in from Whop is 16 short, and 49, the 80%, is still 12
+    // short (Approve approved it on the branch before the review of 2026-10-26); all 61 and Approve approves it.
     onWhop(REQUIRED.slice(0, 45))
     await at('2026-10-19T07:30:00.000Z', backfill)
     const part = await press(db, 'old', '2026-10-21T09:00:00.000Z')
-    ok(part.status === 400 && part.body.error.endsWith('45 of 61 watched, 49 needed.') && part.codes === 0 && part.row.status === 'pending',
-       '45 of them in from Whop: refused, the count says 45 watched and 49 needed, no code', part.body.error)
+    ok(part.status === 400 && part.body.error.endsWith('45 of 61 watched, 61 needed.') && part.codes === 0 && part.row.status === 'pending',
+       '45 of them in from Whop: refused, the count says 45 watched and 61 needed, no code', part.body.error)
     onWhop(REQUIRED.slice(0, 49))
     await at('2026-10-20T07:30:00.000Z', backfill)
-    const enough = await press(db, 'old', '2026-10-21T09:05:00.000Z')
+    const eighty = await press(db, 'old', '2026-10-21T09:05:00.000Z')
+    ok(eighty.status === 400 && eighty.body.error.endsWith('49 of 61 watched, 61 needed.') && eighty.codes === 0 && eighty.row.status === 'pending',
+       '49 in from Whop by 20 October: still refused, every video needed (approved on the branch before the review, the 80% reaching back to the shared window)', eighty.body.error)
+    onWhop(REQUIRED)
+    await at('2026-10-20T08:30:00.000Z', backfill)
+    const enough = await press(db, 'old', '2026-10-21T09:10:00.000Z')
     ok(enough.status === 200 && enough.codes === 1 && enough.row.status === 'approved',
-       '49 in from Whop by 20 October: Approve approves it, one code (61 were needed until 2026-10-26)', show(enough.body))
+       'all 61 in from Whop by 20 October: Approve approves it, one code', show(enough.body))
   }
   {
     // A first payment before 1 October with the ads not ticked: the rule
@@ -575,17 +586,17 @@ console.log('\n=== The approve button itself, POST /api/discounts/approve (2026-
        'ready on the new map, the ads never ticked: Approve approves it and makes one code', show(r.body))
   }
   {
-    // And the rule still decides: 48 of the 61 videos in, one short of the 80%,
-    // the ads never ticked, a request made after the switch (straight in the
-    // table: the map's Apply would not offer it). Refused over the videos, no
-    // code, still pending. (60 of 61 until the 80% rule of 2026-10-26.)
+    // And the rule still decides: 60 of the 61 videos in (the shared deadline
+    // keeps every video, the owner's B), the ads never ticked, a request made
+    // after the switch (straight in the table: the map's Apply would not offer
+    // it). Refused over the videos, no code, still pending.
     const db = switched(freshDb(OCT_2, [{ id: 'part', status: 'pending', created_at: '2026-10-20T10:00:00.000Z' }]), false)
-    onWhop(REQUIRED.slice(0, 48))
+    onWhop(REQUIRED.slice(0, 60))
     await at('2026-10-19T07:30:00.000Z', backfill)
     const r = await press(db, 'part', '2026-10-21T09:00:00.000Z')
-    ok(r.status === 400 && r.body.error.startsWith('Student has not watched 80% of the videos up to the discount checkpoint')
-         && r.body.error.endsWith('48 of 61 watched, 49 needed.') && r.codes === 0 && r.row.status === 'pending',
-       '48 of 61 videos, the ads never ticked: the rule says no, so Approve refuses it, no code, still pending', r.body.error)
+    ok(r.status === 400 && r.body.error.startsWith('Student has not watched every video up to the discount checkpoint')
+         && r.body.error.endsWith('60 of 61 watched, 61 needed.') && r.codes === 0 && r.row.status === 'pending',
+       '60 of 61 videos, the ads never ticked: the rule says no, so Approve refuses it, no code, still pending', r.body.error)
     db.rows('students')[0].ad_submissions_verified = true
     const ticked = await press(db, 'part', '2026-10-21T09:05:00.000Z')
     ok(ticked.status === 400 && ticked.body.error === r.body.error && ticked.codes === 0 && ticked.row.status === 'pending',

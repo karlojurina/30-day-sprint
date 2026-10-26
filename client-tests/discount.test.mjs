@@ -7,8 +7,11 @@
 // Since 2026-10-26 the rule is 80% of the videos up to the checkpoint,
 // rounded up (videosNeeded): the stand-in course counts 3, of which 80% is
 // all 3, so its checks read as before with the new counts; the real course's
-// 61 need 49. discount-eighty.test.mjs walks the 80% itself through the
-// routes.
+// 61 need 49. A window that ends before the 80% rule keeps every video (the
+// owner's B, videosNeededFor): PAID's own 14 days end on 24 October, so its
+// refusals say every video, and the 80%'s words are read on PAID_80's window,
+// which ends after the rule began. discount-eighty.test.mjs walks the 80%
+// itself through the routes.
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import {
@@ -40,6 +43,9 @@ const PAID = '2026-10-10T12:00:00.000Z'
 const ENDS = '2026-10-24T12:00:00.000Z'
 const IN_WINDOW = new Date('2026-10-15T09:00:00.000Z')
 const AFTER = new Date('2026-10-25T00:00:00.000Z')
+/** A first payment whose 14 days end after the 80% rule began (3 November): the 80%'s words are read on it. */
+const PAID_80 = '2026-10-20T12:00:00.000Z'
+const IN_80 = new Date('2026-10-27T09:00:00.000Z')
 const COURSE = [
   L('x01', { duration_seconds: 300 }),
   L('x02', { type: 'setup', has_video: false, duration_seconds: null }),
@@ -363,6 +369,8 @@ const reads = (o = {}) => ({
   ...o,
 })
 const done = (ids, at = '2026-10-12T00:00:00Z') => okRead(ids.map((lesson_id) => ({ lesson_id, completed_at: at })))
+/** The same reads for a first payment on PAID_80, whose 14 days end after the 80% rule began. */
+const reads80 = (o = {}) => reads({ student: okRead({ first_paid_at: PAID_80 }), ...o })
 
 console.log('\n=== discount-server: reads fail closed ===')
 {
@@ -396,18 +404,25 @@ ok(decideDiscountRequest(reads({ lessons: okRead([]) }), IN_WINDOW).status === 5
 ok(decideDiscountRequest(reads({ completions: badRead('x'), requests: badRead('y') }), IN_WINDOW).log.includes('student_lesson_completions: x; discount_requests: y'),
    'every failed read is named in the log')
 {
-  const d = decideDiscountRequest(reads({ completions: done(['x01']) }), IN_WINDOW)
+  const d = decideDiscountRequest(reads80({ completions: done(['x01']) }), IN_80)
   ok(!d.grant && d.status === 400 && d.state === 'locked', 'locked: 400', show(d))
   ok(d.error === 'You need 2 more videos to reach 80%. Watch them before your deadline and apply again.',
      'locked says how many more videos the 80% needs (it said "You have 2 videos left to watch" until 2026-10-26), and no time while one of them (x05) has no length', d.error)
 }
 {
-  const d = decideDiscountRequest(reads({ completions: done(['x01', 'x05']) }), IN_WINDOW)
+  const d = decideDiscountRequest(reads80({ completions: done(['x01', 'x05']) }), IN_80)
   ok(d.error === 'You need 1 more video to reach 80%, about 15 minutes of video if you pick the shortest. Watch it before your deadline and apply again.', 'one video more reads in the singular, with the time the shortest one left takes', d.error)
 }
 {
-  const d = decideDiscountRequest(reads({ completions: done(['x01', 'x06']) }), IN_WINDOW)
+  const d = decideDiscountRequest(reads80({ completions: done(['x01', 'x06']) }), IN_80)
   ok(d.error === 'You need 1 more video to reach 80%. Watch it before your deadline and apply again.', 'no length known: no time in the sentence', d.error)
+}
+{
+  // A window that ends before the 80% rule (PAID's 14 days end on 24 October) keeps every video (the owner's B): a
+  // clock before 26 October sees it open, and its refusal is the every-video sentence it had.
+  const d = decideDiscountRequest(reads({ completions: done(['x01', 'x05']) }), IN_WINDOW)
+  ok(!d.grant && d.state === 'locked' && d.error === 'You have 1 video left to watch, about 15 minutes of video. Finish it before your deadline and apply again.',
+     'a window ending before 26 October, on 15 October: every video, the sentence before the 80% rule (the one left, its whole length)', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ completions: done(['x01', 'x05', 'x06']) }), AFTER)
@@ -438,9 +453,10 @@ ok(decideDiscountRequest(reads({ completions: badRead('x'), requests: badRead('y
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-10-02T10:00:00Z' }), completions: done(['x01']) }), new Date('2026-10-20T10:00:00Z'))
-  ok(!d.grant && d.state === 'locked'
-       && d.error === 'You need 2 more videos to reach 80%. Watch them before your deadline and apply again.',
-     'an early-October joiner with videos left reads the same sentence as a student with their own 14 days: no date and never "your 14 days" (their deadline, 23 October, is the panel\'s "Apply by")', d.error)
+  const own = decideDiscountRequest(reads({ completions: done(['x01']) }), new Date('2026-10-20T10:00:00Z'))
+  ok(!d.grant && d.state === 'locked' && d.error === own.error
+       && d.error === 'You have 2 videos left to watch. Finish them before your deadline and apply again.',
+     'an early-October joiner with videos left reads the same sentence as a student with their own 14 days: no date and never "your 14 days" (their deadline, 23 October, is the panel\'s "Apply by"); both windows end before 26 October, so every video', d.error)
 }
 {
   const d = decideDiscountRequest(reads({ student: okRead({ first_paid_at: '2026-10-02T10:00:00Z' }), completions: done(['x01', 'x05', 'x06']) }), new Date('2026-10-23T22:00:00.000Z'))
@@ -469,7 +485,7 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
 }
 {
   const all = [
-    { kind: 'locked', lessonsLeft: 3, lessonsDone: 0, lessonsNeeded: 3, lessonsTotal: 3, secondsLeft: 7200, endsAt: ENDS, window: 'own', nextLessonId: 'x' },
+    { kind: 'locked', lessonsLeft: 3, lessonsDone: 0, lessonsNeeded: 3, lessonsTotal: 3, secondsLeft: 7200, endsAt: '2026-11-03T12:00:00.000Z', window: 'own', nextLessonId: 'x' },
     { kind: 'locked', lessonsLeft: 1, lessonsDone: 2, lessonsNeeded: 3, lessonsTotal: 3, secondsLeft: 0, endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', nextLessonId: 'x' },
     { kind: 'expired', endsAt: ENDS, window: 'own', lessonsLeft: 0 },
     { kind: 'expired', endsAt: DISCOUNT_SHARED_DEADLINE, window: 'shared', lessonsLeft: 0 },
@@ -480,8 +496,12 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   ok(msgs.every((m) => m.length > 0 && !m.includes('—') && !/\bR[12]\b/.test(m) && !/unlock/i.test(m)),
      'every refusal is a plain sentence: no em dash, no region code, no "unlock"', show(msgs))
   ok(msgs[0].includes('about 2 hours of video'), 'hours read as hours', msgs[0])
-  ok(msgs[1] === 'You need 1 more video to reach 80%. Watch it before your deadline and apply again.',
-     'the shared deadline in the singular, with no length known', msgs[1])
+  ok(msgs[1] === 'You have 1 video left to watch. Finish it before your deadline and apply again.',
+     'the shared deadline in the singular, with no length known: it ends before 26 October, so every video (the owner\'s B)', msgs[1])
+  ok(discountRefusalMessage({ ...all[1], endsAt: '2026-11-03T12:00:00.000Z', window: 'own' }) === 'You need 1 more video to reach 80%. Watch it before your deadline and apply again.'
+       && discountRefusalMessage({ ...all[1], endsAt: DISCOUNT_EIGHTY_FROM }) === 'You need 1 more video to reach 80%. Watch it before your deadline and apply again.'
+       && discountRefusalMessage({ ...all[1], endsAt: '2026-10-25T22:59:59.999Z' }) === msgs[1],
+     'a window ending at the 80% rule\'s first moment or later reads the 80%; one ending the millisecond before it, every video')
   // Since 2026-10-20 the panel says the rule in one line (checkpointView.ts discountRule) and a refusal says only the
   // fact: the shared window's words are the own window's, and no refusal names a date, a clock or a length of window.
   ok(discountRefusalMessage({ ...all[1], window: 'own' }) === msgs[1] && msgs[3] === msgs[2],
@@ -505,8 +525,10 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
      'the panel\'s line while the 30% can be earned (locked, and with no first payment on record)', rule.open)
   ok(rule.closed === 'The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining.',
      'the same rule once the student\'s deadline has passed, after "This closed on <deadline>."', rule.closed)
-  ok(rule.beforeLaunch === 'Your 2 weeks have passed. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining.',
-     'a first payment before 1 October', rule.beforeLaunch)
+  // The review of 2026-10-26: those 2 weeks all ended before 15 October, before the 80% rule, and the owner's B is that
+  // the map never tells a window the 80% rule it did not have. It went on with the 80% line until the review.
+  ok(rule.beforeLaunch === 'Your 2 weeks have passed.',
+     'a first payment before 1 October: "Your 2 weeks have passed." alone, no rule named', rule.beforeLaunch)
   // The review of 2026-10-26: a window that closed before the 80% rule asked for every video, and its line says so.
   ok(rule.closedBefore === 'The 30% was for finishing every video through Video Ads II within 2 weeks of joining.',
      'a deadline that passed before the 80% rule: the rule that window had, in the past', rule.closedBefore)
@@ -518,6 +540,9 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   ok(closedBeforeEighty('not a date') === false && expiredRuleLine('not a date', 'Video Ads II') === rule.closed, 'a date that does not parse reads the rule as it stands')
   ok(rule.ready === "You've watched at least 80% of the videos through Video Ads II. Apply now and the team confirms within 48 hours.",
      'ready, above Apply ("Every video through Video Ads II is watched." until 2026-10-26)', rule.ready)
+  ok(rule.openEvery === 'Finish every video through Video Ads II within 2 weeks of joining to apply.'
+       && rule.readyEvery === "You've watched every video through Video Ads II. Apply now and the team confirms within 48 hours.",
+     'a window that ends before the 80% rule, seen open (a clock before 26 October): the every-video lines', show([rule.openEvery, rule.readyEvery]))
   ok(discountRule('Somewhere Else').open === 'Watch 80% of the videos through Somewhere Else within 2 weeks of joining to apply.',
      'the place is the name handed in, never written into the words')
   ok(DISCOUNT_VIDEO_SHARE === 80 && [rule.open, rule.closed, rule.ready].every((m) => m.includes(`${DISCOUNT_VIDEO_SHARE}% of the videos`)),
@@ -526,7 +551,7 @@ for (const status of ['pending', 'approved', 'applied', 'rejected']) {
   ok(DISCOUNT_WINDOW_DAYS === 14 && twoWeeks.every((m) => m.includes('2 weeks')),
      'the words say "2 weeks" and DISCOUNT_WINDOW_DAYS is 14: if the window ever changes, change these words with it (checkpointView.ts discountRule, discount-server.ts before-launch)',
      `${DISCOUNT_WINDOW_DAYS} days; ${show(twoWeeks)}`)
-  ok([rule.open, rule.closed, rule.closedBefore, rule.beforeLaunch, rule.ready, ...msgs].every((m) => !m.includes('—') && !/unlock|EcomTalent/i.test(m) && !/\btwo\b|fourteen/i.test(m)),
+  ok([rule.open, rule.closed, rule.closedBefore, rule.beforeLaunch, rule.ready, rule.openEvery, rule.readyEvery, ...msgs].every((m) => !m.includes('—') && !/unlock|EcomTalent/i.test(m) && !/\btwo\b|fourteen/i.test(m)),
      'no em dash, no "unlock", no "EcomTalent", numbers as digits')
 }
 
@@ -551,12 +576,20 @@ console.log('\n=== shortestSeconds: the least the 80% still takes (the review of
   ok(shortestSeconds([V('a', 900), V('b', 60)], 5) === 960, 'more needed than there are: all of them')
   // Five counted videos, 80% of them 4. y3 watched, so 3 more of the 4 left: the 3 shortest.
   const five = [V('y1', 3000), V('y2', 600), V('y3', 120), V('y4', 1800), V('y5', 240, { is_gate: true })]
-  const s = discountState({ now: IN_WINDOW, firstPaidAt: PAID, lessons: five, videoDoneIds: new Set(['y3']), requests: [] })
+  const s = discountState({ now: IN_80, firstPaidAt: PAID_80, lessons: five, videoDoneIds: new Set(['y3']), requests: [] })
   ok(s.kind === 'locked' && s.lessonsNeeded === 4 && s.lessonsLeft === 3 && s.secondsLeft === 240 + 600 + 1800 && s.nextLessonId === 'y1',
      'five videos, y3 watched: 3 more, the 3 shortest left 240 + 600 + 1800 seconds (the first 3 in course order, 3000 + 600 + 1800, until the review); the next is still the first in course order', show(s))
-  const d = decideDiscountRequest(reads({ lessons: okRead(catalogRows(five)), videos: okRead(five.map((l) => ({ lesson_id: l.id }))), completions: done(['y3']) }), IN_WINDOW)
+  const d = decideDiscountRequest(reads80({ lessons: okRead(catalogRows(five)), videos: okRead(five.map((l) => ({ lesson_id: l.id }))), completions: done(['y3']) }), IN_80)
   ok(d.error === 'You need 3 more videos to reach 80%, about 44 minutes of video if you pick the shortest. Watch them before your deadline and apply again.',
      'and the refusal says it, "if you pick the shortest" (it said "about 1.5 hours of video", the next 3 in course order)', d.error)
+  const before = discountState({ now: IN_WINDOW, firstPaidAt: PAID, lessons: five, videoDoneIds: new Set(['y3']), requests: [] })
+  ok(before.kind === 'locked' && before.lessonsNeeded === 5 && before.lessonsLeft === 4 && before.secondsLeft === 3000 + 600 + 1800 + 240,
+     'the same five on a window ending 24 October, before the 80% rule: all 5 needed (the owner\'s B), so 4 more and every one\'s length', show(before))
+  // One minute and one hour read in the singular (the review of 2026-10-26: "about 1 minutes" could be read).
+  const oneEach = (seconds) => discountRefusalMessage({ ...s, lessonsLeft: 1, secondsLeft: seconds })
+  ok(oneEach(60).includes('about 1 minute of video if') && oneEach(29).includes('about 1 minute of video if') && oneEach(150).includes('about 3 minutes of video')
+       && oneEach(3600).includes('about 1 hour of video') && oneEach(3780).includes('about 1.1 hours of video') && oneEach(7200).includes('about 2 hours of video'),
+     'one minute and one hour in the singular, every other count in the plural', show([oneEach(60), oneEach(3600), oneEach(150), oneEach(3780)]))
 }
 
 console.log('\n=== decideDiscountRequest: an early-October joiner who already has a request from the old course ===')
@@ -610,9 +643,13 @@ ok(approvalVerdict(reads({ completions: done(['x01', 'x05', 'x06']) }), new Date
   ok(!v.ok && v.status === 400 && v.error.endsWith('2 of 3 watched, 3 needed.'), 'a video done one millisecond after the window does not count', v.error)
 }
 {
-  const v = approvalVerdict(reads({ completions: done(['x01']) }), IN_WINDOW)
+  const v = approvalVerdict(reads80({ completions: done(['x01']) }), IN_80)
   ok(!v.ok && v.status === 400 && v.error === 'Student has not watched 80% of the videos up to the discount checkpoint inside the 14 days: 1 of 3 watched, 3 needed.',
      'fewer than the 80% done: refused, the count and what is needed named ("2 of 3 still missing" until 2026-10-26)', v.error)
+  const before = approvalVerdict(reads({ completions: done(['x01']) }), IN_WINDOW)
+  ok(!before.ok && before.reason === 'locked'
+       && before.error === 'Student has not watched every video up to the discount checkpoint inside the 14 days (a deadline before October 26 asks for every one; the 80% counts from then on): 1 of 3 watched, 3 needed.',
+     'a window ending 24 October, before the 80% rule: refused in the every-video words, the count last (the owner\'s B)', before.error)
 }
 ok(approvalVerdict(reads({ student: okRead({ first_paid_at: null }) }), IN_WINDOW).error.startsWith('Cannot approve: student has no first_paid_at on file.'),
    'no first payment: the old route\'s words')
@@ -657,8 +694,8 @@ console.log('\n=== approvalVerdict: an early-October joiner, judged as of the en
   {
     const v = approvalVerdict(reads({ student: OCT2, completions: finished('2026-10-23T22:00:00.000Z') }), LATER, ASKED)
     ok(!v.ok && v.status === 400
-         && v.error === 'Student has not watched 80% of the videos up to the discount checkpoint by the end of October 23 (Croatia time), the deadline for a first payment before the launch: 2 of 3 watched, 3 needed.',
-       'the gate finished at 00:00 on 24 October in Croatia: refused, the deadline named', v.error)
+         && v.error === 'Student has not watched every video up to the discount checkpoint by the end of October 23 (Croatia time), the deadline for a first payment before the launch (a deadline before October 26 asks for every one; the 80% counts from then on): 2 of 3 watched, 3 needed.',
+       'the gate finished at 00:00 on 24 October in Croatia: refused, the deadline named, every video (the shared deadline is before the 80% rule)', v.error)
   }
   ok(approvalVerdict(reads({ student: OCT2, completions: finished('2026-10-22T12:00:00.000Z') }), new Date('2026-10-22T13:00:00Z'), ASKED).ok,
      'approved before the deadline, every video done: approved')
@@ -933,32 +970,34 @@ console.log('\n=== The real course: course_catalog.json + the development page\'
   ok(req.every((l) => /^a[1-4]l/.test(l.id)), 'nothing past Video Ads II is counted')
   ok(videosNeeded(req.length) === 49, 'the 80% of the 61 is 49 (48.8 rounded up)', `${videosNeeded(req.length)}`)
 
-  const r = (o = {}) => ({ student: okRead({ first_paid_at: PAID }), lessons: okRead(rows), videos: okRead(Object.keys(lengths).map((lesson_id) => ({ lesson_id }))), completions: okRead([]), requests: okRead([]), ...o })
-  const s = discountState({ now: IN_WINDOW, firstPaidAt: PAID, lessons, videoDoneIds: new Set(), requests: [] })
+  const r = (o = {}) => ({ student: okRead({ first_paid_at: PAID_80 }), lessons: okRead(rows), videos: okRead(Object.keys(lengths).map((lesson_id) => ({ lesson_id }))), completions: okRead([]), requests: okRead([]), ...o })
+  const s = discountState({ now: IN_80, firstPaidAt: PAID_80, lessons, videoDoneIds: new Set(), requests: [] })
   const first49 = req.slice(0, 49).reduce((sum, l) => sum + (l.duration_seconds ?? 0), 0)
   const shortest49 = req.map((l) => l.duration_seconds).sort((a, b) => a - b).slice(0, 49).reduce((sum, n) => sum + n, 0)
   ok(s.kind === 'locked' && s.lessonsLeft === 49 && s.lessonsDone === 0 && s.lessonsNeeded === 49 && s.lessonsTotal === 61 && s.secondsLeft === shortest49 && shortest49 === 34787 && first49 === 55253 && s.nextLessonId === 'a1l01',
      'a new student: locked, 49 of the 61 needed, the 49 shortest 34,787 seconds long (the first 49 in course order, 55,253, until the review of 2026-10-26; 61 left and 75,575 seconds until the 80% rule), next a1l01', show(s))
-  const d0 = decideDiscountRequest(r(), IN_WINDOW)
+  const d0 = decideDiscountRequest(r(), IN_80)
   ok(!d0.grant && d0.error === 'You need 49 more videos to reach 80%, about 9.7 hours of video if you pick the shortest. Watch them before your deadline and apply again.',
      'and the route tells them so: the least they can watch, any 49 counting (about 15.3 hours, in course order, until the review)', d0.error)
   const allIds = req.map((l) => l.id)
-  ok(decideDiscountRequest(r({ completions: done(allIds) }), IN_WINDOW).grant === true, 'every counted video done: the route grants')
-  ok(decideDiscountRequest(r({ completions: done(allIds.slice(0, 48)) }), IN_WINDOW).grant === false, '48 of the 61: not granted, 1 more needed')
-  ok(decideDiscountRequest(r({ completions: done(allIds.slice(0, 49)) }), IN_WINDOW).grant === true, '49 of the 61: granted')
-  ok(decideDiscountRequest(r({ completions: done(allIds.filter((id) => id !== 'a4l17')) }), IN_WINDOW).grant === true,
+  ok(decideDiscountRequest(r({ completions: done(allIds) }), IN_80).grant === true, 'every counted video done: the route grants')
+  ok(decideDiscountRequest(r({ completions: done(allIds.slice(0, 48)) }), IN_80).grant === false, '48 of the 61: not granted, 1 more needed')
+  ok(decideDiscountRequest(r({ completions: done(allIds.slice(0, 49)) }), IN_80).grant === true, '49 of the 61: granted')
+  ok(decideDiscountRequest(r({ completions: done(allIds.filter((id) => id !== 'a4l17')) }), IN_80).grant === true,
      'all but the gate, 60 of 61: granted, the gate is one video among the 61 (refused until 2026-10-26)')
-  ok(decideDiscountRequest(r({ completions: done(allIds.slice(12)) }), IN_WINDOW).grant === true,
+  ok(decideDiscountRequest(r({ completions: done(allIds.slice(12)) }), IN_80).grant === true,
      'the last 49 in course order, the first 12 never opened: granted, any 49 count')
-  ok(decideDiscountRequest(r({ completions: done(allIds.slice(13).concat(catalog.lessons.slice(gateAt).map((l) => l.id))) }), IN_WINDOW).grant === false,
+  ok(decideDiscountRequest(r({ completions: done(allIds.slice(13).concat(catalog.lessons.slice(gateAt).map((l) => l.id))) }), IN_80).grant === false,
      'the last 48 up to the gate and the whole rest of the course: not granted, nothing past the gate counts')
 
   // T-080 over the real course: paid 2 October, every required video
-  // finished after the app is back and before the end of 23 October.
+  // finished after the app is back and before the end of 23 October. The
+  // shared deadline is before the 80% rule, so the window keeps every video
+  // (the owner's B, 2026-10-26).
   const OCT2 = okRead({ first_paid_at: '2026-10-02T10:00:00.000Z' })
   const oct2 = discountState({ now: new Date('2026-10-19T08:00:00Z'), firstPaidAt: '2026-10-02T10:00:00.000Z', lessons, videoDoneIds: new Set(), requests: [] })
-  ok(oct2.kind === 'locked' && oct2.lessonsLeft === 49 && oct2.lessonsTotal === 61 && oct2.window === 'shared' && oct2.endsAt === DISCOUNT_SHARED_DEADLINE,
-     'paid 2 October, on 19 October: 49 of the 61 needed, until the end of 23 October', show(oct2))
+  ok(oct2.kind === 'locked' && oct2.lessonsLeft === 61 && oct2.lessonsNeeded === 61 && oct2.lessonsTotal === 61 && oct2.window === 'shared' && oct2.endsAt === DISCOUNT_SHARED_DEADLINE,
+     'paid 2 October, on 19 October: every one of the 61 needed, until the end of 23 October (49 on the branch before the review of 2026-10-26)', show(oct2))
   const by21st = done(allIds, '2026-10-21T10:00:00.000Z')
   ok(decideDiscountRequest(r({ student: OCT2, completions: by21st }), new Date('2026-10-22T10:00:00Z')).grant === true,
      'all 61 finished by 21 October, applied on 22 October: granted')
@@ -967,12 +1006,15 @@ console.log('\n=== The real course: course_catalog.json + the development page\'
   const gateOn24th = okRead(allIds.map((lesson_id) => ({ lesson_id, completed_at: lesson_id === 'a4l17' ? '2026-10-23T22:00:00.000Z' : '2026-10-21T10:00:00.000Z' })))
   ok(decideDiscountRequest(r({ student: OCT2, completions: gateOn24th }), new Date('2026-10-23T22:00:00.000Z')).state === 'expired',
      'the gate (a4l17) finished at 00:00 on 24 October in Croatia: a request then is refused as expired')
-  ok(approvalVerdict(r({ student: OCT2, completions: gateOn24th }), new Date('2026-10-28T10:00:00Z'), '2026-10-23T21:00:00.000Z').ok,
-     'a request made at 23:00 that night, the other 60 done by the 21st: approved, 60 of 61 by the deadline is past the 80% (refused until 2026-10-26, "1 of 61 still missing")')
-  // The 49th video after the deadline: 48 by it, one short.
+  {
+    const v = approvalVerdict(r({ student: OCT2, completions: gateOn24th }), new Date('2026-10-28T10:00:00Z'), '2026-10-23T21:00:00.000Z')
+    ok(!v.ok && v.reason === 'locked' && v.error.endsWith('60 of 61 watched, 61 needed.'),
+       'a request made at 23:00 that night, the other 60 done by the 21st: refused, the window closed before 26 October asks for every video (the owner\'s B; approved on the branch before the review, the 80% reaching back to it)', v.error)
+  }
+  // The 49th video after the deadline: 48 by it.
   const ninthOn24th = okRead(allIds.slice(0, 49).map((lesson_id, i) => ({ lesson_id, completed_at: i === 48 ? '2026-10-23T22:00:00.000Z' : '2026-10-21T10:00:00.000Z' })))
   const late = approvalVerdict(r({ student: OCT2, completions: ninthOn24th }), new Date('2026-10-28T10:00:00Z'), '2026-10-23T21:00:00.000Z')
-  ok(!late.ok && late.error.endsWith('48 of 61 watched, 49 needed.'), 'the 49th video finished at 00:00 on 24 October: an approval refuses it, 48 of 61 by the deadline', late.error)
+  ok(!late.ok && late.error.endsWith('48 of 61 watched, 61 needed.'), 'the 49th video finished at 00:00 on 24 October: an approval refuses it, 48 of 61 by the deadline, every one needed', late.error)
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

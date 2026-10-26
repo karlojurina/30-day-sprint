@@ -418,8 +418,10 @@ console.log('\n=== The 30%: the team\'s own code, the coupon\'s row ===')
   const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/** The 30% code, and a button that copies it. */'))
   // Since the render review's second round "Check Whop again" stands there, and the reason is the map's sentence.
   // Since the owner's review (2026-10-21) a founder's or an admin's Approve anyway stands there too, naming the
-  // coupon it skips (admin-owner-review.test.mjs holds that round's rules); a csm still has no way past it.
-  ok(/\{coupon && \(\s*<button[\s\S]*?Check Whop again[\s\S]*?<\/button>\s*\)\}/.test(pending) && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending)
+  // coupon it skips (admin-owner-review.test.mjs holds that round's rules); a csm still has no way past it. Since the
+  // review of 2026-10-26 Check Whop again stands on the no-real-payment row too (`recheck`, the coupon's row among it).
+  ok(/const recheck = coupon \|\| verdict\.reason === "no-real-payment";/.test(pending)
+       && /\{recheck && \(\s*<button[\s\S]*?Check Whop again[\s\S]*?<\/button>\s*\)\}/.test(pending) && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button[\s\S]*?Approve\s*<\/Button>/.test(pending)
        && /const canOverride = canApproveAnyway && skip !== null;/.test(pending),
      'Applied, the coupon\'s verdict: no Approve; Approve anyway for a founder or an admin alone')
   ok(/variant=\{coupon \? "raised" : "ghost"\}/.test(pending) && /if \(opening && coupon && !reason\.trim\(\)\) setReason\(COUPON_REJECT_REASON\);/.test(pending),

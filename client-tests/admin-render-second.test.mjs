@@ -107,7 +107,9 @@ const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/
 // ── The 30%: Check Whop again ───────────────────────────────────────────────
 {
   // Since the owner's review (2026-10-21) a founder's or an admin's Approve anyway stands beside it (admin-owner-review.test.mjs).
-  ok(/\{coupon && \(\s*<button[\s\S]*?data-check-whop=""[\s\S]*?onCheck\(row\)[\s\S]*?\{busy === "check" \? "Checking Whop" : "Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
+  // Since the review of 2026-10-26 it stands on the no-real-payment row too (`recheck`, the coupon's row among it).
+  ok(/const recheck = coupon \|\| verdict\.reason === "no-real-payment";/.test(pending)
+       && /\{recheck && \(\s*<button[\s\S]*?data-check-whop=""[\s\S]*?onCheck\(row\)[\s\S]*?\{busy === "check" \? "Checking Whop" : "Check Whop again"\}\s*<\/button>\s*\)\}/.test(pending)
        && /\{!coupon && verdict\.ok && !canOverride && \(\s*<Button/.test(pending),
      'the coupon\'s row: "Check Whop again" in Approve\'s place ("Checking Whop" while Whop is asked), and still no Approve')
   ok(/data-check-whop=""\s*style=\{\{ \.\.\.SMALL_LINK, padding: "0 6px"/.test(pending), 'a small link, as Approve anyway is (SMALL_LINK: 13px words, a 44px target)')

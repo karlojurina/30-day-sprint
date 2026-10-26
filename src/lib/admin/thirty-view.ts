@@ -27,9 +27,12 @@
  * loaded after the request (after the switch, for one made before it) are
  * not counted, only videos done by the deadline count, and once the
  * deadline has passed the count says so (`countedByDeadline`). Since the 80%
- * rule (the owner, 2026-10-26) the row also says what the 80% needs
- * (`videosNeeded`, discount.ts videosNeeded of the videos counted), and the
- * verdict says yes exactly when the count reaches it.
+ * rule (the owner, 2026-10-26) the row also says what the window needs
+ * (`videosNeeded`, discount.ts videosNeededFor of the videos counted: 80% of
+ * them, and every one for a deadline before 26 October, the owner's B of the
+ * same day, `everyVideo`), and the verdict says yes exactly when the count
+ * reaches it. Until the review of that day a window that closed before 26
+ * October was judged by the 80% too, here and by Approve.
  *
  * Each row carries the student's Discord user id and the username on file
  * (the owner, 2026-10-26: "Copy Discord username or their ID"), for the
@@ -58,16 +61,19 @@
  */
 
 import {
+  DISCOUNT_EIGHTY_FROM,
   DISCOUNT_ELIGIBLE_FROM,
   DISCOUNT_SHARED_DEADLINE,
   DISCOUNT_VIDEO_SHARE,
   MEMBERSHIP_DISCOUNT_LINE,
+  closedBeforeEighty,
   discountEndsAt,
   discountState,
   discountWindow,
   requiredLessons,
   shortestSeconds,
   videosNeeded,
+  videosNeededFor,
 } from "@/lib/world/discount";
 import type { DiscountLesson, DiscountState, DiscountWindow } from "@/lib/world/discount";
 import {
@@ -117,12 +123,22 @@ export interface Facts {
   deadlinePassed: boolean;
   videosDone: number | null;
   videosTotal: number | null;
-  /** What the 80% needs of videosTotal (discount.ts videosNeeded): the verdict says yes from there. */
+  /**
+   * What the window needs of videosTotal (discount.ts videosNeededFor): the
+   * 80% (videosNeeded), or all of them for a deadline before 26 October
+   * (`everyVideo`). The verdict says yes from there.
+   */
   videosNeeded: number | null;
+  /**
+   * The deadline is before the 80% rule (discount.ts closedBeforeEighty), so
+   * the window asks for every video (the owner's B, 2026-10-26): the verdict
+   * and the count line say so. False with no deadline.
+   */
+  everyVideo: boolean;
   /** Only videos done by the deadline are counted, and the deadline has passed: show the count as "done by the deadline". */
   countedByDeadline: boolean;
   /**
-   * The length of the videos the 80% still needs, the shortest of those not
+   * The length of the videos the window still needs, the shortest of those not
    * watched, in seconds (discount.ts shortestSeconds, as the locked state's
    * secondsLeft); 0 once it is met or when one has no known length. Every
    * video not watched until the 80% rule, then the next ones in course order
@@ -241,6 +257,8 @@ export interface ThirtyView {
 const ELIGIBLE_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
 
 const SHARE = `${DISCOUNT_VIDEO_SHARE}%`;
+/** "Mon 26 Oct": the first day of the 80% rule, in Croatia. */
+const EIGHTY_DAY = dayLabel(DISCOUNT_EIGHTY_FROM);
 
 /**
  * The sentences the page shows for a verdict. Plain words, no em dash: the
@@ -248,12 +266,17 @@ const SHARE = `${DISCOUNT_VIDEO_SHARE}%`;
  * not yet name the 80% ("Every video up to the checkpoint" until then), and no
  * first payment on file is a no: since the first-paid fix it means no real
  * payment, and the owner's rule gives no 30% without one (it said "the rule
- * cannot judge this request").
+ * cannot judge this request"). A deadline before 26 October keeps every video
+ * (the owner's B, 2026-10-26; Facts.everyVideo), so its yes and its not yet
+ * say every video, as they did before the 80% rule.
  */
 export const VERDICT_TEXT = {
   yes: `At least ${SHARE} of the videos up to the checkpoint were watched in time.`,
   lockedOpen: `Fewer than ${SHARE} of the videos up to the checkpoint are watched so far.`,
   lockedClosed: `Fewer than ${SHARE} of the videos up to the checkpoint were watched by the deadline.`,
+  yesEvery: "Every video up to the checkpoint was watched in time.",
+  lockedOpenEvery: "Not every video up to the checkpoint is watched so far.",
+  lockedClosedEvery: "Not every video up to the checkpoint was watched by the deadline.",
   beforeLaunch: `The first payment was before ${ELIGIBLE_DAY}, so this student cannot earn the 30%.`,
   noPayment: "There is no real payment on file for this student, and the 30% needs one.",
   // The stored coupon row: Whop shows no real payment, though first_paid_at may be filled (the review of 2026-10-26).
@@ -271,16 +294,20 @@ export const VERDICT_TEXT = {
 /**
  * A pending row's video line (the 80% rule, 2026-10-26): how many of the
  * videos up to the checkpoint were watched ("48 of 61 videos", with "by the
- * deadline" once it has passed), what the 80% needs ("49 needed for 80%",
- * what the verdict judged against), and, when the rule says not yet, that the
- * student's Whop progress is not in since the switch. Empty beside the
- * coupon's verdict and when the progress could not be read.
+ * deadline" once it has passed), what the window needs ("49 needed for 80%",
+ * what the verdict judged against; for a deadline before 26 October "61
+ * needed, every video for a deadline before Mon 26 Oct", the owner's B), and,
+ * when the rule says not yet, that the student's Whop progress is not in
+ * since the switch. Empty beside the coupon's verdict and when the progress
+ * could not be read.
  */
 export function videoLine(row: Pick<ThirtyRequestRow, "facts" | "student">, verdict: Pick<Verdict, "reason">): string[] {
   const f = row.facts;
   if (verdict.reason === "has-discount" || !f || f.videosDone == null || f.videosTotal == null) return [];
   const out = [`${f.videosDone} of ${f.videosTotal} videos${f.countedByDeadline ? " by the deadline" : ""}`];
-  if (f.videosNeeded != null) out.push(`${f.videosNeeded} needed for ${SHARE}`);
+  if (f.videosNeeded != null) {
+    out.push(f.everyVideo ? `${f.videosNeeded} needed, every video for a deadline before ${EIGHTY_DAY}` : `${f.videosNeeded} needed for ${SHARE}`);
+  }
   if (verdict.reason === "locked" && !row.student.whopPulled) out.push("Whop progress not pulled since the switch");
   return out;
 }
@@ -297,6 +324,12 @@ export const NO_USERNAME = "No username on file for this student.";
 export const USERNAME_TIP = "The username on file. It can be the student's Whop username, and on Discord that name may belong to someone else.";
 /** In the two buttons' place when neither is on file: a phone shows no tip. */
 export const NO_DISCORD_LINE = "No Discord ID or username on file.";
+/**
+ * Beside Copy username when no Discord ID is on file (the review of
+ * 2026-10-26: USERNAME_TIP is a hover tip, which a phone never shows, and
+ * with no ID the username is what the team would search Discord by).
+ */
+export const USERNAME_NOTE = "This username may be their Whop one.";
 
 /** What a copy button copies, or (`unavailable`) why it has nothing to copy. */
 export interface CopyTarget {
@@ -316,11 +349,14 @@ export interface CopyTarget {
  * Discord, and its tip says why (USERNAME_TIP; it was "Copy @" until the
  * review of the same day). One with nothing on file is greyed and its tip
  * says so; with neither, `none` is the line the page shows in their place.
+ * With a username and no Discord ID, `note` is a short line the page shows
+ * beside them (USERNAME_NOTE), since a phone shows no tip.
  */
 export function studentCopies(student: Pick<StudentBrief, "username" | "discordId">): {
   id: CopyTarget;
   username: CopyTarget;
   none: string | null;
+  note: string | null;
 } {
   const handle = bareUsername(student.username);
   const id = student.discordId?.trim() || null;
@@ -330,6 +366,7 @@ export function studentCopies(student: Pick<StudentBrief, "username" | "discordI
       ? { text: `@${handle}`, unavailable: null, tip: USERNAME_TIP }
       : { text: "", unavailable: NO_USERNAME, tip: null },
     none: !id && !handle ? NO_DISCORD_LINE : null,
+    note: !id && handle ? USERNAME_NOTE : null,
   };
 }
 
@@ -458,6 +495,7 @@ function factsWithoutProgress(firstPaidAt: string | null, now: Date): Facts {
     videosDone: null,
     videosTotal: null,
     videosNeeded: null,
+    everyVideo: deadline != null && closedBeforeEighty(deadline),
     countedByDeadline: false,
     secondsLeft: null,
   };
@@ -465,8 +503,9 @@ function factsWithoutProgress(firstPaidAt: string | null, now: Date): Facts {
 
 /**
  * The counts over the lessons the offer counts (`lessons`, as discount.ts
- * reads them) and the videos `done`, with what the 80% needs of them
- * (videosNeeded, the rule's own number).
+ * reads them) and the videos `done`, with what the window needs of them
+ * (videosNeededFor at the student's deadline, the rule's own number: the 80%,
+ * or every video for a deadline before 26 October; the 80% with no window).
  */
 function countFacts(
   firstPaidAt: string | null,
@@ -477,7 +516,8 @@ function countFacts(
 ): Facts {
   const required = requiredLessons(lessons);
   const left = required.filter((l) => !done.has(l.id));
-  const needed = videosNeeded(required.length);
+  const endsAt = discountEndsAt(firstPaidAt);
+  const needed = endsAt ? videosNeededFor(required.length, endsAt) : videosNeeded(required.length);
   const short = Math.max(0, needed - (required.length - left.length));
   return {
     ...factsWithoutProgress(firstPaidAt, now),
@@ -511,7 +551,7 @@ export function studentAppView(reads: DiscountReads, now: Date): { state: Discou
  * a request made before it) left out, and the videos done by the deadline.
  * These lines repeat approvalVerdict's own (discount-server.ts); the test
  * fails if the two ever part, because the verdict must say yes exactly when
- * this count reaches what the 80% needs (videosNeeded).
+ * this count reaches what the window needs (videosNeededFor).
  */
 function judgedFacts(f: DiscountFacts, videos: readonly VideoRow[], now: Date, askedAt: string, resetAt: string | null): Facts {
   const asked = Date.parse(askedAt);
@@ -528,11 +568,18 @@ function judgedFacts(f: DiscountFacts, videos: readonly VideoRow[], now: Date, a
   return countFacts(f.firstPaidAt, lessons, done, now, endsAt != null && now.getTime() > endsAt.getTime());
 }
 
-function refusalText(reason: VerdictReason, oldCourse: boolean, deadlinePassed: boolean): string {
+function refusalText(reason: VerdictReason, oldCourse: boolean, facts: Pick<Facts, "deadlinePassed" | "everyVideo">): string {
   let text: string;
   switch (reason) {
     case "locked":
-      text = deadlinePassed ? VERDICT_TEXT.lockedClosed : VERDICT_TEXT.lockedOpen;
+      // A deadline before 26 October asks for every video (the owner's B): said as before the 80% rule.
+      text = facts.everyVideo
+        ? facts.deadlinePassed
+          ? VERDICT_TEXT.lockedClosedEvery
+          : VERDICT_TEXT.lockedOpenEvery
+        : facts.deadlinePassed
+          ? VERDICT_TEXT.lockedClosed
+          : VERDICT_TEXT.lockedOpen;
       break;
     case "no-gate":
       if (oldCourse) return VERDICT_TEXT.oldCourseNoGate;
@@ -560,14 +607,14 @@ function refusalText(reason: VerdictReason, oldCourse: boolean, deadlinePassed: 
 }
 
 /** The approve route's answer as the page shows it. */
-function toVerdict(raw: ApprovalVerdict, explained: ApprovalVerdict, deadlinePassed: boolean): Verdict {
-  if (explained.ok) return { ok: true, reason: null, text: VERDICT_TEXT.yes, oldCourse: false };
+function toVerdict(raw: ApprovalVerdict, explained: ApprovalVerdict, facts: Pick<Facts, "deadlinePassed" | "everyVideo">): Verdict {
+  if (explained.ok) return { ok: true, reason: null, text: facts.everyVideo ? VERDICT_TEXT.yesEvery : VERDICT_TEXT.yes, oldCourse: false };
   if (explained.status === 500) {
     return { ok: false, reason: "read-failed", text: VERDICT_TEXT.readFailed, oldCourse: false };
   }
   const oldCourse = !raw.ok && explained.error !== raw.error;
   const reason: VerdictReason = explained.reason ?? "unknown";
-  return { ok: false, reason, text: refusalText(reason, oldCourse, deadlinePassed), oldCourse };
+  return { ok: false, reason, text: refusalText(reason, oldCourse, facts), oldCourse };
 }
 
 /**
@@ -588,7 +635,7 @@ export function judgeRequest(
   const facts = f.ok
     ? judgedFacts(f.facts, reads.videos.data!, now, request.created_at, resetAt)
     : factsWithoutProgress(reads.student.data?.first_paid_at ?? null, now);
-  return { verdict: toVerdict(raw, explained, facts.deadlinePassed), facts };
+  return { verdict: toVerdict(raw, explained, facts), facts };
 }
 
 /** The verdict for a student whose membership already has a discount on its next renewal: the approve route's words. */

@@ -116,12 +116,13 @@ function freshDb() {
     lesson_videos: Object.keys(lengths).map((lesson_id) => ({ lesson_id, created_at: LOADED, tella_video_id: `tella-${lesson_id}` })),
     students: [
       // Every video done, a request waiting, the ads never ticked: Approve would approve it
-      // (no ads check since 2026-10-20, the owner's decision).
-      person('s-yes', 'Ana Example', '2026-10-02T10:00:00.000Z', {
+      // (no ads check since 2026-10-20, the owner's decision). Ana and Bo first paid on 15 and 16 October, so their
+      // windows end after the 80% rule began (a deadline before 26 October keeps every video, the owner's B).
+      person('s-yes', 'Ana Example', '2026-10-15T10:00:00.000Z', {
         ad_submissions_verified: false, discord_user_id: '100000000000000001', discord_username: 'ana.example', whop_membership_id: 'mem_devAna',
       }),
       // 45 of the videos, a request waiting: not yet (the 80% needs 49 of the 61 since 2026-10-26; 50 until then).
-      person('s-earn', 'Bo Example', '2026-10-03T10:00:00.000Z', { discord_username: 'bo.example' }),
+      person('s-earn', 'Bo Example', '2026-10-16T10:00:00.000Z', { discord_username: 'bo.example' }),
       // A first payment before 1 October, a request waiting.
       person('s-old', 'Ed Example', '2026-09-20T10:00:00.000Z'),
       // The student who signs in: nothing watched yet.

@@ -62,7 +62,11 @@
  * The page's clock is FIXTURE_NOW, so every date reads the same on every run.
  *
  * The 80% rule (the owner, 2026-10-26: 49 of the 61 videos): Jonah has
- * watched 49, the least that meets it, and Priya 48, one short. Copy Discord
+ * watched 49, the least that meets it, and Priya 48, one short; their windows
+ * end after the rule began (26 and 27 October). The other windows end before
+ * it, the shared one among them, so they keep every video (the owner's B of
+ * the same day): Maya's yes and Sofia's not yet say every video, with "61
+ * needed, every video for a deadline before Mon 26 Oct". Copy Discord
  * ID and Copy username (the same day; "Copy ID" and "Copy @" until its
  * review): Maya has both an id and a username, Hugo a username only, Leo and
  * Omar an id only, Priya neither (her row says so in a line), and Lena's
@@ -175,8 +179,9 @@ const USED_UP: Membership = { code: "welcome50", renewal: 97, plan: 97 };
 /** No code: the cron read the membership and found nothing. */
 const CLEAN: Membership = { code: null, renewal: 97, plan: 97 };
 /**
- * Whop shows no real payment (the review of 2026-10-26): no course membership with a price and no paid course
- * payment, which the rule stores as a row with no code and no price (membership-discount.ts rowShowsNoRealPayment).
+ * Whop shows no real payment (the review of 2026-10-26): no course membership renewing above 0 and no paid course
+ * payment, which the rule stores as a row with no code and no price (membership-discount.ts rowShowsNoRealPayment),
+ * naming the membership on file, so it counts while that stays on file (storedRowApplies), as couponRow stores it.
  */
 const NO_PAYMENT: Membership = { code: null, renewal: null, plan: null };
 
@@ -187,8 +192,9 @@ function fullDb(): FixtureDb {
       { id: "p-maya", name: "Maya Lindqvist", username: "maya.lq", discordId: "100000000000000101", paid: "2026-10-01T09:00:00.000Z", done: 61, stored: USED_UP },
       // Applied: 49 of the 61 watched, the least the 80% takes (2026-10-26).
       { id: "p-jonah", name: "Jonah Pereira", username: "jonah_p", discordId: "100000000000000102", paid: "2026-10-12T15:00:00.000Z", done: 49, doneAt: "2026-10-19T20:00:00.000Z", stored: CLEAN },
-      // Applied: 48 of the 61, one short of the 80%, payment failed, no Whop backfill since the switch; no Discord on file.
-      { id: "p-priya", name: "Priya Raman", status: "past_due", paid: "2026-10-03T08:00:00.000Z", done: 48, synced: "2026-10-18T10:00:00.000Z", stored: CLEAN },
+      // Applied: 48 of the 61, one short of the 80% (her window ends 27 October), payment failed, no Whop backfill since
+      // the switch; no Discord on file.
+      { id: "p-priya", name: "Priya Raman", status: "past_due", paid: "2026-10-13T08:00:00.000Z", done: 48, synced: "2026-10-18T10:00:00.000Z", stored: CLEAN },
       // Applied: asked on the old course, before the switch.
       { id: "p-sofia", name: "Sofia Marin", username: "sofia.marin", discordId: "100000000000000104", paid: "2026-10-05T10:00:00.000Z", done: 40, stored: CLEAN },
       // Applied: first payment before 1 October; canceled, so the cron never checked the coupon. A Discord id, no username.
@@ -612,7 +618,7 @@ export function fixtureThirtyTransport(opts: {
 
     checkCoupon(id) {
       calls.push({ name: "checkCoupon", args: [id] });
-      type Checked = { discounted: boolean; code: string | null };
+      type Checked = { discounted: boolean; code: string | null; noRealPayment: boolean };
       const a = ask(id);
       const p = a ? person(a.studentId) : undefined;
       if (!a || !p) return later<Checked>(notFound);
@@ -624,7 +630,11 @@ export function fixtureThirtyTransport(opts: {
       const now = p.live ?? p.stored ?? CLEAN;
       p.stored = now;
       const row = couponRow(p, now, at());
-      return later<Checked>({ ok: true, status: 200, data: { discounted: row.discounted, code: row.promo_code ?? row.promo_code_id } });
+      return later<Checked>({
+        ok: true,
+        status: 200,
+        data: { discounted: row.discounted, code: row.promo_code ?? row.promo_code_id, noRealPayment: !row.discounted && rowShowsNoRealPayment(row) },
+      });
     },
   };
 }

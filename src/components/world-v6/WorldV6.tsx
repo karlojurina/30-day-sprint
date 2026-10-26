@@ -33,7 +33,7 @@ import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
 import { DISCOUNT_PERCENT, MEMBERSHIP_DISCOUNT_LINE } from "@/lib/world/discount";
 import { renewalStillAhead } from "@/lib/world/celebrations";
-import { checkpointCounts, checkpointView, discountRule, expiredRuleLine, shortDate, type CheckpointView } from "./checkpointView";
+import { checkpointCounts, checkpointView, discountRule, expiredRuleLine, liveRuleLine, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
 import { TuningPanel } from "./TuningPanel";
@@ -4226,10 +4226,15 @@ function BountyBody({
  * within 2 weeks of joining to apply." (checkpointView.ts discountRule; it
  * said "Finish every video" until then), the same words for
  * every student, said while locked and with no first payment on record, and
- * after "This closed on ..." or "Your 2 weeks have passed." where it is closed.
+ * after "This closed on ..." where it is closed.
  * A window that closed before the 80% rule reads the rule it had, "The 30%
  * was for finishing every video through Video Ads II within 2 weeks of
- * joining." (checkpointView.ts expiredRuleLine, the review of 2026-10-26).
+ * joining." (checkpointView.ts expiredRuleLine, the review of 2026-10-26),
+ * and a first payment before 1 October reads "Your 2 weeks have passed."
+ * alone (the owner's B of 2026-10-26: the map never tells a window the 80%
+ * rule it did not have). A window that ends before the 80% rule asks for
+ * every video, so while open, which only a clock before 26 October can show,
+ * it reads that rule (liveRuleLine) beside its counts.
  * T-080's shared deadline (a first payment from 1 October until the launch:
  * the end of 23 October in Croatia, st.window "shared") is unchanged and
  * reaches those students as the date in "Apply by" and, once it has passed,
@@ -4321,8 +4326,9 @@ function CheckpointBody({
           </span>
           {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
         </p>
-        <p className={s.desc}>{rule.open}</p>
-        {/* The bar fills to the 80%: full when Apply turns on. */}
+        {/* The window's rule: the 80% (every video for a window that ends before 26 October, checkpointView.ts liveRuleLine). */}
+        <p className={s.desc}>{liveRuleLine(st, after)}</p>
+        {/* The bar fills to what is needed: full when Apply turns on. */}
         <div className={s.cpBar} aria-hidden="true">
           <i style={{ transform: `scaleX(${counts.fill})` }} />
         </div>
@@ -4344,7 +4350,7 @@ function CheckpointBody({
           </span>
           {cv.left && <span className={s.cpLeft}>{cv.left}</span>}
         </p>
-        <p className={s.desc}>{rule.ready}</p>
+        <p className={s.desc}>{liveRuleLine(st, after)}</p>
         {applyButton}
         {error && (
           <p className={s.cpError} role="alert">

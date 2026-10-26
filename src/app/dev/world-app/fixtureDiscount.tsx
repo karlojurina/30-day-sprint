@@ -64,7 +64,11 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            the app reopens), so on any day the panel reads
  *                            "5 days left" and, in Croatia, "Apply by Fri 23
  *                            Oct, 23:59" (the hour is the browser's own time
- *                            zone: 17:59 in New York, Sat 24 Oct in Manila)
+ *                            zone: 17:59 in New York, Sat 24 Oct in Manila).
+ *                            The window ends before the 80% rule, so it asks
+ *                            for every video (the owner's B, 2026-10-26), and
+ *                            its line and counts say so (checkpointView.ts
+ *                            liveRuleLine)
  *   ?discount=october-expired  the same student on 24 October, 10:00 in
  *                            Croatia: the shared deadline has passed, before
  *                            the 80% rule, so the panel reads the rule that

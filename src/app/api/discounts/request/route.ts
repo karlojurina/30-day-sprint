@@ -47,8 +47,8 @@ import {
  * Try again in a minute." (membershipUncheckedRefusal, a 503); the request
  * used to go through and leave the coupon to the approve route.
  * Since 2026-10-26 a no coupon that says Whop shows no real payment from the
- * student (the check's noRealPayment: no course membership with a price and
- * no real course payment, the owner's applicant who "never paid") is refused
+ * student (the check's noRealPayment: no course membership renewing above 0
+ * and no real course payment, the owner's applicant who "never paid") is refused
  * too, nothing written, in the map's sentence for no first payment
  * (noRealPaymentRefusal, a 400): their first_paid_at can be filled from
  * before the first-paid fix, so the rule's own "no-payment" missed them.

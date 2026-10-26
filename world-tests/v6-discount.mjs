@@ -144,11 +144,14 @@
  *      9 September until Lovro moved it on 2026-10-19; ?discount=october, a
  *      first payment on 2 October, this student's clock held at 19 October,
  *      10:00 in Croatia): in Croatia the panel says "Apply by Fri 23 Oct, 23:59"
- *      and "5 days left", and the rule in the one line every student reads
- *      (since 2026-10-20 no sentence about the shared group); Apply
- *      greyed out. On the phone's sheet in New York it says "Fri 23 Oct,
- *      17:59" and in Manila "Sat 24 Oct, 05:59": every deadline carries its
- *      hour in the student's own time zone (checkpointView.ts deadlineAt)
+ *      and "5 days left", and the rule in one line (since 2026-10-20 no
+ *      sentence about the shared group); the shared deadline is before the
+ *      80% rule, so the window asks for every video (the owner's B,
+ *      2026-10-26) and the line and the counts say so, "Finish every video
+ *      ..." and "61 of 61 needed"; Apply greyed out. On the phone's sheet in
+ *      New York it says "Fri 23 Oct, 17:59" and in Manila "Sat 24 Oct,
+ *      05:59": every deadline carries its hour in the student's own time zone
+ *      (checkpointView.ts deadlineAt)
  *  25  the same student on 24 October (?discount=october-expired): no
  *      chip, the tag and the marker closed, and the panel says "This closed
  *      on Fri 23 Oct, 23:59." and then the rule that window had, "The 30% was
@@ -166,9 +169,10 @@
  *  27  a first payment on 15 September (?discount=september), in the shared
  *      group until the first date moved to 1 October (2026-10-19): no chip,
  *      the tag and the marker closed, and the panel says "Your 2 weeks have
- *      passed." and then the rule, with no date (until 2026-10-20 it named
- *      1 October 2026, Croatia time), in the closed look; no Apply. The
- *      phone's sheet says the same
+ *      passed." alone, with no date (until 2026-10-20 it named 1 October
+ *      2026, Croatia time) and no rule (the review of 2026-10-26: those 2
+ *      weeks ended before the 80% rule, and it went on with the 80% line), in
+ *      the closed look; no Apply. The phone's sheet says the same
  *  28  admin rebuild 2, D5 (?discount=has-discount): every video watched,
  *      and the Whop membership already has a discount on its next renewal.
  *      No chip, the tag and the marker closed; a real click on the tag opens
@@ -913,7 +917,8 @@ try {
       // Since 2026-10-26 the rule is 80% of the videos ("finishing every video" until then). The expired preset's window
       // closes after the 80% rule began (fixtureDiscount.tsx), so it reads the rule as it stands; row 25's closed before.
       ['expired', 'Closed', 'closed', /This closed on \w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./],
-      ['before-launch', 'Closed', 'closed', /Your 2 weeks have passed\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./],
+      // The review of 2026-10-26: those 2 weeks ended before the 80% rule, so no rule is named after it (it went on with the 80% line).
+      ['before-launch', 'Closed', 'closed', /Your 2 weeks have passed\.(?! The 30%)/],
       // Maybe a new student whose payment has not reached the app: the word is what the panel asks, in the open look.
       ['no-payment', 'Ask the team', 'locked', /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\. We can't see your first payment yet\. Tell the team and they'll sort it out\./],
     ]) {
@@ -1544,9 +1549,10 @@ try {
     const counts = /(\d+) of (\d+) needed/.exec(text)
     const [needed, total] = [Number(counts?.[1]), Number(counts?.[2])]
     // Until 2026-10-20 it also said "Everyone who joined from 1 October until the new course opened has this same deadline."
-    r.check('it says the rule in the one line every student reads, with no sentence about the shared group', total > 0 && /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\./.test(text) && !/Everyone who joined|same deadline|until the new course opened/.test(text), text)
+    // The shared deadline is before the 80% rule, so this window asks for every video (the owner's B, 2026-10-26).
+    r.check('it says the rule in one line, every video (the window ends before the 80% rule), with no sentence about the shared group', total > 0 && /Finish every video through Video Ads II within 2 weeks of joining to apply\./.test(text) && !/80%/.test(text) && !/Everyone who joined|same deadline|until the new course opened/.test(text), text)
     const a = await page.evaluate(APPLY)
-    r.check('Apply is there, greyed out with its reason', a?.ariaDisabled === 'true' && a.title === `Watch ${needed} of ${total} videos to apply` && needed === Math.ceil(total * 0.8), a)
+    r.check('Apply is there, greyed out with its reason, every video needed', a?.ariaDisabled === 'true' && a.title === `Watch ${needed} of ${total} videos to apply` && needed === total, a)
     await page.screenshot({ path: path.join(OUT, 'panel-october.png') })
     await page.close()
     // The same deadline in other time zones, on the phone's sheet: the date and the hour are the student's own (east of
@@ -1557,7 +1563,7 @@ try {
       ['Asia/Manila', 'Sat 24 Oct, 05:59', null],
     ]) {
       const p = await phoneSheet(r, 'october', tz, file)
-      r.check(`phone, ${tz}: "Apply by ${when}", 5 days left, the rule's one line, Apply greyed out`, p.text?.includes(`Apply by ${when}`) && /5 days left/.test(p.text) && /Watch 80% of the videos through Video Ads II within 2 weeks of joining to apply\./.test(p.text) && p.apply?.ariaDisabled === 'true', p)
+      r.check(`phone, ${tz}: "Apply by ${when}", 5 days left, the rule's one line, Apply greyed out`, p.text?.includes(`Apply by ${when}`) && /5 days left/.test(p.text) && /Finish every video through Video Ads II within 2 weeks of joining to apply\./.test(p.text) && p.apply?.ariaDisabled === 'true', p)
     }
   })
 
@@ -1614,8 +1620,9 @@ try {
 
   // Lovro's preview review (2026-10-19): the first date moved from 9 September to 1 October, so a September joiner,
   // who had the shared deadline until then, is now outside the offer.
-  await runRow(27, "september (a first payment on 15 September): outside the offer since the first date moved to 1 October; no chip; the tag and the marker closed; the panel says the student's 2 weeks have passed, then the rule; no Apply", async (r) => {
-    const WORDS = /Your 2 weeks have passed\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./
+  await runRow(27, "september (a first payment on 15 September): outside the offer since the first date moved to 1 October; no chip; the tag and the marker closed; the panel says the student's 2 weeks have passed, and no rule; no Apply", async (r) => {
+    // The review of 2026-10-26: those 2 weeks ended before the 80% rule, so the line names no rule (it went on with the 80% line).
+    const WORDS = /Your 2 weeks have passed\.(?! The 30%)/
     const page = await r.open({ discount: 'september' }, '', DESKTOP, ZAGREB)
     let s = await page.evaluate(SNAP)
     r.check('no chip in the header', s.chip === null && s.chipState === null, { chip: s.chip, chipState: s.chipState })
@@ -1625,7 +1632,7 @@ try {
     await parked(page, 'row 27')
     s = await page.evaluate(SNAP)
     r.check('a real click on the tag opens the panel, the camera parked at the cache', via === 'mouse' && s.panel?.title === '30% off your next month' && s.park?.id === 'checkpoint', { via, panel: s.panel?.title, park: s.park })
-    r.check('in Croatia it says the student\'s 2 weeks have passed, then the rule (no deadline, no days left, no date)', WORDS.test(s.panel?.text ?? '') && !/Apply by|days left|September|October|Croatia/.test(s.panel?.text ?? ''), s.panel?.text)
+    r.check('in Croatia it says the student\'s 2 weeks have passed, and no rule (no 80%, no deadline, no days left, no date)', WORDS.test(s.panel?.text ?? '') && !/80%|Apply by|days left|September|October|Croatia/.test(s.panel?.text ?? ''), s.panel?.text)
     const eyebrow = await page.evaluate(EYEBROW)
     r.check('its eyebrow ends "Closed"', eyebrow?.at(-1) === 'Closed', eyebrow)
     r.check('no Apply', (await page.evaluate(FIND.apply)) === null)
@@ -1634,7 +1641,7 @@ try {
     await page.screenshot({ path: path.join(OUT, 'panel-september.png') })
     await page.close()
     const p = await phoneSheet(r, 'september', ZAGREB, 'phone-sheet-september.png')
-    r.check('phone: the sheet says the same, no Apply', WORDS.test(p.text ?? '') && p.apply === null, p)
+    r.check('phone: the sheet says the same, no Apply', WORDS.test(p.text ?? '') && !/80%/.test(p.text ?? '') && p.apply === null, p)
   })
 
   // Admin rebuild 2, D5: the student's Whop membership already has a discount on its next renewal (the stored flag

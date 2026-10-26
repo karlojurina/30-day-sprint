@@ -9,10 +9,11 @@
  *   decideDiscountRequest  POST /api/discounts/request and
  *                          POST /api/discounts/submit-feedback: grant only on
  *                          `ready`
- *   approvalVerdict        POST /api/discounts/approve: were 80% of the
- *                          videos done by the student's deadline (discount.ts
- *                          videosNeeded), and could the app's Apply have made
- *                          the request
+ *   approvalVerdict        POST /api/discounts/approve: were the videos the
+ *                          window asks for done by the student's deadline
+ *                          (discount.ts videosNeededFor: 80% of them, every
+ *                          one for a deadline before 26 October), and could
+ *                          the app's Apply have made the request
  *   secondPendingRequest   both routes that write a request, on either course:
  *                          a double submit the database refused (v106)
  *   SAVE_FAILED            those routes' answer to any other failed write
@@ -39,12 +40,14 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import {
+  DISCOUNT_EIGHTY_FROM,
   DISCOUNT_ELIGIBLE_FROM,
   DISCOUNT_PERCENT,
   DISCOUNT_SHARED_DEADLINE,
   DISCOUNT_VIDEO_SHARE,
   DISCOUNT_WINDOW_DAYS,
   MEMBERSHIP_DISCOUNT_LINE,
+  closedBeforeEighty,
   discountEndsAt,
   discountState,
   requestCounts,
@@ -218,12 +221,26 @@ const SHARED_DEADLINE_DAY = new Date(DISCOUNT_SHARED_DEADLINE).toLocaleDateStrin
   day: "numeric",
   timeZone: "Europe/Zagreb",
 });
+/** "October 26": the first day of the 80% rule; a deadline before it keeps every video (discount.ts videosNeededFor). */
+const EIGHTY_DAY = new Date(DISCOUNT_EIGHTY_FROM).toLocaleDateString("en-US", {
+  month: "long",
+  day: "numeric",
+  timeZone: "Europe/Zagreb",
+});
 
-/** "about 3.5 hours of video", "about 40 minutes of video", or "" for nothing known. */
+/**
+ * "about 3.5 hours of video", "about 1 hour of video", "about 40 minutes of
+ * video", "about 1 minute of video", or "" for nothing known. One is said in
+ * the singular (the review of 2026-10-26: "about 1 minutes" could be read).
+ */
 function videoTime(seconds: number): string {
   if (seconds <= 0) return "";
-  if (seconds < 3600) return `about ${Math.max(1, Math.round(seconds / 60))} minutes of video`;
-  return `about ${Math.round(seconds / 360) / 10} hours of video`;
+  if (seconds < 3600) {
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    return `about ${minutes} ${minutes === 1 ? "minute" : "minutes"} of video`;
+  }
+  const hours = Math.round(seconds / 360) / 10;
+  return `about ${hours} ${hours === 1 ? "hour" : "hours"} of video`;
 }
 
 /** What a student with a request in review reads when they apply again. */
@@ -270,13 +287,22 @@ export function secondPendingRequest(
  * of them counts: "if you pick the shortest". With a length not known there
  * is no time. Until the review of the same day the time was the next ones in
  * course order, and until the rule it was every video left ("You have 3
- * videos left to watch").
+ * videos left to watch"). A window that ends before the 80% rule still asks
+ * for every video (discount.ts videosNeededFor, the owner's B), so a locked
+ * state of one, which only a clock before 26 October can see, reads those
+ * words: every video left is needed, so the time is all of them.
  */
 export function discountRefusalMessage(state: DiscountState): string {
   switch (state.kind) {
     case "locked": {
       const n = state.lessonsLeft;
       const time = videoTime(state.secondsLeft);
+      if (closedBeforeEighty(state.endsAt)) {
+        return (
+          `You have ${n} ${n === 1 ? "video" : "videos"} left to watch${time ? `, ${time}` : ""}. ` +
+          `Finish ${n === 1 ? "it" : "them"} before your deadline and apply again.`
+        );
+      }
       return (
         `You need ${n} more ${n === 1 ? "video" : "videos"} to reach ${DISCOUNT_VIDEO_SHARE}%${time ? `, ${time} if you pick the shortest` : ""}. ` +
         `Watch ${n === 1 ? "it" : "them"} before your deadline and apply again.`
@@ -315,8 +341,9 @@ export type RequestDecision =
 
 /**
  * POST /api/discounts/request and POST /api/discounts/submit-feedback on the
- * new course: grant only when discount.ts says `ready`, which needs 80% of the
- * videos (videosNeeded) inside an open window. A student with no first
+ * new course: grant only when discount.ts says `ready`, which needs what the
+ * window asks of the videos (videosNeededFor: 80% of them for every window
+ * open today) inside an open window. A student with no first
  * payment on file has no window (discountWindow: "no-payment"; since the
  * first-paid fix of 2026-10-20 an empty first_paid_at means no real payment),
  * so is never ready: refused before anything is written, in the map's own
@@ -390,7 +417,7 @@ export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: 
  * Both request routes on the new course, once decideDiscountRequest has
  * granted and the coupon check found no coupon: Whop shows no real payment
  * from the student (checkMembershipDiscount's noRealPayment: no course
- * membership with a price answered and no real course payment, Whop's
+ * membership renewing above 0 answered and no real course payment, Whop's
  * answer now or the one this rule stored). The owner, 2026-10-26, of an applicant: "by his
  * username, he never had a membership. I see one payment, but it has failed
  * ... he watched the course even though he never paid." Such a student can
@@ -522,8 +549,11 @@ function madeOutsideApply(
 
 /**
  * POST /api/discounts/approve on the new course: the request route's rule,
- * judged at the end of the window. 80% of the videos it counts (discount.ts
- * videosNeeded, through discountState; every one of them until 2026-10-26)
+ * judged at the end of the window. What the window asks of the videos it
+ * counts (discount.ts videosNeededFor, through discountState: 80% of them,
+ * and every one for a window that ended before the 80% rule, the owner's B of
+ * 2026-10-26; the branch before the review of that day judged those by the
+ * 80% too, which reached back to windows the owner keeps closed)
  * must have been done by the student's deadline (14 days from a first payment
  * made on or after the launch, the end of 23 October for one from 1 October
  * until the launch: discount.ts discountWindow), so a request may be approved
@@ -604,12 +634,15 @@ export function approvalVerdict(
         state.window === "shared"
           ? `by the end of ${SHARED_DEADLINE_DAY} (Croatia time), the deadline for a first payment before the launch`
           : `inside the ${DISCOUNT_WINDOW_DAYS} days`;
+      const counts = `${state.lessonsDone} of ${state.lessonsTotal} watched, ${state.lessonsNeeded} needed.`;
+      // A window that ended before the 80% rule keeps every video (discount.ts videosNeededFor, the owner's B).
       return {
         ok: false,
         status: 400,
-        error:
-          `Student has not watched ${DISCOUNT_VIDEO_SHARE}% of the videos up to the discount checkpoint ${by}: ` +
-          `${state.lessonsDone} of ${state.lessonsTotal} watched, ${state.lessonsNeeded} needed.`,
+        error: closedBeforeEighty(state.endsAt)
+          ? `Student has not watched every video up to the discount checkpoint ${by} (a deadline before ${EIGHTY_DAY} ` +
+            `asks for every one; the ${DISCOUNT_VIDEO_SHARE}% counts from then on): ${counts}`
+          : `Student has not watched ${DISCOUNT_VIDEO_SHARE}% of the videos up to the discount checkpoint ${by}: ${counts}`,
         reason: "locked",
       };
     }

@@ -31,9 +31,18 @@
  * (`videosNeeded`, discount.ts videosNeeded of the videos counted), and the
  * verdict says yes exactly when the count reaches it.
  *
- * Each row carries the student's Discord username and id (the owner,
- * 2026-10-26: "Copy Discord username or their ID"), for the page's Copy @
- * and Copy ID.
+ * Each row carries the student's Discord user id and the username on file
+ * (the owner, 2026-10-26: "Copy Discord username or their ID"), for the
+ * page's Copy Discord ID and Copy username (studentCopies). The username is
+ * students.discord_username, which holds the student's Whop username after
+ * every Whop sign-in and every payment (the login and the webhook write it)
+ * and their Discord username only once the 2-hour sync has written it since,
+ * so the page never calls it Discord (the review of the same day).
+ *
+ * No real payment (the same review): a pending row whose stored coupon row
+ * says Whop shows no real payment from the student (rowShowsNoRealPayment)
+ * gets that as its verdict, after the coupon and before the rule, as the
+ * approve route refuses it (NO_REAL_PAYMENT_APPROVAL).
  *
  * The coupon of a decided row (the render review's fix round): once the team
  * adds the 30% code in Whop, Whop shows it on the membership as a discount on
@@ -57,6 +66,7 @@ import {
   discountState,
   discountWindow,
   requiredLessons,
+  shortestSeconds,
   videosNeeded,
 } from "./discount.ts";
 import type { DiscountLesson, DiscountState, DiscountWindow } from "./discount.ts";
@@ -69,7 +79,7 @@ import {
   videoDoneIds,
 } from "./discount-server.ts";
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "./discount-server.ts";
-import { isMembershipId, storedRowApplies } from "./membership-discount.ts";
+import { isMembershipId, rowShowsNoRealPayment, storedRowApplies } from "./membership-discount.ts";
 import { dayLabel } from "./croatia-dates.ts";
 import { bareUsername } from "./people-common.ts";
 import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data.ts";
@@ -84,9 +94,9 @@ export interface StudentBrief {
   id: string;
   name: string | null;
   email: string | null;
-  /** students.discord_username, shown as @username (it can hold a Whop username). Copy @ copies it. */
+  /** students.discord_username, shown as @username: a Whop or a Discord username (the header says when which). Copy username copies it. */
   username: string | null;
-  /** students.discord_user_id, the student's Discord user id. Copy ID copies it. */
+  /** students.discord_user_id, the student's Discord user id. Copy Discord ID copies it. */
   discordId: string | null;
   /** membership_status: active, past_due, canceled or expired. */
   status: string;
@@ -112,9 +122,11 @@ export interface Facts {
   /** Only videos done by the deadline are counted, and the deadline has passed: show the count as "done by the deadline". */
   countedByDeadline: boolean;
   /**
-   * The length of the videos the 80% still needs, the next ones in course
-   * order, in seconds; 0 once it is met (discount.ts's secondsLeft; every
-   * video not watched until 2026-10-26).
+   * The length of the videos the 80% still needs, the shortest of those not
+   * watched, in seconds (discount.ts shortestSeconds, as the locked state's
+   * secondsLeft); 0 once it is met or when one has no known length. Every
+   * video not watched until the 80% rule, then the next ones in course order
+   * until its review (both 2026-10-26).
    */
   secondsLeft: number | null;
 }
@@ -123,10 +135,12 @@ export interface Facts {
  * Why a request may not be approved. ApprovalRefusal's reasons are the
  * rule's; "has-discount": a discount is already on the student's next Whop
  * renewal (D5; only a founder's or an admin's Approve anyway passes it);
- * "read-failed": the student's progress could not
+ * "no-real-payment": the stored coupon row says Whop shows no real payment
+ * from the student (2026-10-26; Approve anyway passes it, as it passes the
+ * rule); "read-failed": the student's progress could not
  * be read; "unknown": the rule gave no reason (it cannot, today).
  */
-export type VerdictReason = ApprovalRefusal | "has-discount" | "read-failed" | "unknown";
+export type VerdictReason = ApprovalRefusal | "has-discount" | "no-real-payment" | "read-failed" | "unknown";
 
 export interface Verdict {
   /** Approve would approve it now. */
@@ -150,6 +164,12 @@ export interface Coupon {
   promoCodeId: string | null;
   /** A discount is on the next renewal: no 30% (D5). */
   discounted: boolean;
+  /**
+   * No coupon, and Whop showed no real payment from the student
+   * (membership-discount.ts rowShowsNoRealPayment, 2026-10-26): no 30%
+   * either, unless Approve anyway skips it.
+   */
+  noRealPayment: boolean;
   /**
    * The code is the request's own 30% code (isThirtyCode): the team added it
    * in Whop. An Approved or Code Applied row never warns about it. Always
@@ -236,6 +256,8 @@ export const VERDICT_TEXT = {
   lockedClosed: `Fewer than ${SHARE} of the videos up to the checkpoint were watched by the deadline.`,
   beforeLaunch: `The first payment was before ${ELIGIBLE_DAY}, so this student cannot earn the 30%.`,
   noPayment: "There is no real payment on file for this student, and the 30% needs one.",
+  // The stored coupon row: Whop shows no real payment, though first_paid_at may be filled (the review of 2026-10-26).
+  noRealPayment: "Whop shows no real payment from this student, and the 30% needs one.",
   noGate: "The course has no checkpoint lesson with a video, so nobody can earn the 30% right now.",
   oldCourse: "Asked on the old course, before the switch.",
   oldCourseNoGate:
@@ -263,29 +285,51 @@ export function videoLine(row: Pick<ThirtyRequestRow, "facts" | "student">, verd
   return out;
 }
 
-/** The tips of a greyed Copy @ and Copy ID: what is missing, in plain words. */
-export const NO_DISCORD_USERNAME = "No Discord username on file for this student.";
+/** The tips of a greyed Copy Discord ID and Copy username: what is missing, in plain words. */
 export const NO_DISCORD_ID = "No Discord ID on file for this student.";
+export const NO_USERNAME = "No username on file for this student.";
+/**
+ * Copy username's tip while it can copy (the review of 2026-10-26): the
+ * column holds the student's Whop username after every Whop sign-in and
+ * every payment, and the team searching Discord for it could find someone
+ * else.
+ */
+export const USERNAME_TIP = "The username on file. It can be the student's Whop username, and on Discord that name may belong to someone else.";
+/** In the two buttons' place when neither is on file: a phone shows no tip. */
+export const NO_DISCORD_LINE = "No Discord ID or username on file.";
 
 /** What a copy button copies, or (`unavailable`) why it has nothing to copy. */
 export interface CopyTarget {
   text: string;
   unavailable: string | null;
+  /** The tip while it can copy, or null. */
+  tip: string | null;
 }
 
 /**
- * Copy @ and Copy ID on the 30% page (the owner, 2026-10-26: "Copy Discord
- * username or their ID"). Copy @ copies the student's Discord username with
- * one "@" in front, whether or not the stored one starts with it
- * (bareUsername); Copy ID their Discord user id. With none on file the
- * button is greyed and its tip says so.
+ * Copy Discord ID and Copy username on the 30% page (the owner, 2026-10-26:
+ * "'Copy Discord username' or 'their ID' or whatever. I think ID might be
+ * best, or even their @ tag."). Copy Discord ID copies the student's
+ * Discord user id, the one that finds them on Discord, and comes first.
+ * Copy username copies the username on file with one "@" in front, whether
+ * or not the stored one starts with it (bareUsername); it is never called
+ * Discord, and its tip says why (USERNAME_TIP; it was "Copy @" until the
+ * review of the same day). One with nothing on file is greyed and its tip
+ * says so; with neither, `none` is the line the page shows in their place.
  */
-export function discordCopies(student: Pick<StudentBrief, "username" | "discordId">): { at: CopyTarget; id: CopyTarget } {
+export function studentCopies(student: Pick<StudentBrief, "username" | "discordId">): {
+  id: CopyTarget;
+  username: CopyTarget;
+  none: string | null;
+} {
   const handle = bareUsername(student.username);
   const id = student.discordId?.trim() || null;
   return {
-    at: handle ? { text: `@${handle}`, unavailable: null } : { text: "", unavailable: NO_DISCORD_USERNAME },
-    id: id ? { text: id, unavailable: null } : { text: "", unavailable: NO_DISCORD_ID },
+    id: id ? { text: id, unavailable: null, tip: null } : { text: "", unavailable: NO_DISCORD_ID, tip: null },
+    username: handle
+      ? { text: `@${handle}`, unavailable: null, tip: USERNAME_TIP }
+      : { text: "", unavailable: NO_USERNAME, tip: null },
+    none: !id && !handle ? NO_DISCORD_LINE : null,
   };
 }
 
@@ -320,6 +364,7 @@ export function couponOf(row: ThirtyCouponRow | undefined, student: Pick<ThirtyS
     code: row.promo_code ?? row.promo_code_id ?? null,
     promoCodeId: row.promo_code_id ?? null,
     discounted: row.discounted === true,
+    noRealPayment: rowShowsNoRealPayment(row),
     ours: false,
     renewalPrice: priceOf(row.renewal_price),
     planRenewalPrice: priceOf(row.plan_renewal_price),
@@ -440,7 +485,7 @@ function countFacts(
     videosTotal: required.length,
     videosNeeded: needed,
     countedByDeadline,
-    secondsLeft: left.slice(0, short).reduce((sum, l) => sum + (l.duration_seconds ?? 0), 0),
+    secondsLeft: shortestSeconds(left, short),
   };
 }
 
@@ -551,6 +596,16 @@ export function couponVerdict(coupon: Coupon): Verdict {
   return { ok: false, reason: "has-discount", text: couponApprovalRefusal(coupon.code), oldCourse: false };
 }
 
+/**
+ * The verdict for a student whose stored coupon row says Whop shows no real
+ * payment from them (Coupon.noRealPayment, 2026-10-26): the approve route
+ * refuses their normal Approve (NO_REAL_PAYMENT_APPROVAL, code "rule"), and
+ * Approve anyway skips it as it skips the rule (anywaySkip "rule").
+ */
+export function noRealPaymentVerdict(): Verdict {
+  return { ok: false, reason: "no-real-payment", text: VERDICT_TEXT.noRealPayment, oldCourse: false };
+}
+
 const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
 /**
@@ -607,8 +662,9 @@ export function buildThirtyView(
       if (r.status === "pending") {
         const judged = judgeRequest(data.reads.get(s.id)!, now, r, resetAt);
         facts = judged.facts;
-        // D5 first: a discount on the next renewal decides, whatever the rule says.
-        verdict = coupon?.discounted ? couponVerdict(coupon) : judged.verdict;
+        // D5 first: a discount on the next renewal decides, whatever the rule says. Then Whop showing no real
+        // payment (2026-10-26), as the approve route refuses it before the rule.
+        verdict = coupon?.discounted ? couponVerdict(coupon) : coupon?.noRealPayment ? noRealPaymentVerdict() : judged.verdict;
       }
       return {
         id: r.id,

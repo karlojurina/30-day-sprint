@@ -24,7 +24,7 @@ import { adminTransport } from "@/lib/admin/admin-transport";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
 import { DISCOUNT_STATUS } from "@/lib/admin/discount-status";
-import { COUPON_REJECT_REASON, anywaySkip, approveAnywayText, couponWarns, discordCopies, videoLine } from "@/lib/admin/thirty-view";
+import { COUPON_REJECT_REASON, anywaySkip, approveAnywayText, couponWarns, studentCopies, videoLine } from "@/lib/admin/thirty-view";
 import type {
   StudentBrief,
   TeamRef,
@@ -56,13 +56,25 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * it has passed) and what the 80% needs, "48 of 61 videos by the deadline ·
  * 49 needed for 80%"; the verdict says yes from there (thirty-view.ts).
  *
- * COPY @ AND COPY ID (the owner, 2026-10-26: "We have 'Copy the code,' which
- * is very good, and then 'Copy Discord username' or 'their ID'"): on every
- * Applied row, and beside "Copy code" on every row that has a code, two
- * buttons copy the student's Discord username, with one "@" in front
- * whether or not the stored one has it, and their Discord user id. Each is
- * greyed, with a plain tip, when the student has none on file. The code's
- * button says "Copy code" since then (it said "Copy").
+ * COPY DISCORD ID AND COPY USERNAME (the owner, 2026-10-26: "We have 'Copy
+ * the code,' which is very good, and then 'Copy Discord username' or 'their
+ * ID' or whatever. I think ID might be best"): on every Applied row, and
+ * beside "Copy code" on every row that has a code, Copy Discord ID copies
+ * the student's Discord user id, and Copy username the username on file
+ * with one "@" in front whether or not the stored one has it. The username
+ * is the student's Whop username after every Whop sign-in and every
+ * payment, and their Discord one only once the 2-hour sync wrote it since,
+ * so the button never says Discord and its tip says so (the review of the
+ * same day: it read "Copy @", and "Copy ID" beside it). One with nothing on
+ * file is greyed with a plain tip; with neither, one short line stands in
+ * their place, since a phone shows no tip (thirty-view.ts studentCopies).
+ * The code's button says "Copy code" since then (it said "Copy").
+ *
+ * A row whose stored coupon row says Whop shows no real payment from the
+ * student gets that as its verdict, with no Approve (the review of
+ * 2026-10-26; Approve anyway skips it as it skips the rule). A plain Approve
+ * the route refuses for it shows the page's own sentence, and the list read
+ * again shows the verdict, the route having stored what Whop said.
  *
  * APPROVE ANYWAY (the owner's review, 2026-10-21: approving past any check).
  * A founder or an admin (`canApproveAnyway`; the
@@ -705,16 +717,25 @@ function verdictColor(v: Verdict): string {
 }
 
 /**
- * Copy @ and Copy ID (thirty-view.ts discordCopies): the student's Discord
- * username with one "@" in front, and their Discord user id; each greyed,
- * its tip saying what is missing, when the student has none on file.
+ * Copy Discord ID, then Copy username (thirty-view.ts studentCopies): the
+ * student's Discord user id, and the username on file with one "@" in front,
+ * its tip saying it can be their Whop username. Each greyed, its tip saying
+ * what is missing, when the student has none on file; with neither, one
+ * short line in their place.
  */
-function DiscordCopies({ student }: { student: StudentBrief }) {
-  const { at, id } = discordCopies(student);
+function StudentCopies({ student }: { student: StudentBrief }) {
+  const { id, username, none } = studentCopies(student);
+  if (none) {
+    return (
+      <span data-no-discord="" style={{ ...T.bodyDim, lineHeight: 1.5 }}>
+        {none}
+      </span>
+    );
+  }
   return (
     <>
-      <CopyButton text={at.text} label="Copy @" unavailable={at.unavailable ?? undefined} />
-      <CopyButton text={id.text} label="Copy ID" unavailable={id.unavailable ?? undefined} />
+      <CopyButton text={id.text} label="Copy Discord ID" unavailable={id.unavailable ?? undefined} tip={id.tip ?? undefined} />
+      <CopyButton text={username.text} label="Copy username" unavailable={username.unavailable ?? undefined} tip={username.tip ?? undefined} />
     </>
   );
 }
@@ -879,9 +900,9 @@ function PendingRow({
                 <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>Coupon not checked yet. Approve asks Whop first.</span>
               </p>
             )}
-            {/* Copy @ and Copy ID, to find the student on Discord (the owner, 2026-10-26). */}
+            {/* Copy Discord ID and Copy username, to find the student on Discord (the owner, 2026-10-26). */}
             <span className="flex flex-wrap items-center" style={{ gap: 8 }} data-discord-copies="">
-              <DiscordCopies student={row.student} />
+              <StudentCopies student={row.student} />
             </span>
             {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
           </>
@@ -972,7 +993,7 @@ function PendingRow({
   );
 }
 
-/** The 30% code, the button that copies it, and beside it Copy @ and Copy ID (2026-10-26). */
+/** The 30% code, the button that copies it, and beside it Copy Discord ID and Copy username (2026-10-26). */
 function CodeWithCopy({ code, student }: { code: string; student: StudentBrief }) {
   return (
     <span className="flex flex-wrap items-center" style={{ gap: 8 }} data-discord-copies="">
@@ -991,7 +1012,7 @@ function CodeWithCopy({ code, student }: { code: string; student: StudentBrief }
         {code}
       </code>
       <CopyButton text={code} label="Copy code" />
-      <DiscordCopies student={student} />
+      <StudentCopies student={student} />
     </span>
   );
 }

@@ -38,12 +38,17 @@
  *           and error; a row is the name (to the student page), @username,
  *           Active or not, the date applied, the verdict line with its count
  *           and what the 80% needs (the owner's 80% rule of 2026-10-26, 49
- *           of 61: Jonah at 49 says yes, Priya at 48 not yet), Copy @ and
- *           Copy ID (each greyed with its tip when the student has none on
- *           file, a stored "@" never doubled when copied), the coupon and the
- *           actions, with no plan, Open in Discord, survey, Can still earn,
- *           last contact or Mark messaged; Copy code, Copy @ and Copy ID on
- *           every row with a code, none on a rejected one; then its
+ *           of 61: Jonah at 49 says yes, Priya at 48 not yet), Copy Discord
+ *           ID then Copy username (each greyed with its tip when the student
+ *           has none on file, the username's tip saying it can be the Whop
+ *           one, a line in their place with neither, a stored "@" never
+ *           doubled when copied; "Copy ID" and "Copy @" until the review of
+ *           the same day), the coupon and the actions, with no plan, Open in
+ *           Discord, survey, Can still earn, last contact or Mark messaged;
+ *           Copy code, Copy Discord ID and Copy username on every row with a
+ *           code, none on a rejected one; ?state=nopayment, Whop showing no
+ *           real payment (the verdict, no Approve, a plain Approve refused
+ *           and the row turning, Approve anyway, a csm's row); then its
  *           paths by clicks: Approve on the rule's yes, Approve refused for a
  *           coupon Whop names only then (its row turns to the coupon, no
  *           Approve anyway after it), the Approve anyway link and its confirm,
@@ -670,9 +675,13 @@ if (wanted('thirty')) {
   // The verdict sentences (thirty-view.ts VERDICT_TEXT) since the 80% rule of 2026-10-26.
   const YES = 'At least 80% of the videos up to the checkpoint were watched in time.'
   const NOT_YET = 'Fewer than 80% of the videos up to the checkpoint are watched so far.'
-  // Copy @ and Copy ID's tips when the student has none on file (thirty-view.ts).
-  const NO_AT = 'No Discord username on file for this student.'
+  // Copy Discord ID's and Copy username's tips, and the line with neither on file (thirty-view.ts, the review of 2026-10-26).
+  const NO_USERNAME = 'No username on file for this student.'
   const NO_ID = 'No Discord ID on file for this student.'
+  const USERNAME_TIP = "The username on file. It can be the student's Whop username, and on Discord that name may belong to someone else."
+  const NO_LINE = 'No Discord ID or username on file.'
+  // The verdict for a student Whop shows no real payment from (the same review).
+  const NO_PAYMENT = 'Whop shows no real payment from this student, and the 30% needs one.'
   /** The map's sentence for a discount already on the account: since the render review's second round, the reason a coupon row's Reject starts with. */
   const MAP_LINE = "You can't apply for this discount because you already have a discount applied to your account."
   const open = (query, size) => go(`/dev/admin/discounts${query}`, size)
@@ -799,7 +808,7 @@ if (wanted('thirty')) {
     await waitReady()
     const text = await bodyText()
     expect(!/\b(Monthly|Yearly|Other plan)\b/.test(text) && !/subscription/i.test(text), 'no plan pill and no "subscription" anywhere on the page')
-    // Copy @ and Copy ID came back on 2026-10-26 (the owner); Open in Discord and the rest stay gone.
+    // Copy Discord ID and Copy username came back on 2026-10-26 (the owner); Open in Discord and the rest stay gone.
     expect(!/Open in Discord|No Discord linked|Survey answers|Can still earn|Mark messaged|No message yet|Messaged |Deadline |Paid |Whop progress not pulled yet/.test(text),
       'no Open in Discord, survey answers, Can still earn, last contact, Mark messaged, deadline or payment facts, and no "not pulled" pill')
     const maya = await row('Maya Lindqvist')
@@ -859,13 +868,16 @@ if (wanted('thirty')) {
     await check('30% off, Applied, the verdicts and the coupon, 1440x900', 'thirty-applied-rows-1440')
   }
 
-  // The owner, 2026-10-26: "We have 'Copy the code,' which is very good, and then 'Copy Discord username' or 'their ID'".
-  console.log('\n30% off: Copy @ and Copy ID on every Applied row and beside Copy code, greyed with a tip when there is nothing to copy')
+  // The owner, 2026-10-26: "We have 'Copy the code,' which is very good, and then 'Copy Discord username' or 'their ID'
+  // or whatever. I think ID might be best". The review of the same day: the username can be the Whop one, so its button
+  // never says Discord, and Copy Discord ID comes first.
+  console.log('\n30% off: Copy Discord ID and Copy username on every Applied row and beside Copy code, greyed with a tip when there is nothing to copy, a line with neither')
   {
-    /** Copy @ and Copy ID on a row: on or greyed, its tip, its height. */
-    const copies = (h) => h.evaluate((r) => [...r.querySelectorAll('button')].filter((b) => /^Copy (@|ID|code)$/.test(b.textContent.trim())).map((b) => ({
+    /** The copy buttons on a row: on or greyed, their tip, their height; and the line in their place, if any. */
+    const copies = (h) => h.evaluate((r) => [...r.querySelectorAll('button')].filter((b) => /^Copy (Discord ID|username|code)$/.test(b.textContent.trim())).map((b) => ({
       label: b.textContent.trim(), off: b.getAttribute('aria-disabled') === 'true', disabled: b.disabled, tip: b.getAttribute('title'), h: Math.round(b.getBoundingClientRect().height),
     })))
+    const noLine = (h) => h.evaluate((r) => r.querySelector('[data-no-discord]')?.textContent ?? null)
     // What a press copies: the page's clipboard, held here.
     const holdClipboard = () => page.evaluate(() => {
       window.__copied = []
@@ -875,67 +887,119 @@ if (wanted('thirty')) {
     for (const size of [[1440, 900], [390, 844]]) {
       await open('', size)
       await waitReady()
+      // [the id greyed, the username greyed]; Priya has neither, so a line stands in their place.
       const want = {
-        'Maya Lindqvist': [false, false], 'Jonah Pereira': [false, false], 'Priya Raman': [true, true], 'Hugo Lindahl': [false, true],
-        'Leo Hartmann': [true, false], 'Sofia Marin': [false, false], 'Tara Quinn': [false, false], 'Maximilian Featherstonehaugh-Smythe': [false, false],
+        'Maya Lindqvist': [false, false], 'Jonah Pereira': [false, false], 'Hugo Lindahl': [true, false],
+        'Leo Hartmann': [false, true], 'Sofia Marin': [false, false], 'Tara Quinn': [false, false], 'Maximilian Featherstonehaugh-Smythe': [false, false],
       }
       const got = {}
-      for (const name of Object.keys(want)) got[name] = await copies(await row(name))
-      const wrong = Object.entries(want).filter(([name, [atOff, idOff]]) => {
-        const g = got[name]
-        const at = g.find((b) => b.label === 'Copy @')
-        const id = g.find((b) => b.label === 'Copy ID')
-        return g.length !== 2 || !at || !id || at.off !== atOff || id.off !== idOff || at.disabled || id.disabled
-          || (atOff ? at.tip !== NO_AT : at.tip !== null) || (idOff ? id.tip !== NO_ID : id.tip !== null) || at.h < 44 || id.h < 44
+      for (const name of Object.keys(want)) got[name] = { buttons: await copies(await row(name)), line: await noLine(await row(name)) }
+      const wrong = Object.entries(want).filter(([name, [idOff, userOff]]) => {
+        const { buttons: g, line } = got[name]
+        const [id, user] = g
+        return g.length !== 2 || line !== null || id?.label !== 'Copy Discord ID' || user?.label !== 'Copy username' || id.off !== idOff || user.off !== userOff || id.disabled || user.disabled
+          || (idOff ? id.tip !== NO_ID : id.tip !== null) || (userOff ? user.tip !== NO_USERNAME : user.tip !== USERNAME_TIP) || id.h < 44 || user.h < 44
       })
       expect(wrong.length === 0,
-        `${size.join('x')}: every Applied row has Copy @ and Copy ID, 44px tall; greyed with its tip where there is none on file (Priya both, Hugo the id, Leo the @), still in the keyboard's path`, JSON.stringify(wrong.map(([n]) => [n, got[n]])))
-      if (size[0] === 1440) await check('30% off, Applied, Copy @ and Copy ID, 1440x900', 'thirty-copies-applied-1440')
-      else await check('30% off, Applied, Copy @ and Copy ID, 390x844', 'thirty-copies-applied-390')
+        `${size.join('x')}: every Applied row has Copy Discord ID then Copy username, 44px tall; greyed with its tip where there is none on file (Hugo the id, Leo the username), still in the keyboard's path; the username's tip says it can be the Whop one`, JSON.stringify(wrong.map(([n]) => [n, got[n]])))
+      const priya = await row('Priya Raman')
+      expect((await copies(priya)).length === 0 && (await noLine(priya)) === NO_LINE && (await rowText(priya)).includes(NO_LINE),
+        `${size.join('x')}: Priya, neither on file: no copy button, the line "${NO_LINE}" in their place (a phone shows no tip)`, JSON.stringify({ buttons: await copies(priya), line: await noLine(priya) }))
+      if (size[0] === 1440) await check('30% off, Applied, Copy Discord ID and Copy username, 1440x900', 'thirty-copies-applied-1440')
+      else await check('30% off, Applied, Copy Discord ID and Copy username, 390x844', 'thirty-copies-applied-390')
     }
     await viewport([1280, 720])
     await holdClipboard()
-    await press(await buttonIn(await row('Maya Lindqvist'), 'Copy @'))
-    await press(await buttonIn(await row('Maya Lindqvist'), 'Copy ID'))
+    await press(await buttonIn(await row('Maya Lindqvist'), 'Copy Discord ID'))
+    await press(await buttonIn(await row('Maya Lindqvist'), 'Copy username'))
     await sleep(200)
     const said = await (await row('Maya Lindqvist')).evaluate((r) => [...r.querySelectorAll('button')].filter((b) => /^Copied$/.test(b.textContent.trim())).length)
-    expect(JSON.stringify(await copied()) === JSON.stringify(['@maya.lq', '100000000000000101']) && said === 2,
-      'Maya: Copy @ copies "@maya.lq", Copy ID her Discord id, each saying "Copied"', JSON.stringify(await copied()))
-    await press(await buttonIn(await row('Priya Raman'), 'Copy @'))
-    await press(await buttonIn(await row('Priya Raman'), 'Copy ID'))
+    expect(JSON.stringify(await copied()) === JSON.stringify(['100000000000000101', '@maya.lq']) && said === 2,
+      'Maya: Copy Discord ID copies her Discord id, Copy username "@maya.lq", each saying "Copied"', JSON.stringify(await copied()))
+    await press(await buttonIn(await row('Hugo Lindahl'), 'Copy Discord ID'))
     await sleep(200)
-    const priyaSaid = await (await row('Priya Raman')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => /^Copy|^Copied|^Couldn't/.test(t)))
-    expect(JSON.stringify(await copied()) === JSON.stringify(['@maya.lq', '100000000000000101']) && JSON.stringify(priyaSaid) === JSON.stringify(['Copy @', 'Copy ID']),
-      'Priya, none on file: a press on either greyed button copies nothing and says nothing', JSON.stringify(priyaSaid))
+    const hugoSaid = await (await row('Hugo Lindahl')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => /^Copy|^Copied|^Couldn't/.test(t)))
+    expect(JSON.stringify(await copied()) === JSON.stringify(['100000000000000101', '@maya.lq']) && JSON.stringify(hugoSaid) === JSON.stringify(['Copy Discord ID', 'Copy username']),
+      'Hugo, no Discord id: a press on the greyed Copy Discord ID copies nothing and says nothing', JSON.stringify(hugoSaid))
     expect((await calls()).every((c) => c.name === 'loadThirty'), 'copying calls no route')
 
     // Beside Copy code: Approved and Code Applied rows.
     await open('?tab=approved')
     await waitReady()
     const ethan = await copies(await row('Ethan Cole'))
-    expect(JSON.stringify(ethan.map((b) => [b.label, b.off])) === JSON.stringify([['Copy code', false], ['Copy @', false], ['Copy ID', false]]),
-      'Approved, Ethan: Copy code, then Copy @ and Copy ID beside it ("Copy" until 2026-10-26)', JSON.stringify(ethan))
+    expect(JSON.stringify(ethan.map((b) => [b.label, b.off])) === JSON.stringify([['Copy code', false], ['Copy Discord ID', false], ['Copy username', false]]),
+      'Approved, Ethan: Copy code, then Copy Discord ID and Copy username beside it ("Copy" until 2026-10-26)', JSON.stringify(ethan))
     await open('?tab=code-applied')
     await waitReady()
     const omar = await copies(await row('Omar Haddad'))
     const lena = await copies(await row('Lena Vogel'))
-    expect(JSON.stringify(omar.map((b) => [b.label, b.off, b.tip])) === JSON.stringify([['Copy code', false, null], ['Copy @', true, NO_AT], ['Copy ID', false, null]])
-        && JSON.stringify(lena.map((b) => [b.label, b.off])) === JSON.stringify([['Copy code', false], ['Copy @', false], ['Copy ID', false]]),
-      'Code Applied: Omar with no username, Copy @ greyed with its tip; Lena with all three', JSON.stringify({ omar, lena }))
+    expect(JSON.stringify(omar.map((b) => [b.label, b.off, b.tip])) === JSON.stringify([['Copy code', false, null], ['Copy Discord ID', false, null], ['Copy username', true, NO_USERNAME]])
+        && JSON.stringify(lena.map((b) => [b.label, b.off])) === JSON.stringify([['Copy code', false], ['Copy Discord ID', false], ['Copy username', false]]),
+      'Code Applied: Omar with no username, Copy username greyed with its tip; Lena with all three', JSON.stringify({ omar, lena }))
     await holdClipboard()
-    await press(await buttonIn(await row('Lena Vogel'), 'Copy @'))
+    await press(await buttonIn(await row('Lena Vogel'), 'Copy username'))
     await press(await buttonIn(await row('Lena Vogel'), 'Copy code'))
     await sleep(200)
     expect(JSON.stringify(await copied()) === JSON.stringify(['@lena.v', 'ECOM30-C55E10']),
-      'Lena, her username stored as "@lena.v": Copy @ copies "@lena.v", never "@@lena.v"; Copy code the code', JSON.stringify(await copied()))
+      'Lena, her username stored as "@lena.v": Copy username copies "@lena.v", never "@@lena.v"; Copy code the code', JSON.stringify(await copied()))
     for (const size of [[1440, 900], [390, 844]]) {
       await viewport(size)
-      await check(`30% off, Code Applied, Copy code, Copy @ and Copy ID, ${size.join('x')}`, `thirty-copies-code-applied-${size[0]}`)
+      await check(`30% off, Code Applied, Copy code, Copy Discord ID and Copy username, ${size.join('x')}`, `thirty-copies-code-applied-${size[0]}`)
     }
     await open('?tab=rejected')
     await waitReady()
     const rejected = await page.$$eval('.list-row', (rs) => rs.map((r) => [...r.querySelectorAll('button')].filter((b) => /^Copy/.test(b.textContent.trim())).length))
     expect(rejected.length === 3 && rejected.every((n) => n === 0), 'Rejected: no code, so no copy button on any row', JSON.stringify(rejected))
+  }
+
+  // The review of 2026-10-26, the owner's applicant: "he never had a membership. I see one payment, but it has failed
+  // ... he watched the course even though he never paid." ?state=nopayment: Jonah's stored row says Whop shows no real
+  // payment; Maya's stored row is a clean one and Whop says it only now.
+  console.log('\n30% off: Whop showing no real payment (?state=nopayment): the verdict, no Approve, a plain Approve refused, Approve anyway')
+  {
+    for (const size of SIZES) {
+      await open('?state=nopayment', size)
+      await waitReady()
+      const jonah = await row('Jonah Pereira')
+      const t = await rowText(jonah)
+      const dot = await jonah.evaluate((r) => r.querySelector('[data-verdict]')?.getAttribute('data-verdict') ?? null)
+      expect(t.includes(`${NO_PAYMENT} · 49 of 61 videos · 49 needed for 80%`) && dot === 'no-real-payment' && !t.includes(YES)
+          && (await isNull(await buttonIn(jonah, 'Approve'))) && !(await isNull(await linkIn(jonah))) && !(await isNull(await buttonIn(jonah, 'Reject'))),
+        `${size.join('x')}: Jonah, 49 of 61 and Whop showing no real payment: the verdict says so with the count, no Approve, Approve anyway for an admin, Reject`, t)
+      await check(`30% off, no real payment, ${size.join('x')}`, `thirty-nopayment-${size[0]}`)
+    }
+    await viewport([1280, 720])
+    // Maya: the stored row is clean, so her row says yes until Approve asks Whop.
+    const loads = (await calls()).filter((c) => c.name === 'loadThirty').length
+    expect((await rowText(await row('Maya Lindqvist'))).includes(YES), 'Maya: her stored row is a clean one, so the verdict is the rule\'s yes')
+    await press(await buttonIn(await row('Maya Lindqvist'), 'Approve'))
+    const REFUSED = 'Not approved: the 30% rule says no for this request now. Its row shows why.'
+    await page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, REFUSED)
+    await settled()
+    const maya = await row('Maya Lindqvist')
+    const m = await rowText(maya)
+    const alert = await maya.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
+    expect(alert === REFUSED && m.includes(NO_PAYMENT) && (await isNull(await buttonIn(maya, 'Approve'))) && !(await isNull(await linkIn(maya)))
+        && (await calls()).filter((c) => c.name === 'loadThirty').length === loads + 1 && JSON.stringify((await calls()).filter((c) => c.name === 'approve').map((c) => c.args)) === JSON.stringify([['r-maya', false, false]]),
+      'Maya\'s Approve: refused with code "rule", the page\'s own sentence on her row, the list read again, and her verdict now says Whop shows no real payment; Approve anyway in Approve\'s place', JSON.stringify({ alert, m }))
+    expect(JSON.stringify(await tabCounts()) === JSON.stringify(['Applied 8', 'Approved 2', 'Rejected 3', 'Code Applied 2']), 'nothing approved', (await tabCounts()).join(' | '))
+    await press(await linkIn(await row('Jonah Pereira')))
+    await page.waitForSelector('[data-approve-anyway-confirm]')
+    const confirmText = await page.evaluate(() => document.querySelector('[data-approve-anyway-confirm]')?.textContent ?? null)
+    expect(confirmText === `Approve anyway skips the 30% rule, and creates the student's Whop code now. The rule says: ${NO_PAYMENT} A discount already on the membership is still checked first.`,
+      'Jonah\'s Approve anyway asks once, naming why the rule says no', confirmText)
+    await check('30% off, Approve anyway past no real payment, 1280x720', 'thirty-nopayment-anyway-1280')
+    await press(await buttonIn(await row('Jonah Pereira'), 'Yes, create the code'))
+    await page.waitForFunction(() => document.body.innerText.includes('Approved Jonah Pereira.'), { timeout: 10000 })
+    await settled()
+    const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
+    expect(JSON.stringify(sent.at(-1)) === JSON.stringify(['r-jonah', true, false]) && (await tabCounts())[1] === 'Approved 3',
+      'Approve anyway: one approve call with override, the code made past it, Jonah on Approved', JSON.stringify(sent))
+    // A csm: no Approve anyway, so Jonah's row has Reject alone.
+    await open('?state=nopayment&role=csm')
+    await waitReady()
+    const csm = await (await row('Jonah Pereira')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)))
+    expect(JSON.stringify(csm) === JSON.stringify(['Reject']), 'a csm: Jonah\'s row has Reject alone', JSON.stringify(csm))
   }
 
   console.log('\n30% off: Approve on the rule\'s yes, and on Hugo, whose coupon Whop names only now (D5)')
@@ -1150,8 +1214,8 @@ if (wanted('thirty')) {
     await waitReady()
     const rows = await page.$$eval('.list-row', (rs) => rs.map((r) => ({
       name: r.querySelector('a')?.textContent,
-      // The copy buttons (Copy code, Copy @, Copy ID) are every role's: left out here.
-      buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|@|ID)$/.test(t)),
+      // The copy buttons (Copy code, Copy Discord ID, Copy username) are every role's: left out here.
+      buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)),
     })))
     const by = Object.fromEntries(rows.map((r) => [r.name, r.buttons.join(',')]))
     expect(rows.every((r) => !r.buttons.includes('Approve anyway')) && by['Tara Quinn'] === 'Check Whop again,Reject' && by['Priya Raman'] === 'Reject'

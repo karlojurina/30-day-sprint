@@ -29,7 +29,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { loadThirtyData } from './_gen/thirty-data.ts'
 import {
-  VERDICT_TEXT, buildThirtyView, couponOf, judgeRequest, studentAppView, whopPulled,
+  VERDICT_TEXT, anywaySkip, buildThirtyView, couponOf, judgeRequest, studentAppView, videoLine, whopPulled,
 } from './_gen/thirty-view.ts'
 import { approvalVerdict, couponApprovalRefusal, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, discountState, requiredLessons } from './_gen/discount.ts'
@@ -297,9 +297,12 @@ async function bothWays(db, nowIso, { load = loadThirtyData, skip = new Set(), r
     // The page's verdict is that answer alone: no ads check since 2026-10-20 (Lovro).
     const rule = jp.said
     const reason = rule.ok ? null : rule.status === 500 ? 'read-failed' : (rule.reason ?? 'unknown')
-    // The coupon decides first (D5); with none stored, the page's verdict is the rule's.
+    // The coupon decides first (D5), then a stored row saying Whop shows no real payment (the review of 2026-10-26);
+    // with neither stored, the page's verdict is the rule's.
     const coupon = r.coupon?.discounted === true
+    const noPayment = !coupon && r.coupon?.noRealPayment === true
     if (coupon ? r.verdict.reason !== 'has-discount' || r.verdict.ok
+        : noPayment ? r.verdict.reason !== 'no-real-payment' || r.verdict.ok
         : r.verdict.ok !== rule.ok || r.verdict.reason !== reason || r.verdict.oldCourse !== (!jp.raw.ok && rule.error !== jp.raw.error)) {
       differences.push(`${r.id} the page's verdict`)
     }
@@ -378,9 +381,11 @@ ok(!W.data.students.some((s) => ['s-e', 's-v', 's-w', 's-x', 's-b', 's-m'].inclu
 {
   // B, C, D, E and M hold no request: Can still earn went with D4, so nobody without one is read.
   const b = studentAppView(W.per.get('s-b'), new Date(WED))
+  // The review of 2026-10-26: the 4 shortest of the 16 not watched, any of them counting (the next 4 in course order until then).
+  const shortest4 = REQUIRED.slice(45).map((id) => SECONDS[id]).sort((x, y) => x - y).slice(0, 4).reduce((sum, n) => sum + n, 0)
   ok(b.state.kind === 'locked' && b.state.lessonsLeft === 4 && b.facts.videosDone === 45 && b.facts.videosTotal === 61 && b.facts.videosNeeded === 49
-       && b.facts.secondsLeft === secondsOf(REQUIRED.slice(45, 49)) && !request(wv, 'r-b'),
-     'B: 45 of 61 by the rule, 4 short of the 49, the next 4 videos\' length left, no request, on no tab', show(b.facts))
+       && b.facts.secondsLeft === shortest4 && b.state.secondsLeft === shortest4 && shortest4 < secondsOf(REQUIRED.slice(45, 49)) && !request(wv, 'r-b'),
+     'B: 45 of 61 by the rule, 4 short of the 49, the 4 shortest videos not watched as the time left (the map\'s own number), no request, on no tab', show({ facts: b.facts, shortest4, next4: secondsOf(REQUIRED.slice(45, 49)) }))
 }
 ok(studentAppView(W.per.get('s-c'), new Date(WED)).state.kind === 'ready' && studentAppView(W.per.get('s-d'), new Date(WED)).state.kind === 'locked',
    'C ready and D locked by the rule, neither listed')
@@ -739,12 +744,15 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
   })
   // C1: every video done, evolve10 on the membership. C2: the same, its row read from a membership it no longer has.
   // C3: a used-up code (not discounted). C4: evolve10 and 20 videos left. C5: approved before the rule, evolve10 on it.
-  // C6: evolve10 whose name Whop would not give.
-  for (const [id, done] of [['s-c1', 61], ['s-c2', 61], ['s-c3', 61], ['s-c4', 41], ['s-c5', 61], ['s-c6', 61]]) {
-    f.person(id, `${id} Example`, '2026-10-10T10:00:00.000Z')
+  // C6: evolve10 whose name Whop would not give. C7 (the review of 2026-10-26): every video done, and the stored row is
+  // the rule's "no real payment" answer (no code, no price, no membership), the owner's applicant who "never paid".
+  // C8: the same with a first real payment of 97.00 stored (a price, so a real payment).
+  for (const [id, done] of [['s-c1', 61], ['s-c2', 61], ['s-c3', 61], ['s-c4', 41], ['s-c5', 61], ['s-c6', 61], ['s-c7', 61], ['s-c8', 61]]) {
+    // C7 and C8 have no membership on file, as a student who never had one (so their row counts, storedRowApplies).
+    f.person(id, `${id} Example`, '2026-10-10T10:00:00.000Z', id === 's-c7' || id === 's-c8' ? { whop_membership_id: null } : {})
     f.watched(id, REQUIRED.slice(0, done), FROM_WHOP)
   }
-  for (const id of ['s-c1', 's-c2', 's-c3', 's-c4', 's-c6']) f.request(id, `r-${id.slice(2)}`, '2026-10-20T10:00:00.000Z')
+  for (const id of ['s-c1', 's-c2', 's-c3', 's-c4', 's-c6', 's-c7', 's-c8']) f.request(id, `r-${id.slice(2)}`, '2026-10-20T10:00:00.000Z')
   f.request('s-c5', 'r-c5', '2026-10-19T10:00:00.000Z', 'approved', { promo_code: 'ECOM30-TEST06', reviewed_at: '2026-10-19T12:00:00.000Z', reviewed_by: 'tm-1' })
   f.coupons.push(
     stored('s-c1'),
@@ -753,13 +761,15 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
     stored('s-c4'),
     stored('s-c5'),
     stored('s-c6', { promo_code: null, promo_code_id: 'promo_devYear10' }),
+    stored('s-c7', { whop_membership_id: null, promo_code_id: null, promo_code: null, renewal_price: null, plan_renewal_price: null, discounted: false }),
+    stored('s-c8', { whop_membership_id: null, promo_code_id: null, promo_code: null, renewal_price: '97.00', plan_renewal_price: '97.00', discounted: false }),
   )
   const C = await bothWays(world(f, WED), WED)
   ok(C.differences.length === 0, 'both ways agree for every student, the coupon read beside them', C.differences.join(', '))
   const c1 = request(C.view, 'r-c1')
   ok(!c1.verdict.ok && c1.verdict.reason === 'has-discount' && c1.verdict.text === 'This student already has a discount on their membership (evolve10).' && !c1.verdict.oldCourse,
      'C1: every video done, evolve10 on the membership: no, in the approve route\'s own words', show(c1.verdict))
-  ok(show(c1.coupon) === show({ code: 'evolve10', promoCodeId: 'promo_devEvolve', discounted: true, ours: false, renewalPrice: 87.3, planRenewalPrice: 97, checkedAt: '2026-10-21T06:40:00.000Z' }),
+  ok(show(c1.coupon) === show({ code: 'evolve10', promoCodeId: 'promo_devEvolve', discounted: true, noRealPayment: false, ours: false, renewalPrice: 87.3, planRenewalPrice: 97, checkedAt: '2026-10-21T06:40:00.000Z' }),
      'C1: the coupon on the row, its code\'s id, not the team\'s own code, its prices as numbers (Postgres numeric reaches the route as a string)', show(c1.coupon))
   ok(approve(C.per.get('s-c1'), new Date(WED), c1).said.ok, 'C1: (the rule alone would have said yes: the coupon is what refuses)')
   ok(request(C.view, 'r-c2').verdict.ok && request(C.view, 'r-c2').coupon === null, 'C2: a row read from another membership says nothing: the rule\'s yes, no coupon')
@@ -771,6 +781,16 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
      'C5: approved before the rule, evolve10 on the membership: the coupon on the row for the page to warn about')
   ok(request(C.view, 'r-c6').verdict.text === couponApprovalRefusal('promo_devYear10') && request(C.view, 'r-c6').verdict.text.endsWith('(promo_devYear10).'),
      'C6: no name from Whop: the verdict names the code\'s id')
+  const c7 = request(C.view, 'r-c7')
+  ok(!c7.verdict.ok && c7.verdict.reason === 'no-real-payment' && c7.verdict.text === 'Whop shows no real payment from this student, and the 30% needs one.'
+       && c7.verdict.text === VERDICT_TEXT.noRealPayment && c7.coupon?.noRealPayment === true && c7.coupon?.discounted === false
+       && c7.facts.videosDone === 61 && c7.facts.window === 'own' && anywaySkip(c7.verdict, null) === 'rule'
+       && show(videoLine(c7, c7.verdict)) === show(['61 of 61 videos', '49 needed for 80%']),
+     'C7: every video done, a first_paid_at on file, the stored row saying Whop shows no real payment: the verdict says so (the approve route refuses it), the count still on the line, Approve anyway skipping it as it skips the rule', show({ verdict: c7.verdict, coupon: c7.coupon }))
+  ok(approve(C.per.get('s-c7'), new Date(WED), c7).said.ok, 'C7: (the rule alone would have said yes: Whop showing no real payment is what refuses)')
+  const c8 = request(C.view, 'r-c8')
+  ok(c8.verdict.ok && c8.coupon?.noRealPayment === false && c8.coupon?.discounted === false,
+     'C8: the same row with a 97.00 first payment stored: a real payment, the rule\'s yes', show({ verdict: c8.verdict, coupon: c8.coupon }))
   ok(couponOf(undefined, { whop_membership_id: 'mem_x' }) === null && couponOf(stored('s'), { whop_membership_id: 'mem_devOther' }) === null
        && couponOf(stored('s'), { whop_membership_id: null })?.discounted === true && couponOf(stored('s'), { whop_membership_id: 'pay_devX' })?.code === 'evolve10',
      'couponOf: no row, or a row from another membership: no coupon; with no membership id on file (none, or a payment\'s), the student\'s row counts (T-122: the cron wrote it through the Whop user or a payment)')

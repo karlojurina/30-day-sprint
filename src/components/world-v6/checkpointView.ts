@@ -40,7 +40,7 @@
  *                 them to tell the team, so it never reads "Closed".
  * Closed, rejected and the other not eligible take the grey look (tag "closed").
  */
-import { DISCOUNT_PERCENT, DISCOUNT_VIDEO_SHARE, type DiscountState } from "@/lib/world/discount";
+import { DISCOUNT_PERCENT, DISCOUNT_VIDEO_SHARE, closedBeforeEighty, type DiscountState } from "@/lib/world/discount";
 import type { CheckpointLook } from "@/lib/world-v6/checkpoint";
 
 const HOUR_MS = 3_600_000;
@@ -110,6 +110,12 @@ export function deadlineAt(iso: string): string {
  *   open          while it can still be earned: locked, and with no first
  *                 payment on record.
  *   closed        the same rule once the student's deadline has passed.
+ *   closedBefore  the rule their window had, for a deadline that passed
+ *                 before the 80% rule (expiredRuleLine; the review of
+ *                 2026-10-26): "The 30% was for finishing every video
+ *                 through Video Ads II within 2 weeks of joining." Until the
+ *                 review they read the 80% line, a rule the app never asked
+ *                 of them.
  *   beforeLaunch  a first payment before 1 October.
  *   ready         above Apply, once the student has met it ("at least": a
  *                 student who watched them all reads it too).
@@ -120,15 +126,35 @@ export function deadlineAt(iso: string): string {
  * of 23 October (discount.ts DISCOUNT_SHARED_DEADLINE), more than 2 weeks:
  * the line does not name that group, and their "Apply by" row shows their date.
  */
-export function discountRule(after: string): { open: string; closed: string; beforeLaunch: string; ready: string } {
+export function discountRule(after: string): {
+  open: string;
+  closed: string;
+  closedBefore: string;
+  beforeLaunch: string;
+  ready: string;
+} {
   const share = `${DISCOUNT_VIDEO_SHARE}%`;
   const closed = `The ${DISCOUNT_PERCENT}% is for watching ${share} of the videos through ${after} within 2 weeks of joining.`;
   return {
     open: `Watch ${share} of the videos through ${after} within 2 weeks of joining to apply.`,
     closed,
+    closedBefore: `The ${DISCOUNT_PERCENT}% was for finishing every video through ${after} within 2 weeks of joining.`,
     beforeLaunch: `Your 2 weeks have passed. ${closed}`,
     ready: `You've watched at least ${share} of the videos through ${after}. Apply now and the team confirms within 48 hours.`,
   };
+}
+
+/**
+ * The rule line after "This closed on ..." on an expired panel: the rule the
+ * student's window had. One that closed before the 80% rule
+ * (discount.ts DISCOUNT_EIGHTY_FROM, closedBeforeEighty) asked for every
+ * video, so it reads `closedBefore`; one that closed since reads `closed`.
+ * Whether the 80% reaches back to the early windows is the owner's call:
+ * until he makes it, the line says what the app asked of them.
+ */
+export function expiredRuleLine(endsAt: string, after: string): string {
+  const rule = discountRule(after);
+  return closedBeforeEighty(endsAt) ? rule.closedBefore : rule.closed;
 }
 
 /**

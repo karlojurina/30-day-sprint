@@ -59,7 +59,9 @@
  *      the cache's lantern lit (near); since the 80% rule (2026-10-26) ?p=mid
  *      (a1 to a3 and a4l01 to a4l09, 53 of 61), the locked student this row
  *      used until then, is past it, and the cache is ready
- *  10  closed for the student (expired, a first payment before 1 October:
+ *  10  closed for the student (expired, a window that closed after the 80%
+ *      rule began, so the line is the rule as it stands; a first payment
+ *      before 1 October:
  *      T-080, 9 September until 2026-10-19) and no first payment on record: since Lovro's second Loom (2026-10-16, "clickable
  *      at all times") the tag and the marker show, grey when closed, and a
  *      real click on the tag opens the panel, which says why in one line,
@@ -149,8 +151,11 @@
  *      hour in the student's own time zone (checkpointView.ts deadlineAt)
  *  25  the same student on 24 October (?discount=october-expired): no
  *      chip, the tag and the marker closed, and the panel says "This closed
- *      on Fri 23 Oct, 23:59." and then the rule, never "your first 14 days"; no Apply;
- *      grey. The phone's sheet says the same
+ *      on Fri 23 Oct, 23:59." and then the rule that window had, "The 30% was
+ *      for finishing every video through Video Ads II within 2 weeks of
+ *      joining." (it closed before the 80% rule: the review of 2026-10-26),
+ *      never "your first 14 days" or the 80%; no Apply; grey. The phone's
+ *      sheet says the same
  *  26  that student's application from the old dashboard, made on 6
  *      October (?discount=october-old-course, -pending, -approved): the
  *      map shows it ("Yours", "In review", "Approved"; the header's chip
@@ -905,7 +910,8 @@ try {
     for (const [preset, word, look, why] of [
       // T-080: the date carries its hour (deadlineAt); before-launch is a first payment before 1 October now (9 September until 2026-10-19).
       // Since 2026-10-20 each says the rule in one line after the fact (checkpointView.ts discountRule).
-      // Since 2026-10-26 the rule is 80% of the videos ("finishing every video" until then).
+      // Since 2026-10-26 the rule is 80% of the videos ("finishing every video" until then). The expired preset's window
+      // closes after the 80% rule began (fixtureDiscount.tsx), so it reads the rule as it stands; row 25's closed before.
       ['expired', 'Closed', 'closed', /This closed on \w{3} \d{1,2} \w{3,4}, \d{2}:\d{2}\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./],
       ['before-launch', 'Closed', 'closed', /Your 2 weeks have passed\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./],
       // Maybe a new student whose payment has not reached the app: the word is what the panel asks, in the open look.
@@ -1555,8 +1561,10 @@ try {
     }
   })
 
-  await runRow(25, "october-expired: the shared deadline passed: no chip; the tag and the marker closed; the panel says when it closed, then the rule; no Apply", async (r) => {
-    const WORDS = /This closed on Fri 23 Oct, 23:59\. The 30% is for watching 80% of the videos through Video Ads II within 2 weeks of joining\./
+  await runRow(25, "october-expired: the shared deadline passed: no chip; the tag and the marker closed; the panel says when it closed, then the rule that window had; no Apply", async (r) => {
+    // The review of 2026-10-26: the shared deadline passed before the 80% rule, while the app asked for every video, so
+    // the line says the rule that window had (checkpointView.ts expiredRuleLine); it read the 80% line until the review.
+    const WORDS = /This closed on Fri 23 Oct, 23:59\. The 30% was for finishing every video through Video Ads II within 2 weeks of joining\./
     const page = await r.open({ discount: 'october-expired' }, '', DESKTOP, ZAGREB)
     let s = await page.evaluate(SNAP)
     r.check('no chip in the header', s.chip === null && s.chipState === null, { chip: s.chip, chipState: s.chipState })
@@ -1566,7 +1574,7 @@ try {
     await parked(page, 'row 25')
     s = await page.evaluate(SNAP)
     r.check('a real click on the tag opens the panel, the camera parked at the cache', via === 'mouse' && s.panel?.title === '30% off your next month' && s.park?.id === 'checkpoint', { via, panel: s.panel?.title, park: s.park })
-    r.check('in Croatia it says it closed on Fri 23 Oct, 23:59, then the rule (never "your first 14 days", no sentence about the shared group)', WORDS.test(s.panel?.text ?? '') && !/first 14 days|Everyone who joined|until the new course opened/.test(s.panel?.text ?? ''), s.panel?.text)
+    r.check('in Croatia it says it closed on Fri 23 Oct, 23:59, then the rule that window had, every video (never "your first 14 days", no sentence about the shared group, never the 80% it was not asked)', WORDS.test(s.panel?.text ?? '') && !/first 14 days|Everyone who joined|until the new course opened|80%/.test(s.panel?.text ?? ''), s.panel?.text)
     const eyebrow = await page.evaluate(EYEBROW)
     r.check('its eyebrow ends "Closed"', eyebrow?.at(-1) === 'Closed', eyebrow)
     r.check('no Apply', (await page.evaluate(FIND.apply)) === null)

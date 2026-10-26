@@ -457,8 +457,8 @@ export function Button({
    * Why the button can do nothing here, in a plain sentence: it is greyed and
    * presses do nothing, but it stays in the keyboard's path (aria-disabled,
    * not disabled), and the sentence is its title, the hover's tip and what a
-   * screen reader is told. The 30% page's Copy @ and Copy ID for a student
-   * with none on file (2026-10-26).
+   * screen reader is told. The 30% page's Copy Discord ID and Copy username
+   * for a student with none on file (2026-10-26).
    */
   unavailable?: string;
 }) {

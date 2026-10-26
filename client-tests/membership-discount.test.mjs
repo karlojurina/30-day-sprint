@@ -296,7 +296,7 @@ const {
   WHOP_DISCOUNT_VERSION, MEMBERSHIP_DISCOUNTS_TABLE, REFRESH_START_BUDGET_MS, priceOf, idOf, isDiscounted, storedRowApplies,
   isMembershipId, newReadContext, readMembershipDiscount, checkMembershipDiscount, codeOf,
   FULL_PRICE, paidUnderFullPrice, courseProductIds, findCourseMemberships, judgeStudentDiscount, lacksSourceColumn, isNoAnswer,
-  paymentCoupon,
+  paymentCoupon, rowShowsNoRealPayment,
 } = await import('./_gen/membership-discount.ts')
 const { fetchCoursePayments, taxOnTopOf, judgePayment } = await import('./_gen/first-payment.ts')
 const { ETFB_PRODUCT_ID, TEAM_SEAT_PRODUCT_ID } = await import('./_gen/whop-products.ts')
@@ -828,7 +828,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devEvolve' }] })
   const live = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
   const row = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
-  ok(show(live.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'membership', liveFail: null, saved: true }), 'Whop answers: discounted, evolve10, live from the membership on file, and saved', show(live.value))
+  ok(show(live.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'membership', liveFail: null, saved: true, noRealPayment: false }), 'Whop answers: discounted, evolve10, live from the membership on file, and saved', show(live.value))
   ok(row && row.student_id === 's1' && row.whop_membership_id === 'mem_devEvolve' && row.promo_code === 'evolve10' && row.promo_code_id === 'promo_devEvolve'
        && row.renewal_price === 87.3 && row.plan_renewal_price === 97 && row.discounted === true && row.checked_at === new Date().toISOString()
        && row.source === R5('membership') && row.source_checked_at === row.checked_at,
@@ -850,7 +850,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   whop.answer = () => json(500, {})
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devEvolve' }], [MEMBERSHIP_DISCOUNTS_TABLE]: [storedEvolve('s1')] })
   const r = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
-  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'stored', via: null, liveFail: 'http_other', saved: false }), 'Whop fails: the stored row for this membership decides (nothing saved)', show(r.value))
+  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'stored', via: null, liveFail: 'http_other', saved: false, noRealPayment: false }), 'Whop fails: the stored row for this membership decides (nothing saved)', show(r.value))
   ok(r.lines.length === 1 && r.lines[0].includes('http_other') && r.lines[0].includes('the stored row decides') && !r.lines[0].includes('mem_'),
      'one line for the log, with the kind and no Whop id', show(r.lines))
 }
@@ -874,7 +874,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   const noMembership = new FakeDb({ students: [{ id: 's1', whop_membership_id: null, whop_user_id: 'user_devFullPay' }], [MEMBERSHIP_DISCOUNTS_TABLE]: [storedEvolve('s1')] })
   const r2 = await quiet(() => checkMembershipDiscount(fakeClient(noMembership), 's1', { apiKey: KEY }))
   const row2 = noMembership.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
-  ok(show(r2.value) === show({ discounted: false, code: null, source: 'live', via: 'user', liveFail: null, saved: true })
+  ok(show(r2.value) === show({ discounted: false, code: null, source: 'live', via: 'user', liveFail: null, saved: true, noRealPayment: false })
        && row2.whop_membership_id === 'mem_devFull' && row2.source === R5('user') && row2.discounted === false && r2.lines.length === 0,
      'no membership on file: the course membership found through the Whop user answers (full price), and its row replaces the old one', show({ answer: r2.value, row: row2 }))
 }
@@ -883,14 +883,14 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   resetWhop()
   const db = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'pay_devPayment', whop_user_id: 'user_devEvolvePay' }] })
   const r = await quiet(() => checkMembershipDiscount(fakeClient(db), 's1', { apiKey: KEY }))
-  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'user', liveFail: null, saved: true })
+  ok(show(r.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'user', liveFail: null, saved: true, noRealPayment: false })
        && db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].whop_membership_id === 'mem_devEvolve' && r.lines.length === 0,
      'a payment\'s id on file: through the Whop user, evolve10, stored for the membership it judged', show(r.value))
   resetWhop()
   const odd = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'mem_devNullPrice', whop_user_id: 'user_devOdd' }] })
   const r3 = await quiet(() => checkMembershipDiscount(fakeClient(odd), 's1', { apiKey: KEY }))
   const row3 = odd.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
-  ok(show(r3.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'payment', liveFail: null, saved: true })
+  ok(show(r3.value) === show({ discounted: true, code: 'evolve10', source: 'live', via: 'payment', liveFail: null, saved: true, noRealPayment: false })
        && row3.source === R5('payment') && row3.renewal_price === 87.3 && row3.plan_renewal_price === 97 && row3.whop_membership_id === 'mem_devOdd',
      'a null renewal price: the latest real payment (87.30) answers, stored with source payment for the payment\'s membership (since the second fix round)', show(row3))
   // Whop down while the user is asked, with a row stored through the user before: the stored row decides (the id on file names no membership).
@@ -898,7 +898,7 @@ function storedEvolve(student, membership = 'mem_devEvolve') {
   whop.answer = () => 'throw'
   const stale = new FakeDb({ students: [{ id: 's1', whop_membership_id: 'pay_devPayment', whop_user_id: 'user_devEvolvePay' }], [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...storedEvolve('s1', 'mem_devEvolve'), source: 'user' }] })
   const r4 = await quiet(() => checkMembershipDiscount(fakeClient(stale), 's1', { apiKey: KEY }))
-  ok(show(r4.value) === show({ discounted: true, code: 'evolve10', source: 'stored', via: null, liveFail: 'network', saved: false })
+  ok(show(r4.value) === show({ discounted: true, code: 'evolve10', source: 'stored', via: null, liveFail: 'network', saved: false, noRealPayment: false })
        && r4.lines.some((l) => l.includes('Whop gave no answer (network), so the stored row decides')),
      'Whop down, a payment\'s id on file and a row stored through the user: that row decides', show(r4.value))
   resetWhop()
@@ -1068,7 +1068,6 @@ for (const [name, route, path, body] of [
     // Since T-122's second fix round every real payment is judged: the 87.30 on evolve10 before the newest 97.00 refuses (it went in until then).
     ['a null renewal price, the latest real payment 97.00 and an 87.30 on evolve10 before it', 'mem_devNullPrice', 'user_devOddFull', 400, 'payment'],
     ['no course membership through the Whop user, a real payment of 87.30', 'pay_devNotAMembership', 'user_devNoCourse', 400, 'payment'],
-    ['no course membership and no real payment', 'pay_devNotAMembership', 'user_devNothing', 200, 'payment'],
   ]) {
     resetWhop()
     db = readyDb(membership, {}, user)
@@ -1078,6 +1077,48 @@ for (const [name, route, path, body] of [
     ok(r.value.status === status && (status === 400 ? r.value.body.error === LINE && wrote === 0 : wrote === 1) && stored?.source === R5(source) && stored?.discounted === (status === 400),
        `${why}: ${status === 400 ? '400, the student\'s line, nothing written' : '200, the request goes in'} (source ${source}, stored)`, show({ status: r.value.status, body: r.value.body, source: stored?.source }))
   }
+  // No real payment (the review of 2026-10-26, the owner's applicant: "by his username, he never had a membership. I
+  // see one payment, but it has failed ... he watched the course even though he never paid"). Each has a first_paid_at
+  // on file, as one written before the first-paid fix from a membership's creation, so the rule says ready. Until the
+  // review the request went in (200) and the normal Approve then approved it.
+  const NO_PAYMENT_LINE = "We can't see your first payment yet. Tell the team and they'll sort it out."
+  for (const [why, membership, user] of [
+    ['no course membership and no payment at all', 'pay_devNotAMembership', 'user_devNothing'],
+    ['no membership on file, none through the Whop user, and one payment that failed', null, 'user_devFailedPay'],
+  ]) {
+    resetWhop()
+    whop.payments.set('user_devFailedPay', [pay('pay_devFail1', 'user_devFailedPay', '97.00', '2026-10-10T10:00:00.000Z', { status: 'failed', substatus: 'failed', paid_at: null })])
+    db = readyDb(membership, {}, user)
+    r = await quiet(() => post(route, path, body))
+    const stored = db.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0]
+    ok(r.value.status === 400 && r.value.body.error === NO_PAYMENT_LINE && r.value.body.state === 'not-eligible'
+         && db.rows('discount_requests').length === 0 && db.calls('submit_discount_with_feedback', 'rpc').length === 0
+         && stored?.source === R5('payment') && stored?.discounted === false && stored?.renewal_price === null && stored?.promo_code_id === null
+         && r.lines.some((l) => l.includes('nothing written, Whop shows no real payment (live answer)')) && !r.lines.some((l) => /pay_dev|user_dev|@example/.test(l)),
+       `${why}: refused before anything is written, in the map's sentence for no first payment (it went in until the review); Whop's answer stored with no code and no price; the log says why with no Whop id`,
+       show({ status: r.value.status, body: r.value.body, stored, lines: r.lines }))
+  }
+  // The same student when Whop does not answer: the stored row this rule wrote says it, so the same refusal.
+  resetWhop()
+  whop.answer = () => 'throw'
+  db = readyDb('pay_devNotAMembership', { [MEMBERSHIP_DISCOUNTS_TABLE]: [stampedBy({
+    student_id: 's1', whop_membership_id: null, promo_code_id: null, promo_code: null, renewal_price: null, plan_renewal_price: null,
+    discounted: false, checked_at: '2026-10-20T08:40:00.000Z',
+  }, 'payment')] }, 'user_devNothing')
+  r = await quiet(() => post(route, path, body))
+  ok(r.value.status === 400 && r.value.body.error === NO_PAYMENT_LINE && db.rows('discount_requests').length === 0
+       && r.lines.some((l) => l.includes('nothing written, Whop shows no real payment (stored answer)')),
+     'Whop down, the row this rule stored says no real payment: the same refusal, nothing written', show({ value: r.value, lines: r.lines }))
+  // A real payment stored (97.00, no code), Whop down: the request goes in on the stored answer.
+  resetWhop()
+  whop.answer = () => 'throw'
+  db = readyDb('pay_devNotAMembership', { [MEMBERSHIP_DISCOUNTS_TABLE]: [stampedBy({
+    student_id: 's1', whop_membership_id: null, promo_code_id: null, promo_code: null, renewal_price: 97, plan_renewal_price: 97,
+    discounted: false, checked_at: '2026-10-20T08:40:00.000Z',
+  }, 'payment')] }, 'user_devCtl97')
+  r = await quiet(() => post(route, path, body))
+  ok(r.value.status === 200 && db.rows('discount_requests').length === 1, 'Whop down, the stored row holding a real payment\'s price: the request goes in', show(r.value))
+
   // Whop down at the steps T-122 added: still the 503 and nothing written.
   for (const [why, membership, user, answer] of [
     ['a payment\'s id on file, Whop down while the user is asked', 'pay_devNotAMembership', 'user_devEvolvePay', (p) => (p === '/api/v2/memberships' ? json(503, {}) : null)],
@@ -1452,6 +1493,109 @@ async function listedRow(db) {
   ok(r4.value.status === 200 && show(r4.value.body) === show({ discounted: true, code: 'evolve10' }) && gone.rows(MEMBERSHIP_DISCOUNTS_TABLE)[0].whop_membership_id === 'mem_devEvolve2'
        && goneRow?.couponCheck === 'not-checked',
      'a membership Whop does not know: 200, evolve10 on the one found through the Whop user; the list, which compares with the membership on file, says "not checked yet" until the sync puts the new one there (Approve asks Whop first)', show({ body: r4.value.body, check: goneRow?.couponCheck }))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// The review of 2026-10-26. The owner, of an applicant: "by his username, he never had a membership. I see one payment,
+// but it has failed ... he watched the course even though he never paid." judgeStudentDiscount has said it since T-122
+// (noRealPayment), but only the cron counted it: a student whose first_paid_at was filled before the first-paid fix
+// could apply, and the normal Approve approved. Now the check carries it (CouponCheck.noRealPayment): the request routes
+// refuse (above), the approve route's normal Approve refuses with code "rule", Approve anyway passes, and the 30% page's
+// verdict says it from the row the check stored.
+console.log('\n=== No real payment: the approve route and the 30% page (the review of 2026-10-26) ===')
+{
+  const FAILED = [pay('pay_devFail1', 'user_devFailedPay', '97.00', '2026-10-10T10:00:00.000Z', { status: 'failed', substatus: 'failed', paid_at: null })]
+  const NO_PAYMENT = 'Cannot approve: Whop shows no real payment from this student, and the 30% needs one.'
+  /** readyDb's student (every video up to the gate watched, a first_paid_at on file) with a pending request, on `user`. */
+  const pendingDb = (membership, user, more = {}) => readyDb(membership, {
+    discount_requests: [{ id: 'r1', student_id: 's1', status: 'pending', created_at: new Date(Date.parse(NOW) - 3_600_000).toISOString() }],
+    admin_config: [{ key: 'curriculum_reset_at', value: '2026-10-19T14:33:00.000Z' }],
+    ...more,
+  }, user)
+  for (const [why, membership, user] of [
+    ['no membership and no payment at all', 'pay_devNotAMembership', 'user_devNothing'],
+    ['no membership on file or through the Whop user, and one payment that failed (the owner\'s applicant)', null, 'user_devFailedPay'],
+  ]) {
+    resetWhop()
+    whop.payments.set('user_devFailedPay', FAILED)
+    const db = pendingDb(membership, user)
+    const before = await listedRow(db)
+    const made = promoCodes.length
+    const r = await quiet(() => approve(false))
+    const after = await listedRow(db)
+    ok(before?.verdict?.ok === true && before?.couponCheck === 'not-checked',
+       `${why}: before Approve the 30% page has nothing stored, so its verdict is the rule's yes and the coupon "not checked yet"`, show(before?.verdict))
+    ok(r.value.status === 400 && r.value.body.code === 'rule' && r.value.body.error === NO_PAYMENT && promoCodes.length === made
+         && db.rows('discount_requests')[0].status === 'pending' && r.lines.some((l) => l.includes('nothing approved, Whop shows no real payment from the student'))
+         && !r.lines.some((l) => /pay_dev|user_dev|@example/.test(l)),
+       `${why}: the normal Approve refused, 400 with code "rule" and the team's sentence, no Whop code made, still pending (it approved until the review)`, show({ value: r.value, lines: r.lines }))
+    ok(after?.verdict?.reason === 'no-real-payment' && !after.verdict.ok && after.verdict.text === 'Whop shows no real payment from this student, and the 30% needs one.'
+         && after.coupon?.noRealPayment === true && after.facts?.videosDone === 2,
+       `${why}: the route stored Whop's answer, so the 30% page's list read again says it as the verdict, the count still judged`, show(after?.verdict))
+    resetWhop()
+    whop.payments.set('user_devFailedPay', FAILED)
+    const db2 = pendingDb(membership, user)
+    const made2 = promoCodes.length
+    const r2 = await quiet(() => approve(true))
+    ok(r2.value.status === 200 && promoCodes.length === made2 + 1 && db2.rows('discount_requests')[0].status === 'approved'
+         && r2.lines.some((l) => l.includes('OVERRIDE') && l.includes('Eligibility gates skipped.') && l.includes('Whop shows no real payment from the student.')),
+       `${why}: Approve anyway (override, a founder's) approves past it, the code made, and the log line says what it skipped`, show({ body: r2.value.body, lines: r2.lines }))
+  }
+  // Whop down: the row this rule stored says no real payment, so the normal Approve is refused the same way.
+  resetWhop()
+  whop.answer = () => 'throw'
+  const stored = stampedBy({
+    student_id: 's1', whop_membership_id: null, promo_code_id: null, promo_code: null, renewal_price: null, plan_renewal_price: null,
+    discounted: false, checked_at: '2026-10-20T08:40:00.000Z',
+  }, 'payment')
+  const db = pendingDb('pay_devNotAMembership', 'user_devNothing', { [MEMBERSHIP_DISCOUNTS_TABLE]: [stored] })
+  const made = promoCodes.length
+  const r = await quiet(() => approve(false))
+  ok(r.value.status === 400 && r.value.body.code === 'rule' && r.value.body.error === NO_PAYMENT && promoCodes.length === made && db.rows('discount_requests')[0].status === 'pending',
+     'Whop down, the stored row this rule wrote saying no real payment: the normal Approve refused the same way, nothing made', show(r.value))
+  ok((await listedRow(db))?.verdict?.reason === 'no-real-payment', 'and the 30% page\'s verdict says it from that row')
+  // The same row with no stamp (an older build wrote it): it answers nothing, so Whop's silence is the 503 as before.
+  resetWhop()
+  whop.answer = () => 'throw'
+  const unstamped = pendingDb('pay_devNotAMembership', 'user_devNothing', { [MEMBERSHIP_DISCOUNTS_TABLE]: [{ ...stored, source: null, source_checked_at: null }] })
+  const r3 = await quiet(() => approve(false))
+  ok(r3.value.status === 503 && r3.value.body.code === 'rule' && unstamped.rows('discount_requests')[0].status === 'pending',
+     'the same row with no stamp, Whop down: no stored answer, the 503 the normal Approve gave before', show(r3.value))
+  // A student with a real payment and no membership answering (a 97.00 checkout naming no code): approved as before.
+  resetWhop()
+  const ok97 = pendingDb('pay_devNotAMembership', 'user_devCtl97')
+  const made4 = promoCodes.length
+  const r4 = await quiet(() => approve(false))
+  ok(r4.value.status === 200 && promoCodes.length === made4 + 1 && ok97.rows('discount_requests')[0].status === 'approved',
+     'no membership answering but a real 97.00 payment naming no code: approved, the code made', show(r4.value.body))
+}
+
+// Every answer of judgeStudentDiscount this file has made says no real payment exactly when its stored row shows none
+// (rowShowsNoRealPayment): the stored fallback and the 30% page read the row, the routes the answer.
+{
+  const users = ['user_devNothing', 'user_devFailedPay', 'user_devCtl97', 'user_devOdd', 'user_devOddFull', 'user_devNoCourse', 'user_devNullPay',
+    'user_devEvolvePay', 'user_devFullPay', 'user_devYear970', 'user_devTaxed', 'user_devListGone', 'user_devCtlTax', 'user_devCtl970', 'user_devCtlIncl', 'user_devUsedPay', 'user_devFreeFull']
+  const files = [null, 'pay_devNotAMembership', 'mem_devFull', 'mem_devNullPrice', 'mem_devMissing', 'mem_devOdd', 'mem_devFree']
+  let answers = 0
+  let none = 0
+  const wrong = []
+  for (const user of users) {
+    for (const onFile of files) {
+      resetWhop()
+      whop.payments.set('user_devFailedPay', [pay('pay_devFail1', 'user_devFailedPay', '97.00', '2026-10-10T10:00:00.000Z', { status: 'failed', substatus: 'failed', paid_at: null })])
+      const a = await quiet(() => judgeStudentDiscount({ id: 's1', whop_membership_id: onFile, whop_user_id: user, first_paid_at: null }, newReadContext(KEY, Date.now() + 60_000, Date.now() + 60_000)))
+      if (!a.value.ok) continue
+      answers++
+      if (a.value.noRealPayment) none++
+      if (rowShowsNoRealPayment(a.value.row) !== a.value.noRealPayment) wrong.push(`${user} ${onFile}: ${show({ noRealPayment: a.value.noRealPayment, row: a.value.row })}`)
+    }
+  }
+  ok(answers > 80 && none >= 4 && answers - none >= 60 && wrong.length === 0,
+     `rowShowsNoRealPayment agrees with noRealPayment on all ${answers} answers (17 Whop users by 7 ids on file), ${none} of them no real payment`, wrong.slice(0, 3).join(' | '))
+  ok(rowShowsNoRealPayment({ discounted: false, promo_code_id: null, renewal_price: null }) && !rowShowsNoRealPayment({ discounted: false, promo_code_id: null })
+       && !rowShowsNoRealPayment({ discounted: false, promo_code_id: null, renewal_price: '97.00' }) && !rowShowsNoRealPayment({ discounted: true, promo_code_id: null, renewal_price: null })
+       && !rowShowsNoRealPayment({ discounted: false, promo_code_id: 'promo_devX', renewal_price: null }),
+     'rowShowsNoRealPayment: no coupon, no code and no price; a column not read (undefined) is never no price, and a price as Postgres sends it (a string) is one')
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1864,10 +2008,10 @@ console.log('\n=== vercel.json, the migration and its undo ===')
   // "no coupon" this rule wrote; on a database without v113 it reads again without it (run in the round's own section).
   // Since the fifth it names source_checked_at with it, and reads checked_at.
   ok(/MEMBERSHIP_DISCOUNT_COLUMNS =\s+"student_id, whop_membership_id, promo_code_id, promo_code, renewal_price, plan_renewal_price, discounted, checked_at";/.test(src)
-       && /STORED_FALLBACK_COLUMNS = "whop_membership_id, promo_code_id, promo_code, discounted, checked_at";/.test(src)
+       && /STORED_FALLBACK_COLUMNS = "whop_membership_id, promo_code_id, promo_code, renewal_price, discounted, checked_at";/.test(src)
        && (src.match(/`\$\{STORED_FALLBACK_COLUMNS\}, source, source_checked_at`/g) ?? []).length === 1 && !/\.select\("[^"]*source/.test(src)
        && /if \(!lacksSourceColumn\(withSource\.error\)\) return null;\s+const bare = await read\(STORED_FALLBACK_COLUMNS\);/.test(src),
-     'one read names source and source_checked_at, the request routes\' fallback, and on a database without v113 it reads again without them, so every read still answers there')
+     'one read names source and source_checked_at, the request routes\' fallback (with renewal_price since 2026-10-26, for a stored "no real payment"), and on a database without v113 it reads again without them, so every read still answers there')
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2464,7 +2608,7 @@ console.log('\n=== T-122\'s third fix round: a code anywhere is a coupon, then t
     const d = await check(stampedBy(noCoupon, 'user'), noV113)
     // A step's word alone (an earlier round's build wrote it) answered until T-122's fifth fix round; now this rule's stamp alone does.
     ok(a.source === 'none' && b.source === 'stored' && b.discounted === false && b2.source === 'none' && c.source === 'none' && d.source === 'none'
-         && show(d.selects) === show(['whop_membership_id, promo_code_id, promo_code, discounted, checked_at, source, source_checked_at', 'whop_membership_id, promo_code_id, promo_code, discounted, checked_at']),
+         && show(d.selects) === show(['whop_membership_id, promo_code_id, promo_code, renewal_price, discounted, checked_at, source, source_checked_at', 'whop_membership_id, promo_code_id, promo_code, renewal_price, discounted, checked_at']),
        'checkMembershipDiscount: "no coupon" with no source none, with this rule\'s stamp stored, with a step\'s word alone or any other value none; without v113 read twice and none', show({ a: a.source, b: b.source, b2: b2.source, c: c.source, d }))
   }
 

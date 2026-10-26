@@ -37,6 +37,14 @@
  *                     still offers only Reject, and Check Whop again finds no
  *                     discount, so the rule decides her row and Approve is
  *                     back (the render review's second round)
+ *          nopayment  full, with Whop showing no real payment from two
+ *                     students who watched enough (the review of 2026-10-26,
+ *                     the owner's applicant who "never paid"): Jonah's stored
+ *                     row says so, so his verdict does and he has no Approve;
+ *                     Maya's stored row is a clean one and Whop says so only
+ *                     now, so her Approve is refused with code "rule", the
+ *                     answer stored, and her row then reads the same. Approve
+ *                     anyway passes both
  *
  * The Approved rows' coupon is what Whop says now (liveCoupons, as
  * GET /api/admin/thirty asks it): Ethan was approved before the coupon rule
@@ -54,10 +62,12 @@
  * The page's clock is FIXTURE_NOW, so every date reads the same on every run.
  *
  * The 80% rule (the owner, 2026-10-26: 49 of the 61 videos): Jonah has
- * watched 49, the least that meets it, and Priya 48, one short. Copy @ and
- * Copy ID (the same day): Maya has both a Discord username and an id, Hugo a
- * username only, Leo and Omar an id only, Priya neither, and Lena's username
- * is stored with its own "@" (copied with one). Every Discord id is invented.
+ * watched 49, the least that meets it, and Priya 48, one short. Copy Discord
+ * ID and Copy username (the same day; "Copy ID" and "Copy @" until its
+ * review): Maya has both an id and a username, Hugo a username only, Leo and
+ * Omar an id only, Priya neither (her row says so in a line), and Lena's
+ * username is stored with its own "@" (copied with one). Every Discord id is
+ * invented.
  */
 
 import { buildThirtyView } from "@/lib/admin/thirty-view";
@@ -65,7 +75,8 @@ import type { ThirtyView } from "@/lib/admin/thirty-view";
 import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyRequest, ThirtyStudent } from "@/lib/admin/thirty-data";
 import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
-import { couponApprovalRefusal } from "@/lib/world/discount-server";
+import { NO_REAL_PAYMENT_APPROVAL, couponApprovalRefusal } from "@/lib/world/discount-server";
+import { rowShowsNoRealPayment } from "@/lib/membership-discount";
 import type { CatalogLessonRow, CompletionRow, DiscountReads, VideoRow } from "@/lib/world/discount-server";
 
 /** Tue 20 Oct 2026, 10:30 in Croatia: the moment every dev load is read at. */
@@ -98,14 +109,17 @@ const REQUIRED = LESSONS.map((l) => l.id);
 const VIDEOS: VideoRow[] = REQUIRED.map((lesson_id) => ({ lesson_id, created_at: LOADED }));
 
 // ── The made-up database ────────────────────────────────────────────────────
-/** A Whop membership as the coupon rule reads it: a code, the next renewal's price and the plan's. */
+/**
+ * A Whop membership as the coupon rule reads it: a code, the next renewal's price and the plan's. No prices and no
+ * code: the rule's "no real payment" answer (NO_PAYMENT).
+ */
 interface Membership {
   /** The code's name; null with no code, or when its name could not be read (then `promoId` is the code). */
   code: string | null;
   /** The code's Whop promo id, when it is not promoIdOf(code). */
   promoId?: string | null;
-  renewal: number;
-  plan: number;
+  renewal: number | null;
+  plan: number | null;
 }
 
 /** A made-up Whop promo id for a code: "promo_dev" and the code's letters and digits. */
@@ -160,6 +174,11 @@ const EVOLVE: Membership = { code: "evolve10", renewal: 87.3, plan: 97 };
 const USED_UP: Membership = { code: "welcome50", renewal: 97, plan: 97 };
 /** No code: the cron read the membership and found nothing. */
 const CLEAN: Membership = { code: null, renewal: 97, plan: 97 };
+/**
+ * Whop shows no real payment (the review of 2026-10-26): no course membership with a price and no paid course
+ * payment, which the rule stores as a row with no code and no price (membership-discount.ts rowShowsNoRealPayment).
+ */
+const NO_PAYMENT: Membership = { code: null, renewal: null, plan: null };
 
 function fullDb(): FixtureDb {
   return {
@@ -269,6 +288,18 @@ function staleCouponDb(): FixtureDb {
   return db;
 }
 
+/**
+ * The full fixture, with Whop showing no real payment from Jonah (stored) and
+ * from Maya (only now, so her stored row is still a clean one): the review of
+ * 2026-10-26.
+ */
+function noPaymentDb(): FixtureDb {
+  const db = fullDb();
+  db.people.find((p) => p.id === "p-jonah")!.stored = NO_PAYMENT;
+  db.people.find((p) => p.id === "p-maya")!.live = NO_PAYMENT;
+  return db;
+}
+
 /** The full fixture plus one student whose progress cannot be read, with a request waiting. */
 function partialDb(): FixtureDb {
   const db = fullDb();
@@ -297,7 +328,7 @@ function couponRow(p: Person, m: Membership, checkedAt: string): ThirtyCouponRow
     renewal_price: m.renewal,
     plan_renewal_price: m.plan,
     // THE RULE (membership-discount.ts): a code on the membership, and a next renewal below the plan's.
-    discounted: promoId !== null && Math.round(m.renewal * 100) < Math.round(m.plan * 100),
+    discounted: promoId !== null && m.renewal !== null && m.plan !== null && Math.round(m.renewal * 100) < Math.round(m.plan * 100),
     checked_at: checkedAt,
   };
 }
@@ -392,9 +423,19 @@ function liveCoupons(db: FixtureDb, failAll: boolean): Map<string, LiveCoupon> {
 }
 
 // ── The stand-in for the server ─────────────────────────────────────────────
-export type FixtureState = "full" | "empty" | "loading" | "error" | "partial" | "novideos" | "nocoupons" | "owncode" | "stalecoupon";
+export type FixtureState =
+  | "full"
+  | "empty"
+  | "loading"
+  | "error"
+  | "partial"
+  | "novideos"
+  | "nocoupons"
+  | "owncode"
+  | "stalecoupon"
+  | "nopayment";
 
-const STATES: FixtureState[] = ["full", "empty", "loading", "error", "partial", "novideos", "nocoupons", "owncode", "stalecoupon"];
+const STATES: FixtureState[] = ["full", "empty", "loading", "error", "partial", "novideos", "nocoupons", "owncode", "stalecoupon", "nopayment"];
 
 export function parseFixtureState(value: string | null): FixtureState {
   return STATES.find((s) => s === value) ?? "full";
@@ -447,7 +488,9 @@ export function fixtureThirtyTransport(opts: {
           ? ownCodeDb()
           : opts.state === "stalecoupon"
             ? staleCouponDb()
-            : fullDb();
+            : opts.state === "nopayment"
+              ? noPaymentDb()
+              : fullDb();
   const calls: FixtureCall[] = [];
   let minute = 0;
   let served = false;
@@ -506,7 +549,8 @@ export function fixtureThirtyTransport(opts: {
       }
       if (a.status !== "pending") return later<{ promoCode: string | null }>({ ok: false, status: 400, error: "Request already processed" });
       // D5, as the route: Whop now (the stored row when Whop says nothing new), stored, then refused, with `override`
-      // too. Approve anyway on the coupon's row (`overrideCoupon`) does not ask Whop at all.
+      // too. Approve anyway on the coupon's row (`overrideCoupon`) does not ask Whop at all. Then, as the route since
+      // 2026-10-26, Whop showing no real payment refuses the normal Approve with code "rule".
       const p = person(a.studentId);
       const now = p?.live ?? p?.stored;
       if (p && now && !overrideCoupon) {
@@ -519,6 +563,9 @@ export function fixtureThirtyTransport(opts: {
             error: couponApprovalRefusal(row.promo_code),
             code: "has-discount",
           });
+        }
+        if (rowShowsNoRealPayment(row) && !override) {
+          return later<{ promoCode: string | null }>({ ok: false, status: 400, error: NO_REAL_PAYMENT_APPROVAL, code: "rule" });
         }
       }
       if (!override) {

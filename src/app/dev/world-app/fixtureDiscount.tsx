@@ -2,7 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DiscountStandInContext, type DiscountStandIn } from "@/components/world/useWorldDiscount";
-import { DISCOUNT_LAUNCH_DATE, requiredLessons, videosNeeded, type DiscountLesson, type DiscountRequestRow } from "@/lib/world/discount";
+import {
+  DISCOUNT_EIGHTY_FROM,
+  DISCOUNT_LAUNCH_DATE,
+  DISCOUNT_WINDOW_DAYS,
+  requiredLessons,
+  videosNeeded,
+  type DiscountLesson,
+  type DiscountRequestRow,
+} from "@/lib/world/discount";
 import type { CatalogLessonLike } from "@/lib/world/catalog";
 import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/database";
 
@@ -37,9 +45,11 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *   ?discount=rejected       as ready, and the application not approved, with
  *                            the team's reason
  *   ?discount=expired        first payment 20 days ago, nothing applied for
- *                            (never before the launch: until 2026-10-29 the
- *                            payment is the day after it and this student's
- *                            clock runs on to day 20)
+ *                            (never before the launch, and never a window
+ *                            that closed before the 80% rule: until
+ *                            2026-11-01 the payment is 13 days before the
+ *                            rule's day and this student's clock runs on to
+ *                            day 20), so the panel reads the rule as it stands
  *   ?discount=before-launch  first payment on 2026-09-05, before 1 October,
  *                            the earliest first payment that can earn it
  *   ?discount=september      first payment on 2026-09-15. It had the shared
@@ -56,7 +66,10 @@ const NO_QUESTIONS: readonly DiscountFeedbackQuestion[] = [];
  *                            Oct, 23:59" (the hour is the browser's own time
  *                            zone: 17:59 in New York, Sat 24 Oct in Manila)
  *   ?discount=october-expired  the same student on 24 October, 10:00 in
- *                            Croatia: the shared deadline has passed
+ *                            Croatia: the shared deadline has passed, before
+ *                            the 80% rule, so the panel reads the rule that
+ *                            window had, every video (checkpointView.ts
+ *                            expiredRuleLine)
  *   ?discount=october-old-course  first payment on 2026-10-02, and the 30%
  *                            already got on the old dashboard (a request of
  *                            6 October, applied): the map shows it as
@@ -271,10 +284,18 @@ export function FixtureDiscount({ search, children }: { search: string | null; c
   const plainRef = useRef(0);
 
   // Expired: 20 days in, never before the launch (20 days back from today was,
-  // until 2026-10-29, so the panel said "joined before the new course"). When
-  // that puts the payment later than 20 days ago, this student's clock runs
-  // ahead to day 20 (DiscountStandIn.now); the rest of the page keeps the real one.
-  const expiredPaid = Math.max(boot - 20 * DAY_MS, Date.parse(DISCOUNT_LAUNCH_DATE) + DAY_MS);
+  // until 2026-10-29, so the panel said "joined before the new course"), and
+  // since the review of 2026-10-26 never a window that closed before the 80%
+  // rule (discount.ts DISCOUNT_EIGHTY_FROM: 14 days from the payment end after
+  // it), so the panel always reads the rule as it stands; ?discount=
+  // october-expired is a window that closed before it. When that puts the
+  // payment later than 20 days ago, this student's clock runs ahead to day 20
+  // (DiscountStandIn.now); the rest of the page keeps the real one.
+  const expiredPaid = Math.max(
+    boot - 20 * DAY_MS,
+    Date.parse(DISCOUNT_LAUNCH_DATE) + DAY_MS,
+    Date.parse(DISCOUNT_EIGHTY_FROM) - (DISCOUNT_WINDOW_DAYS - 1) * DAY_MS,
+  );
   const now =
     preset === "expired" && expiredPaid + 20 * DAY_MS > boot
       ? expiredPaid + 20 * DAY_MS

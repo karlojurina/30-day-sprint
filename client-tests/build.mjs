@@ -273,7 +273,7 @@ const RULE = [
 gen('../src/lib/admin/thirty-view.ts', './_gen/thirty-view.ts', [
   ...RULE,
   ['from "./croatia-dates"', 'from "./croatia-dates.ts"'],
-  // Copy @ (2026-10-26): a username's leading "@" taken off as the other admin pages take it (people-common.ts, copied below).
+  // Copy username (2026-10-26, "Copy @" until its review): a username's leading "@" taken off as the other admin pages take it (people-common.ts, copied below).
   ['from "./people-common"', 'from "./people-common.ts"'],
   ['from "./thirty-data"', 'from "./thirty-data.ts"'],
   // Whether a stored Whop id can be asked about at all (the review's fix round): the coupon rule's copy below.

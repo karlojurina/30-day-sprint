@@ -23,6 +23,10 @@
  *   membershipUncheckedRefusal
  *                          the request routes' refusal when that check could
  *                          not run (the owner's review, 2026-10-21)
+ *   noRealPaymentRefusal, NO_REAL_PAYMENT_APPROVAL
+ *                          Whop shows no real payment from the student (the
+ *                          coupon check's noRealPayment, 2026-10-26): the
+ *                          request routes' refusal and the approve route's
  *
  * Everything fails closed. A read that errors, or comes back empty where a
  * row must exist, means no request and no approval: a believable "you're not
@@ -261,8 +265,12 @@ export function secondPendingRequest(
  * on the questions' last step.
  *
  * Locked, since the 80% rule (2026-10-26): how many more videos the 80% needs
- * (state.lessonsLeft) and about how long the next ones take, in course order.
- * Until then it was every video left ("You have 3 videos left to watch").
+ * (state.lessonsLeft) and about how long the shortest of the videos not
+ * watched take (state.secondsLeft, discount.ts shortestSeconds), since any
+ * of them counts: "if you pick the shortest". With a length not known there
+ * is no time. Until the review of the same day the time was the next ones in
+ * course order, and until the rule it was every video left ("You have 3
+ * videos left to watch").
  */
 export function discountRefusalMessage(state: DiscountState): string {
   switch (state.kind) {
@@ -270,7 +278,7 @@ export function discountRefusalMessage(state: DiscountState): string {
       const n = state.lessonsLeft;
       const time = videoTime(state.secondsLeft);
       return (
-        `You need ${n} more ${n === 1 ? "video" : "videos"} to reach ${DISCOUNT_VIDEO_SHARE}%${time ? `, ${time}` : ""}. ` +
+        `You need ${n} more ${n === 1 ? "video" : "videos"} to reach ${DISCOUNT_VIDEO_SHARE}%${time ? `, ${time} if you pick the shortest` : ""}. ` +
         `Watch ${n === 1 ? "it" : "them"} before your deadline and apply again.`
       );
     }
@@ -377,6 +385,32 @@ export const MEMBERSHIP_UNCHECKED = "We couldn't check your membership just now.
 export function membershipUncheckedRefusal(): Extract<RequestDecision, { grant: false }> {
   return { grant: false, status: 503, state: "read-failed", error: MEMBERSHIP_UNCHECKED };
 }
+
+/**
+ * Both request routes on the new course, once decideDiscountRequest has
+ * granted and the coupon check found no coupon: Whop shows no real payment
+ * from the student (checkMembershipDiscount's noRealPayment: no course
+ * membership with a price answered and no real course payment, Whop's
+ * answer now or the one this rule stored). The owner, 2026-10-26, of an applicant: "by his
+ * username, he never had a membership. I see one payment, but it has failed
+ * ... he watched the course even though he never paid." Such a student can
+ * still have a first_paid_at, a date written before the first-paid fix from
+ * a membership's creation, which the repair never empties, so the rule's own
+ * "no-payment" never caught them. Nothing is written, and the student reads
+ * the map's sentence for no first payment on record.
+ */
+export function noRealPaymentRefusal(): Extract<RequestDecision, { grant: false }> {
+  const state: DiscountState = { kind: "not-eligible", reason: "no-payment" };
+  return { grant: false, status: 400, state: state.kind, error: discountRefusalMessage(state) };
+}
+
+/**
+ * The approve route's refusal of the normal Approve for that student, code
+ * "rule", so a founder's or an admin's Approve anyway still passes it (the
+ * route's `override`). The 30% page shows its own words for it and the row's
+ * verdict says why (thirty-view.ts, "no-real-payment").
+ */
+export const NO_REAL_PAYMENT_APPROVAL = "Cannot approve: Whop shows no real payment from this student, and the 30% needs one.";
 
 /**
  * The approve route's refusal for a student whose membership already has a

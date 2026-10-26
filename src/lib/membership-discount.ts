@@ -304,6 +304,20 @@
  * the stored flag through /api/student/data. The admin's 30% page reads the
  * stored rows.
  *
+ * NO REAL PAYMENT (2026-10-26, the owner's applicant: "he never had a
+ * membership. I see one payment, but it has failed ... he watched the course
+ * even though he never paid"). With no coupon, the check says too whether Whop
+ * shows a real payment: none when no course membership with a price answered
+ * and no real course payment exists (judgeStudentDiscount's noRealPayment, a
+ * "payment" row with no code and no price, rowShowsNoRealPayment). Until then
+ * only the cron counted it (no_real_payment), and such a student whose
+ * first_paid_at was filled before the first-paid fix could apply and be
+ * approved. Since then the request routes refuse on it before writing
+ * (noRealPaymentRefusal in discount-server.ts), the approve route's normal
+ * Approve refuses with code "rule" (NO_REAL_PAYMENT_APPROVAL; Approve anyway
+ * passes), on Whop's answer now or a stored row this rule wrote that
+ * answers, and the 30% page's verdict says it from the stored row.
+ *
  * No answer names a student, an email or a Whop id: student ids only. A
  * failure comes back as a kind, never as Whop's words.
  */
@@ -1331,6 +1345,24 @@ export async function judgeStudentDiscount(student: StudentForCheck, ctx: WhopRe
   );
 }
 
+/**
+ * Whether a stored row is judgeStudentDiscount's "no real payment" answer
+ * (`noRealPayment`: no course membership with a price answered and no real
+ * course payment; the owner's applicant of 2026-10-26, "he never paid"): no
+ * coupon, no code and no price. Every other answer this rule stores holds a
+ * price, the renewal price of the membership the check settled on (a
+ * membership is settled on only when its price reads) or the first real
+ * payment's (a real payment's total always reads), so the row says it
+ * exactly; client-tests/membership-discount.test.mjs holds it to every answer
+ * of judgeStudentDiscount there. Read by the stored fallback
+ * (checkMembershipDiscount: the request routes and the approve route) and by
+ * the 30% page's verdict (thirty-view.ts couponOf). Strict: a column that was
+ * not read (undefined) never reads as no price.
+ */
+export function rowShowsNoRealPayment(row: { discounted?: unknown; promo_code_id?: unknown; renewal_price?: unknown }): boolean {
+  return row.discounted === false && row.promo_code_id === null && row.renewal_price === null;
+}
+
 /** A row as a database without v113 takes it: everything but `source` and `source_checked_at`. */
 function withoutSource(row: MembershipDiscountRow): MembershipDiscountRow {
   const copy = { ...row };
@@ -1400,6 +1432,16 @@ export interface CouponCheck {
    * the old row (the render review's second round).
    */
   saved: boolean;
+  /**
+   * No coupon, and Whop shows no real payment from the student: no course
+   * membership with a price answered and no real course payment
+   * (judgeStudentDiscount's noRealPayment on a live answer, or
+   * rowShowsNoRealPayment on a stored row this rule wrote that answers).
+   * Both request routes then refuse before writing, and the approve route's
+   * normal Approve refuses with code "rule" (the review of 2026-10-26: until
+   * then it was read only by the cron's count). False with any other answer.
+   */
+  noRealPayment: boolean;
 }
 
 /** The student's own approved or applied 30% requests, as the check reads them (THIS STUDENT'S OWN 30% CODE, the header). */
@@ -1438,9 +1480,15 @@ async function ownThirtyOf(db: SupabaseClient, studentId: string): Promise<OwnTh
   }
 }
 
-/** What the request routes' fallback reads of a stored row (with `source` and `source_checked_at` where the database has v113). */
-const STORED_FALLBACK_COLUMNS = "whop_membership_id, promo_code_id, promo_code, discounted, checked_at";
-type StoredFallbackRow = Pick<MembershipDiscountRow, "whop_membership_id" | "promo_code_id" | "promo_code" | "discounted" | "checked_at"> & {
+/**
+ * What the request routes' fallback reads of a stored row (with `source` and `source_checked_at` where the database
+ * has v113); `renewal_price` since 2026-10-26, for rowShowsNoRealPayment.
+ */
+const STORED_FALLBACK_COLUMNS = "whop_membership_id, promo_code_id, promo_code, renewal_price, discounted, checked_at";
+type StoredFallbackRow = Pick<
+  MembershipDiscountRow,
+  "whop_membership_id" | "promo_code_id" | "promo_code" | "renewal_price" | "discounted" | "checked_at"
+> & {
   source?: unknown;
   source_checked_at?: unknown;
 };
@@ -1521,7 +1569,11 @@ const NOT_THIS_RULE: Record<Exclude<StoredStamp, "this_rule"> | "a_code" | "stud
  * the request routes refuse on it, and since T-122's fourth fix round so
  * does the approve route's normal Approve). A live answer is stored, best
  * effort, so the map and the admin page catch up. Never throws. `apiKey`
- * defaults to WHOP_API_KEY; without one there is no live read.
+ * defaults to WHOP_API_KEY; without one there is no live read. Since
+ * 2026-10-26 a no coupon also carries `noRealPayment`, Whop showing no real
+ * payment from the student, on which every caller but Check Whop again
+ * refuses (until then judgeStudentDiscount said it and only the cron counted
+ * it).
  */
 export async function checkMembershipDiscount(
   db: SupabaseClient,
@@ -1569,22 +1621,31 @@ export async function checkMembershipDiscount(
       } catch (e) {
         console.error(`[membership discount] student ${studentId}: the live answer was not stored: ${e instanceof Error ? e.message : String(e)}`);
       }
-      return { discounted: live.row.discounted, code: codeOf(live.row), source: "live", via: live.source, liveFail: null, saved };
+      return {
+        discounted: live.row.discounted,
+        code: codeOf(live.row),
+        source: "live",
+        via: live.source,
+        liveFail: null,
+        saved,
+        noRealPayment: live.noRealPayment,
+      };
     }
     liveFail = live.fail;
   }
 
   // The stored row, when it was read from the membership the student has now (or when that could not be read): a
   // coupon always; no coupon only when this rule wrote it and nothing since, it names no code but the student's own,
-  // and (since T-122's fifth fix round) the student's row was read, so the membership on file is known.
-  let answer: CouponCheck = { discounted: false, code: null, source: "none", via: null, liveFail, saved: false };
+  // and (since T-122's fifth fix round) the student's row was read, so the membership on file is known. Such a no
+  // coupon says too whether Whop showed a real payment (rowShowsNoRealPayment, since 2026-10-26).
+  let answer: CouponCheck = { discounted: false, code: null, source: "none", via: null, liveFail, saved: false, noRealPayment: false };
   let notThisRule: keyof typeof NOT_THIS_RULE | null = null;
   try {
     const stored = await storedFallback(db, studentId);
     if (stored && storedRowApplies(stored.row, student?.whop_membership_id)) {
       const discounted = stored.row.discounted === true;
       if (discounted) {
-        answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false };
+        answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false, noRealPayment: false };
       } else if (student === undefined) {
         notThisRule = "student_unread";
       } else if (stored.stamp !== "this_rule") {
@@ -1592,7 +1653,15 @@ export async function checkMembershipDiscount(
       } else {
         const ownIds = stored.row.promo_code_id ? (await ownThirtyOnce()).promoIds : [];
         if (storedNoCouponAnswers(stored.row, ownIds)) {
-          answer = { discounted, code: codeOf(stored.row), source: "stored", via: null, liveFail, saved: false };
+          answer = {
+            discounted,
+            code: codeOf(stored.row),
+            source: "stored",
+            via: null,
+            liveFail,
+            saved: false,
+            noRealPayment: rowShowsNoRealPayment(stored.row),
+          };
         } else notThisRule = "a_code";
       }
     }

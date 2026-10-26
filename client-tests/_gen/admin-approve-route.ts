@@ -6,6 +6,7 @@ import { CATALOG_IS_V2, LESSONS_TABLE } from "./stub-server.ts";
 import { getCurriculumResetAt } from "./curriculum-reset.ts";
 import { checkMembershipDiscount, teamThirtyCodeFor } from "./membership-discount.ts";
 import {
+  NO_REAL_PAYMENT_APPROVAL,
   approvalVerdict,
   couponApprovalRefusal,
   couponUncheckedApprovalRefusal,
@@ -35,13 +36,19 @@ import {
  *      its say (503, code "rule", the reason in the team's words:
  *      couponUncheckedApprovalRefusal); until then it went on. Approve
  *      anyway (`override`, a founder's or an admin's) still goes on, which
- *      the page offers on that refusal.
+ *      the page offers on that refusal. Since 2026-10-26 a no coupon that
+ *      says Whop shows no real payment from the student (the check's
+ *      noRealPayment: the owner's applicant who "never paid", whose
+ *      first_paid_at the rule below can still find filled) refuses the
+ *      normal Approve before the rule, a 400 with code "rule"
+ *      (NO_REAL_PAYMENT_APPROVAL), so only Approve anyway passes it.
  *   1. Validate eligibility: the course's 30% rule, below. Since 2026-10-20
  *      the ads are not checked (the owner's decision: the 30% already asks
- *      for 61 videos), so students.ad_submissions_verified decides nothing
- *      here. A refusal of the rule, or of a read it needs (the check could
- *      not run), carries code "rule": the 30% page then offers Approve
- *      anyway, which `override` is.
+ *      for the videos, 80% of them since 2026-10-26, 49 of today's 61), so
+ *      students.ad_submissions_verified decides nothing here. A refusal of
+ *      the rule, or of a read it needs (the check could not run), carries
+ *      code "rule": the 30% page then offers Approve anyway, which
+ *      `override` is.
  *
  * APPROVE ANYWAY (the owner's review, 2026-10-21: a founder or an admin can
  * approve past any check). `override` skips the 30% rule; `overrideCoupon`
@@ -156,6 +163,8 @@ export async function POST(request: NextRequest) {
   // (`overrideCoupon`): then Whop is not asked at all. A check that gave no
   // answer is remembered, and refuses the normal Approve after the rule.
   let couponUnchecked: { liveFail: string | null } | null = null;
+  // Whop shows no real payment from the student (2026-10-26): no 30%, unless Approve anyway skips it.
+  let noRealPayment = false;
   if (!overrideCoupon) {
     const coupon = await checkMembershipDiscount(supabase, discountReq.student_id);
     if (coupon.discounted) {
@@ -165,6 +174,11 @@ export async function POST(request: NextRequest) {
       );
     }
     if (coupon.source === "none") couponUnchecked = { liveFail: coupon.liveFail };
+    noRealPayment = coupon.noRealPayment;
+  }
+  if (noRealPayment && !override) {
+    console.warn(`[discount approve] request ${requestId}: nothing approved, Whop shows no real payment from the student`);
+    return NextResponse.json({ error: NO_REAL_PAYMENT_APPROVAL, ...RULE }, { status: 400 });
   }
 
   if (CATALOG_IS_V2) {
@@ -323,6 +337,7 @@ export async function POST(request: NextRequest) {
       override ? "Eligibility gates skipped." : null,
       overrideCoupon ? "The coupon check skipped." : null,
       couponUnchecked !== null ? "The coupon check gave no answer." : null,
+      noRealPayment ? "Whop shows no real payment from the student." : null,
     ]
       .filter(Boolean)
       .join(" ");

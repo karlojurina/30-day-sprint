@@ -33,7 +33,7 @@ import { CHECKPOINT, type CheckpointLook } from "@/lib/world-v6/checkpoint";
 import { BOUNTY } from "@/lib/world-v6/bounty";
 import { DISCOUNT_PERCENT, MEMBERSHIP_DISCOUNT_LINE } from "@/lib/world/discount";
 import { renewalStillAhead } from "@/lib/world/celebrations";
-import { checkpointCounts, checkpointView, discountRule, shortDate, type CheckpointView } from "./checkpointView";
+import { checkpointCounts, checkpointView, discountRule, expiredRuleLine, shortDate, type CheckpointView } from "./checkpointView";
 import { CARD_HINTS, anchorCard, placeCard, placePanel, type Box, type Placement } from "./cardPlace";
 import { DEFAULT_TUNING, clearTuning, loadTuning, sameTuning, sanitize, saveTuning, type Tuning } from "./tuning";
 import { TuningPanel } from "./TuningPanel";
@@ -4227,6 +4227,9 @@ function BountyBody({
  * said "Finish every video" until then), the same words for
  * every student, said while locked and with no first payment on record, and
  * after "This closed on ..." or "Your 2 weeks have passed." where it is closed.
+ * A window that closed before the 80% rule reads the rule it had, "The 30%
+ * was for finishing every video through Video Ads II within 2 weeks of
+ * joining." (checkpointView.ts expiredRuleLine, the review of 2026-10-26).
  * T-080's shared deadline (a first payment from 1 October until the launch:
  * the end of 23 October in Croatia, st.window "shared") is unchanged and
  * reaches those students as the date in "Apply by" and, once it has passed,
@@ -4398,7 +4401,8 @@ function CheckpointBody({
       </>
     );
   } else if (st.kind === "expired") {
-    body = <p className={s.desc}>{`This closed on ${cv.deadline}. ${rule.closed}`}</p>;
+    // The rule the window had: every video for one that closed before the 80% rule (the review of 2026-10-26).
+    body = <p className={s.desc}>{`This closed on ${cv.deadline}. ${expiredRuleLine(st.endsAt, after)}`}</p>;
   } else if (st.kind === "not-eligible") {
     // "has-discount" (admin rebuild 2, D5): a discount already on the next Whop renewal, the owner's line, no Apply.
     body = (

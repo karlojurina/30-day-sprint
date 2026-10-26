@@ -267,8 +267,9 @@ async function approve(body) {
   ok(/if \(\(override \|\| overrideCoupon\) && auth\.teamMember\.role !== "founder" && auth\.teamMember\.role !== "admin"\) \{\s*return NextResponse\.json\(\{ error: "Only a founder or an admin can approve past a check\." \}, \{ status: 403 \}\);/.test(route)
        && route.indexOf('auth.teamMember.role !== "founder"') < route.indexOf('.from("discount_requests")'),
      'a csm\'s override is refused before anything is read (the routes\' real login runs it in admin-discounts.test.mjs)')
-  // Since T-122's fourth fix round the coupon check that gave no answer refuses the normal Approve with the code too.
-  ok((route.match(/\.\.\.RULE/g) ?? []).length === 7, 'every refusal the override skips carries the code: the switch date unread, the new rule, the old rule\'s four, and the coupon check that gave no answer', String((route.match(/\.\.\.RULE/g) ?? []).length))
+  // Since T-122's fourth fix round the coupon check that gave no answer refuses the normal Approve with the code too,
+  // and since 2026-10-26 Whop showing no real payment from the student.
+  ok((route.match(/\.\.\.RULE/g) ?? []).length === 8, 'every refusal the override skips carries the code: the switch date unread, the new rule, the old rule\'s four, the coupon check that gave no answer, and Whop showing no real payment', String((route.match(/\.\.\.RULE/g) ?? []).length))
 }
 
 // ════════════════════════════════════════════════════════════════════════════

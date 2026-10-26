@@ -58,6 +58,48 @@ export function videosNeeded(total: number): number {
   // ceil(total * 80 / 100) in whole numbers, so no rounding of 0.8 can move the edge.
   return Math.floor((total * DISCOUNT_VIDEO_SHARE + 99) / 100);
 }
+
+/**
+ * When the 80% took over from every video: the start of the owner's day, 26
+ * October 2026 in Croatia, 00:00 CET (UTC+1, the clocks went back on 25
+ * October), which is 25 October 23:00 UTC. A window that closed before it was
+ * judged by every video, and the map's line for it says so in the past
+ * (checkpointView.ts expiredRuleLine). Whether the 80% reaches back to those
+ * windows is the owner's call, not made here: nothing else reads this date,
+ * so the approval judges every request by the 80%, and a student whose window
+ * closed has no Apply either way. supabase/diagnostics/eighty-closed-windows.sql
+ * counts the students it leaves out. The 80% build went live after this
+ * moment, so a window that closed between the two shows the 80% line although
+ * the app asked that student for every video; the count lists them too.
+ */
+export const DISCOUNT_EIGHTY_FROM = "2026-10-25T23:00:00.000Z";
+
+/** A window that ended before the 80% rule (DISCOUNT_EIGHTY_FROM): it asked for every video. False for a date that does not parse. */
+export function closedBeforeEighty(endsAt: string): boolean {
+  const t = Date.parse(endsAt);
+  return Number.isFinite(t) && t < Date.parse(DISCOUNT_EIGHTY_FROM);
+}
+
+/**
+ * How long the `count` shortest of `videos` take, in seconds: the least a
+ * student still has to watch to reach the 80%, since any video up to the
+ * checkpoint counts toward it (the review of 2026-10-26; it was the next ones
+ * in course order, which could be hours where the shortest take minutes). 0
+ * when `count` is 0, or when any of `videos` has no known length: the
+ * shortest could then be that one, so no time is known.
+ */
+export function shortestSeconds(videos: readonly DiscountLesson[], count: number): number {
+  if (count <= 0) return 0;
+  const lengths: number[] = [];
+  for (const v of videos) {
+    if (v.duration_seconds == null || !Number.isFinite(v.duration_seconds)) return 0;
+    lengths.push(v.duration_seconds);
+  }
+  return lengths
+    .sort((a, b) => a - b)
+    .slice(0, count)
+    .reduce((sum, s) => sum + s, 0);
+}
 /** The 14 days. One source: constants.ts, re-exported here for the map. */
 export { DISCOUNT_WINDOW_DAYS };
 /**
@@ -147,7 +189,11 @@ export type DiscountState =
       lessonsDone: number;
       lessonsNeeded: number;
       lessonsTotal: number;
-      /** The length of the next `lessonsLeft` videos not watched, in course order. */
+      /**
+       * The length of the `lessonsLeft` shortest videos not watched
+       * (shortestSeconds), the least the 80% still takes; 0 when one of them
+       * has no known length. The next ones in course order until 2026-10-26.
+       */
       secondsLeft: number;
       /** The first video not watched, in course order. */
       nextLessonId: string | null;
@@ -344,8 +390,8 @@ export function discountState(input: DiscountInput): DiscountState {
     lessonsDone: done,
     lessonsNeeded: needed,
     lessonsTotal: required.length,
-    // The videos still needed, taken in course order: the way the student goes.
-    secondsLeft: left.slice(0, short).reduce((sum, l) => sum + (l.duration_seconds ?? 0), 0),
+    // The shortest of the videos not watched: any of them counts toward the 80%.
+    secondsLeft: shortestSeconds(left, short),
     nextLessonId: left[0]?.id ?? null,
   };
 }

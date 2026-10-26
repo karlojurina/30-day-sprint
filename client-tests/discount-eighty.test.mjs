@@ -30,12 +30,23 @@
 //                      both request routes refuse in the map's own sentence and
 //                      write nothing however much was watched, the normal
 //                      Approve refuses with code "rule", Approve anyway by a
-//                      founder or an admin approves it, a csm's is refused
+//                      founder or an admin approves it, a csm's is refused.
+//                      Since the review of 2026-10-26 the owner's applicant too:
+//                      first_paid_at filled (from before the first-paid fix)
+//                      while Whop shows no real payment, the coupon check's
+//                      stored row saying so (membership-discount.test.mjs runs
+//                      Whop's live answer): the same refusals, and the 30%
+//                      page's verdict says it
 //   7. the map's words discountRule and checkpointCounts: the one line, "49 of
-//                      61 needed", Apply's reason; no em dash, no "unlock"
-//   8. the 30% page    the row's video line (videoLine), what Copy @ and Copy
-//                      ID copy (discordCopies) with and without a Discord
-//                      username or id, a stored "@" never doubled, and the
+//                      61 needed", Apply's reason; no em dash, no "unlock"; a
+//                      window that closed before the 80% rule reads the rule it
+//                      had (expiredRuleLine, the review of 2026-10-26)
+//   8. the 30% page    the row's video line (videoLine), what Copy Discord ID
+//                      and Copy username copy (studentCopies; "Copy ID" and
+//                      "Copy @" until the review of 2026-10-26) with and
+//                      without an id or a username, a stored "@" never
+//                      doubled, the username's tip that it can be the Whop
+//                      one, the line in their place with neither, and the
 //                      greyed button rendered with its tip
 //
 // build.mjs copies the modules and the two request routes (run it first; `npm
@@ -49,15 +60,18 @@ import ts from 'typescript'
 import { createElement } from 'react'
 import { renderToString } from 'react-dom/server'
 import {
-  DISCOUNT_VIDEO_SHARE, discountState, discountWindow, requiredLessons, videosNeeded,
+  DISCOUNT_EIGHTY_FROM, DISCOUNT_SHARED_DEADLINE, DISCOUNT_VIDEO_SHARE, discountState, discountWindow, requiredLessons, videosNeeded,
 } from './_gen/discount.ts'
-import { approvalVerdict, decideDiscountRequest, discountRefusalMessage, toDiscountLessons, videoDoneIds } from './_gen/discount-server.ts'
-import { checkpointCounts, checkpointView, discountRule } from './_gen/checkpointView.ts'
-import { NO_DISCORD_ID, NO_DISCORD_USERNAME, VERDICT_TEXT, anywaySkip, discordCopies, judgeRequest, videoLine } from './_gen/thirty-view.ts'
+import { NO_REAL_PAYMENT_APPROVAL, approvalVerdict, decideDiscountRequest, discountRefusalMessage, toDiscountLessons, videoDoneIds } from './_gen/discount-server.ts'
+import { checkpointCounts, checkpointView, discountRule, expiredRuleLine } from './_gen/checkpointView.ts'
+import {
+  NO_DISCORD_ID, NO_DISCORD_LINE, NO_USERNAME, USERNAME_TIP, VERDICT_TEXT, anywaySkip, buildThirtyView, judgeRequest, studentCopies, videoLine,
+} from './_gen/thirty-view.ts'
 import { POST as requestRoute } from './_gen/discount-request-route.ts'
 import { POST as feedbackRoute } from './_gen/discount-submit-feedback-route.ts'
+import { loadThirtyData } from './_gen/thirty-data.ts'
 // useDb is no React hook; the alias keeps eslint's hook rule from reading it as one.
-import { FakeDb, setCatalog, steps, useDb as installDb } from './_gen/stub-server.ts'
+import { FakeDb, fakeClient, setCatalog, steps, useDb as installDb } from './_gen/stub-server.ts'
 
 let pass = 0
 const fails = []
@@ -205,10 +219,11 @@ for (const [n, want] of [[48, 'locked'], [49, 'ready'], [61, 'ready']]) {
   if (n === 48) {
     ok(map.lessonsDone === 48 && map.lessonsNeeded === 49 && map.lessonsLeft === 1 && map.lessonsTotal === 61 && map.nextLessonId === REQUIRED[48],
        '48: 1 more needed, the next video the 49th in course order', show(map))
-    // The 49th in course order is a4l05, an editing breakdown 10,602 seconds long on the development page.
-    ok(d.status === 400 && d.state === 'locked' && d.error === discountRefusalMessage(map)
-         && d.error === 'You need 1 more video to reach 80%, about 2.9 hours of video. Watch it before your deadline and apply again.',
-       '48: the refusal says one more video, in the singular, with the next one\'s length', d.error)
+    // Any of the 13 left counts. The shortest is a4l06, 136 seconds on the development page; the next in course order,
+    // a4l05, an editing breakdown, is 10,602, which the refusal named ("about 2.9 hours") until the review of 2026-10-26.
+    ok(map.secondsLeft === 136 && d.status === 400 && d.state === 'locked' && d.error === discountRefusalMessage(map)
+         && d.error === 'You need 1 more video to reach 80%, about 2 minutes of video if you pick the shortest. Watch it before your deadline and apply again.',
+       '48: the refusal says one more video, in the singular, with the length of the shortest one left (any counts)', d.error)
     ok(!v.ok && v.status === 400 && v.reason === 'locked' && v.error === 'Student has not watched 80% of the videos up to the discount checkpoint inside the 14 days: 48 of 61 watched, 49 needed.',
        '48: the approval refuses in the team\'s words, the count and what is needed', v.error)
   } else {
@@ -296,16 +311,30 @@ console.log('\n=== 5. The real routes: request, submit-feedback and approve agre
  * student (first payment `paid`), the lessons in `done` finished at
  * `doneAt`, their Whop membership checked with no coupon by the rule's own
  * stamp (with no Whop key here, the stored row answers), and `requests`.
+ * `whop` "no-payment" (the review of 2026-10-26): no membership on file, and
+ * the stored row is the check's "no real payment" answer, no code and no
+ * price (the owner's applicant: "he never had a membership. I see one
+ * payment, but it has failed").
  */
-function freshDb(paid, done = [], doneAt = WATCHED, requests = []) {
+function freshDb(paid, done = [], doneAt = WATCHED, requests = [], whop = 'clean') {
   setCatalog({ v2: true, lessonsTable: 'lessons' })
+  const noPayment = whop === 'no-payment'
   const db = new FakeDb({
-    students: [{ id: 's1', whop_user_id: 'user_1', supabase_user_id: 'auth-1', first_paid_at: paid, joined_at: paid ?? '2026-10-01T00:00:00.000Z', whop_membership_id: 'mem_devEighty' }],
-    student_membership_discounts: [{
-      student_id: 's1', whop_membership_id: 'mem_devEighty', promo_code_id: null, promo_code: null,
-      renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-14T08:00:00.000Z',
-      source: 'r5-membership', source_checked_at: '2026-10-14T08:00:00.000Z',
+    students: [{
+      id: 's1', name: 'Made Up', email: 's1@example.com', whop_user_id: 'user_1', supabase_user_id: 'auth-1', first_paid_at: paid,
+      joined_at: paid ?? '2026-10-01T00:00:00.000Z', whop_membership_id: noPayment ? null : 'mem_devEighty', membership_status: 'active',
     }],
+    student_membership_discounts: [noPayment
+      ? {
+          student_id: 's1', whop_membership_id: null, promo_code_id: null, promo_code: null,
+          renewal_price: null, plan_renewal_price: null, discounted: false, checked_at: '2026-10-14T08:00:00.000Z',
+          source: 'r5-payment', source_checked_at: '2026-10-14T08:00:00.000Z',
+        }
+      : {
+          student_id: 's1', whop_membership_id: 'mem_devEighty', promo_code_id: null, promo_code: null,
+          renewal_price: 97, plan_renewal_price: 97, discounted: false, checked_at: '2026-10-14T08:00:00.000Z',
+          source: 'r5-membership', source_checked_at: '2026-10-14T08:00:00.000Z',
+        }],
     lessons: LESSONS,
     lesson_videos: Object.keys(lengths).map((lesson_id) => ({ lesson_id, created_at: '2026-10-12T00:00:00.000Z' })),
     student_lesson_completions: done.map((lesson_id) => ({ student_id: 's1', lesson_id, completed_at: doneAt })),
@@ -418,6 +447,48 @@ console.log('\n=== 6. No 30% without a real payment (first_paid_at empty) ===')
          && VERDICT_TEXT.noPayment === j.verdict.text && anywaySkip(j.verdict, null) === 'rule' && j.facts.window === null,
        'the 30% page: "There is no real payment on file for this student, and the 30% needs one.", no Approve, Approve anyway skips the rule', show(j.verdict))
   }
+
+  // The gap the review of 2026-10-26 closed: first_paid_at filled (a date written before the first-paid fix from a
+  // membership's creation, which the repair never empties) while Whop shows no real payment. The rule alone says
+  // ready, so until the review both request routes wrote the request and the normal Approve approved it at 49 of 61.
+  for (const [way, send] of [['the plain request', apply], ['the questions form', submit]]) {
+    for (const n of [49, 61]) {
+      const db = freshDb(PAID, REQUIRED.slice(0, n), WATCHED, [], 'no-payment')
+      const r = await at(SENT, send)
+      ok(r.status === 400 && r.body.state === 'not-eligible' && r.body.error === words && db.rows('discount_requests').length === 0
+           && db.calls('submit_discount_with_feedback', 'rpc').length === 0 && !steps.some((s) => s.step === 'discount-requested'),
+         `a first payment on file but Whop showing none, ${n} of 61 watched, ${way}: refused in the same sentence, nothing written, no team task (it went in until the review)`, show(r.body))
+    }
+  }
+  const gap = () => freshDb(PAID, REQUIRED.slice(0, 49), WATCHED, [{ id: 'gp', status: 'pending', created_at: SENT }], 'no-payment')
+  {
+    const db = gap()
+    const r = await at('2026-10-23T09:00:00.000Z', () => press(db, 'gp', 'csm'))
+    ok(r.status === 400 && r.body.code === 'rule' && r.body.error === NO_REAL_PAYMENT_APPROVAL
+         && r.body.error === 'Cannot approve: Whop shows no real payment from this student, and the 30% needs one.' && r.codes === 0 && r.row.status === 'pending',
+       'its request (made before the review): the normal Approve refused, code "rule", the team\'s sentence, no code, still pending (approved at 49 until the review)', show(r.body))
+  }
+  for (const role of ['admin', 'founder']) {
+    const db = gap()
+    const r = await at('2026-10-23T09:00:00.000Z', () => press(db, 'gp', role, true))
+    ok(r.status === 200 && r.codes === 1 && r.row.status === 'approved', `Approve anyway by ${role === 'admin' ? 'an admin' : 'a founder'}: approved past it, one code`, show(r.body))
+  }
+  {
+    const db = gap()
+    const r = await at('2026-10-23T09:00:00.000Z', () => press(db, 'gp', 'csm', true))
+    ok(r.status === 403 && r.codes === 0 && r.row.status === 'pending', 'Approve anyway by a csm: refused (403), no code, still pending', show(r.body))
+  }
+  {
+    // The 30% page's own list over the same database: the verdict says it, with the count; no Approve, Approve anyway.
+    const db = gap()
+    const load = await loadThirtyData(fakeClient(db))
+    const row = load.ok ? buildThirtyView(load.data, new RealDate('2026-10-23T09:00:00.000Z'), null).requests.find((x) => x.id === 'gp') : null
+    ok(row && !row.verdict.ok && row.verdict.reason === 'no-real-payment' && row.verdict.text === 'Whop shows no real payment from this student, and the 30% needs one.'
+         && row.verdict.text === VERDICT_TEXT.noRealPayment && anywaySkip(row.verdict, null) === 'rule' && row.coupon?.noRealPayment === true
+         && show(videoLine(row, row.verdict)) === show(['49 of 61 videos', '49 needed for 80%']),
+       'the 30% page: "Whop shows no real payment from this student, and the 30% needs one.", the count beside it, no Approve, Approve anyway skips it', show(row?.verdict))
+    ok(!BANNED.test(NO_REAL_PAYMENT_APPROVAL + VERDICT_TEXT.noRealPayment), 'its words plain: no em dash, no "unlock"')
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -437,12 +508,30 @@ console.log('\n=== 7. The map\'s words: the one line, and every count says what 
      'the cache\'s lantern: lit 3 short of the 49 (46 watched), dark 4 short, for a student before Video Ads II')
   ok(checkpointView(locked(44), NOW.getTime(), 3, 3).look === 'near',
      'in Video Ads II itself (place 3), 5 short: lit, as for any locked student there')
-  const all = [rule.open, rule.closed, rule.beforeLaunch, rule.ready, c12.why, c12.needed]
+  // The review of 2026-10-26: a window that closed before the 80% rule asked for every video. The student who had 55 of
+  // 61 by 20 October read "The 30% is for watching 80% ..." under "This closed on Fri 23 Oct", a rule the app never
+  // asked of them; whether the 80% reaches back to them is the owner's call (CONTEXT.md), and until then the line says
+  // what that window asked.
+  ok(rule.closedBefore === 'The 30% was for finishing every video through Video Ads II within 2 weeks of joining.', 'the rule a window before the 80% had, in the past', rule.closedBefore)
+  const closedLine = (paid, doneBy, now) => {
+    const st = discountState({ now, firstPaidAt: paid, lessons: COURSE, videoDoneIds: new Set(REQUIRED.slice(0, doneBy)), requests: [] })
+    return { kind: st.kind, line: st.kind === 'expired' ? expiredRuleLine(st.endsAt, 'Video Ads II') : null }
+  }
+  const TODAY = new RealDate('2026-10-26T12:00:00.000Z')
+  const shared = closedLine('2026-10-02T10:00:00.000Z', 55, TODAY)
+  const own = closedLine('2026-10-10T10:00:00.000Z', 55, TODAY)
+  const since = closedLine('2026-10-12T10:00:00.000Z', 55, new RealDate('2026-10-27T12:00:00.000Z'))
+  ok(shared.kind === 'expired' && shared.line === rule.closedBefore && own.kind === 'expired' && own.line === rule.closedBefore,
+     'paid 2 October (the shared deadline, 23 October) or 10 October (24 October), 55 of 61 watched, read on 26 October: expired, and the line says the window was for every video', show({ shared, own }))
+  ok(since.kind === 'expired' && since.line === rule.closed && Date.parse('2026-10-26T10:00:00.000Z') > Date.parse(DISCOUNT_EIGHTY_FROM),
+     'paid 12 October, its 14 days ending 26 October 10:00 UTC, after the rule began: the 80% line', show(since))
+  ok(expiredRuleLine(DISCOUNT_SHARED_DEADLINE, 'Video Ads II') === rule.closedBefore, 'the shared deadline itself: before the rule')
+  const all = [rule.open, rule.closed, rule.closedBefore, rule.beforeLaunch, rule.ready, c12.why, c12.needed]
   ok(all.every((w) => !BANNED.test(w)), 'no em dash, no "unlock", no "EcomTalent" in any of them', show(all))
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-console.log('\n=== 8. The 30% page: the video line, Copy @ and Copy ID ===')
+console.log('\n=== 8. The 30% page: the video line, Copy Discord ID and Copy username ===')
 {
   const student = (o = {}) => ({ id: 's', name: 'Made Up', email: null, username: null, discordId: null, status: 'active', whopPulled: true, ...o })
   const facts = (o = {}) => ({ firstPaidAt: PAID, window: 'own', deadline: '2026-10-29T12:00:00.000Z', deadlinePassed: false, videosDone: 48, videosTotal: 61, videosNeeded: 49, countedByDeadline: false, secondsLeft: 300, ...o })
@@ -457,35 +546,48 @@ console.log('\n=== 8. The 30% page: the video line, Copy @ and Copy ID ===')
        && videoLine({ facts: facts({ videosDone: null, videosTotal: null, videosNeeded: null }), student: student() }, { reason: 'read-failed' }).length === 0,
      'no line beside the coupon\'s verdict, or with no count (never "0 of 61")')
 
-  const both = discordCopies(student({ username: 'maya.lq', discordId: '100000000000000101' }))
-  ok(show(both) === show({ at: { text: '@maya.lq', unavailable: null }, id: { text: '100000000000000101', unavailable: null } }),
-     'a username and an id: Copy @ copies "@maya.lq", Copy ID the id', show(both))
-  ok(discordCopies(student({ username: '@lena.v', discordId: '1' })).at.text === '@lena.v' && discordCopies(student({ username: '  @x  ' })).at.text === '@x',
+  // The review of 2026-10-26: students.discord_username is the Whop username after every Whop sign-in and every
+  // payment (the login and the webhook write it) and the Discord one only once the 2-hour sync wrote it since, so the
+  // button is "Copy username", its tip says it can be the Whop name, and "Copy Discord ID" comes first (the owner: "I
+  // think ID might be best"). They read "Copy @" and "Copy ID" until then.
+  const both = studentCopies(student({ username: 'maya.lq', discordId: '100000000000000101' }))
+  ok(show(both) === show({ id: { text: '100000000000000101', unavailable: null, tip: null }, username: { text: '@maya.lq', unavailable: null, tip: USERNAME_TIP }, none: null }),
+     'an id and a username: Copy Discord ID copies the id, Copy username "@maya.lq" with its tip', show(both))
+  ok(USERNAME_TIP === "The username on file. It can be the student's Whop username, and on Discord that name may belong to someone else.",
+     'the username\'s tip, word for word: never called Discord', USERNAME_TIP)
+  ok(studentCopies(student({ username: '@lena.v', discordId: '1' })).username.text === '@lena.v' && studentCopies(student({ username: '  @x  ' })).username.text === '@x',
      'a username stored with its "@": copied with one, never "@@"')
-  const none = discordCopies(student({ username: '   ', discordId: '  ' }))
-  ok(show(none) === show({ at: { text: '', unavailable: NO_DISCORD_USERNAME }, id: { text: '', unavailable: NO_DISCORD_ID } })
-       && NO_DISCORD_USERNAME === 'No Discord username on file for this student.' && NO_DISCORD_ID === 'No Discord ID on file for this student.',
-     'neither on file (blank counts as none): both greyed, each tip saying what is missing', show(none))
-  ok(discordCopies(student({ username: 'hugo.l' })).id.unavailable === NO_DISCORD_ID && discordCopies(student({ discordId: '7' })).at.unavailable === NO_DISCORD_USERNAME,
-     'one without the other: only that button greyed')
+  const none = studentCopies(student({ username: '   ', discordId: '  ' }))
+  ok(show(none) === show({ id: { text: '', unavailable: NO_DISCORD_ID, tip: null }, username: { text: '', unavailable: NO_USERNAME, tip: null }, none: NO_DISCORD_LINE })
+       && NO_USERNAME === 'No username on file for this student.' && NO_DISCORD_ID === 'No Discord ID on file for this student.' && NO_DISCORD_LINE === 'No Discord ID or username on file.',
+     'neither on file (blank counts as none): the line "No Discord ID or username on file." in their place (a phone shows no tip)', show(none))
+  ok(studentCopies(student({ username: 'hugo.l' })).id.unavailable === NO_DISCORD_ID && studentCopies(student({ username: 'hugo.l' })).none === null
+       && studentCopies(student({ discordId: '7' })).username.unavailable === NO_USERNAME && studentCopies(student({ discordId: '7' })).none === null,
+     'one without the other: only that button greyed, with its tip, and no line')
 
   // The button itself, rendered.
-  const on = renderToString(createElement(CopyButton, { text: '@maya.lq', label: 'Copy @' }))
-  const off = renderToString(createElement(CopyButton, { text: '', label: 'Copy ID', unavailable: NO_DISCORD_ID }))
-  ok(/>Copy @</.test(on) && !/aria-disabled/.test(on) && !/title=/.test(on) && !/disabled=""/.test(on) && /opacity:1/.test(on),
-     'with something to copy: a plain raised button, no tip', on)
-  ok(/>Copy ID</.test(off) && /aria-disabled="true"/.test(off) && off.includes(`title="${NO_DISCORD_ID}"`) && !/ disabled=""/.test(off) && /opacity:0\.4/.test(off) && /cursor:not-allowed/.test(off),
+  const on = renderToString(createElement(CopyButton, { text: '100000000000000101', label: 'Copy Discord ID' }))
+  const named = renderToString(createElement(CopyButton, { text: '@maya.lq', label: 'Copy username', tip: USERNAME_TIP }))
+  const off = renderToString(createElement(CopyButton, { text: '', label: 'Copy Discord ID', unavailable: NO_DISCORD_ID }))
+  ok(/>Copy Discord ID</.test(on) && !/aria-disabled/.test(on) && !/title=/.test(on) && !/disabled=""/.test(on) && /opacity:1/.test(on),
+     'with something to copy: a plain raised button', on)
+  ok(/>Copy username</.test(named) && !/aria-disabled/.test(named) && named.includes(`title="The username on file. It can be the student&#x27;s Whop username`),
+     'Copy username carries its tip as its title while it can copy', named)
+  ok(/>Copy Discord ID</.test(off) && /aria-disabled="true"/.test(off) && off.includes(`title="${NO_DISCORD_ID}"`) && !/ disabled=""/.test(off) && /opacity:0\.4/.test(off) && /cursor:not-allowed/.test(off),
      'with nothing: greyed, aria-disabled (still in the keyboard\'s path), its tip as its title', off)
 
   // Where the page puts them (ThirtyView.tsx): beside "Copy code" on a row with a code, and on every Applied row.
   const page = fromSrc('src/components/admin/thirty/ThirtyView.tsx')
-  ok(/<CopyButton text=\{code\} label="Copy code" \/>\s*<DiscordCopies student=\{student\} \/>/.test(page)
+  ok(/<CopyButton text=\{code\} label="Copy code" \/>\s*<StudentCopies student=\{student\} \/>/.test(page)
        && /\{row\.promoCode && row\.status !== "rejected" && <CodeWithCopy code=\{row\.promoCode\} student=\{row\.student\} \/>\}/.test(page),
-     'in the source: Copy @ and Copy ID beside "Copy code" (it said "Copy"), on every Approved and Code Applied row with a code')
+     'in the source: Copy Discord ID and Copy username beside "Copy code" (it said "Copy"), on every Approved and Code Applied row with a code')
   const pendingRow = page.slice(page.indexOf('function PendingRow('), page.indexOf('function CodeWithCopy('))
-  ok(/<DiscordCopies student=\{row\.student\} \/>/.test(pendingRow) && /const detail = videoLine\(row, verdict\);/.test(pendingRow),
+  ok(/<StudentCopies student=\{row\.student\} \/>/.test(pendingRow) && /const detail = videoLine\(row, verdict\);/.test(pendingRow),
      'in the source: every Applied row has them, and its verdict line is videoLine\'s')
-  ok(/label="Copy @"/.test(page) && /label="Copy ID"/.test(page) && !BANNED.test(NO_DISCORD_USERNAME + NO_DISCORD_ID), 'the labels "Copy @" and "Copy ID"; the tips plain')
+  const copies = page.slice(page.indexOf('function StudentCopies('), page.indexOf('function PendingRow('))
+  ok(copies.indexOf('label="Copy Discord ID"') > 0 && copies.indexOf('label="Copy Discord ID"') < copies.indexOf('label="Copy username"') && /if \(none\) \{/.test(copies)
+       && !/label="Copy @"|label="Copy ID"/.test(page) && !BANNED.test(NO_USERNAME + NO_DISCORD_ID + NO_DISCORD_LINE + USERNAME_TIP),
+     'the labels "Copy Discord ID", first, then "Copy username" (no "Copy @" or "Copy ID" left), the line in their place with neither; the tips plain')
 }
 
 ok(Date === RealDate, 'the clock is the real one again')

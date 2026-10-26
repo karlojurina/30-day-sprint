@@ -41,7 +41,10 @@
  * student's row read (since its fifth): a row with no source, an earlier
  * round's source, one written over since, one naming another code, and
  * every stored "no coupon" on a database without v113, give the 503 when
- * Whop does not answer.
+ * Whop does not answer. Since 2026-10-26 a no coupon saying Whop shows no
+ * real payment from the student (the check's noRealPayment) is refused
+ * before anything is written, in the map's sentence for no first payment
+ * (noRealPaymentRefusal), as the request route refuses it.
  */
 
 import { NextRequest, NextResponse } from "./stub-server.ts";
@@ -58,6 +61,7 @@ import {
   loadDiscountReads,
   membershipDiscountRefusal,
   membershipUncheckedRefusal,
+  noRealPaymentRefusal,
   secondPendingRequest,
 } from "./discount-server.ts";
 
@@ -165,6 +169,12 @@ export async function POST(request: NextRequest) {
         `[discounts/submit-feedback] student ${studentId}: nothing written, the coupon check could not run (${coupon.liveFail ?? "no answer"}) and nothing is stored`,
       );
       const refusal = membershipUncheckedRefusal();
+      return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
+    }
+    // Whop shows no real payment from the student (the owner, 2026-10-26: "he never paid"): nothing is written.
+    if (coupon.noRealPayment) {
+      console.warn(`[discounts/submit-feedback] student ${studentId}: nothing written, Whop shows no real payment (${coupon.source} answer)`);
+      const refusal = noRealPaymentRefusal();
       return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
     }
   } else {

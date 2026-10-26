@@ -70,9 +70,12 @@ export interface ThirtyStudent {
   id: string;
   name: string | null;
   email: string | null;
-  /** Shown as @username; it can hold a Whop username. The page's Copy @ copies it. */
+  /**
+   * Shown as @username: the student's Whop username after every Whop sign-in and every payment (the login and the
+   * webhook write it), their Discord one only once the 2-hour sync wrote it since. The page's Copy username copies it.
+   */
   discord_username: string | null;
-  /** The student's Discord user id (the login and the Whop sync fill it): the page's Copy ID copies it (2026-10-26). */
+  /** The student's Discord user id (the login writes it, the Whop sync fills an empty one): the page's Copy Discord ID copies it (2026-10-26). */
   discord_user_id: string | null;
   membership_status: string;
   first_paid_at: string | null;

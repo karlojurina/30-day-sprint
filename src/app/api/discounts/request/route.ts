@@ -12,6 +12,7 @@ import {
   loadDiscountReads,
   membershipDiscountRefusal,
   membershipUncheckedRefusal,
+  noRealPaymentRefusal,
   secondPendingRequest,
 } from "@/lib/world/discount-server";
 
@@ -45,6 +46,12 @@ import {
  * written and the student reads "We couldn't check your membership just now.
  * Try again in a minute." (membershipUncheckedRefusal, a 503); the request
  * used to go through and leave the coupon to the approve route.
+ * Since 2026-10-26 a no coupon that says Whop shows no real payment from the
+ * student (the check's noRealPayment: no course membership with a price and
+ * no real course payment, the owner's applicant who "never paid") is refused
+ * too, nothing written, in the map's sentence for no first payment
+ * (noRealPaymentRefusal, a 400): their first_paid_at can be filled from
+ * before the first-paid fix, so the rule's own "no-payment" missed them.
  * The old rule below runs everywhere else, unchanged, so the live app on the
  * v1 catalog behaves exactly as before.
  */
@@ -69,6 +76,11 @@ async function requestUnderNewCourse(supabase: SupabaseClient, studentId: string
       `[discounts/request] student ${studentId}: nothing written, the coupon check could not run (${coupon.liveFail ?? "no answer"}) and nothing is stored`,
     );
     const refusal = membershipUncheckedRefusal();
+    return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
+  }
+  if (coupon.noRealPayment) {
+    console.warn(`[discounts/request] student ${studentId}: nothing written, Whop shows no real payment (${coupon.source} answer)`);
+    const refusal = noRealPaymentRefusal();
     return NextResponse.json({ error: refusal.error, state: refusal.state }, { status: refusal.status });
   }
 

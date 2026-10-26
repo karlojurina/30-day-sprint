@@ -268,11 +268,14 @@ export function CopyButton({
   text,
   label,
   unavailable,
+  tip,
 }: {
   text: string;
   label: string;
   /** Nothing to copy: the button is greyed with this sentence as its tip, and copies nothing (Button's `unavailable`). */
   unavailable?: string;
+  /** The tip while it can copy (its title): what it copies, when the label cannot say all of it. */
+  tip?: string;
 }) {
   const [copied, setCopied] = useState<"yes" | "failed" | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -284,6 +287,7 @@ export function CopyButton({
       variant="raised"
       size="md"
       unavailable={unavailable}
+      title={tip}
       onClick={async () => {
         let ok = false;
         try {

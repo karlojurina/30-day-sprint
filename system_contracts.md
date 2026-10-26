@@ -1128,9 +1128,12 @@ When adding a new table, append it here. When deleting a field, scan
   file (`first_paid_at` empty) is no window at all, so neither request
   route writes a row for such a student and the normal Approve refuses
   one (code `rule`; Approve anyway, a founder's or an admin's, passes).
-  Since the review of 2026-10-26 the same holds when the coupon check
-  says Whop shows no real payment (`CouponCheck.noRealPayment`, "No 30%
-  without a real payment" below), whatever `first_paid_at` holds.
+  Since the review of 2026-10-26 the same held when the coupon check
+  said Whop shows no real payment, and since the owner's answers of that
+  day it holds when the check says the student is unpaid, Whop not
+  showing both a paid course plan and a course payment that went through
+  (`CouponCheck.unpaid`, "The paid plan and the payment" below), whatever
+  `first_paid_at` holds.
   `requestCounts()` (T-080) counts every request from 2026-10-08 22:00
   UTC (the launch) on. An earlier one counts only for a student whose
   `first_paid_at` is from 2026-09-30 22:00 UTC (1 October in Croatia;
@@ -1235,7 +1238,13 @@ When adding a new table, append it here. When deleting a field, scan
   With no coupon the membership the check settled on answers (paid or free
   by its own renewal price since the fourth fix round, which reads no plan
   for a membership naming no code), else the first real payment (the
-  newest until the fourth), and no real payment at all is none. Until the
+  newest until the fourth), and no real payment at all is none. Since the
+  owner's answers of 2026-10-26 a no coupon needs both a real course
+  payment and a course membership on a paid plan: the paid membership
+  settled on answers, else, where the plan is not known (a renewal price
+  that does not read, v2's list answering a 4xx), the first real payment;
+  every other no coupon is unpaid ("The paid plan and the payment"
+  below). Until the
   fourth fix round a membership that no longer grants access was never
   read, the price judged every real course payment, the name of the
   student's own code counted with no request, a v2 list in another shape,
@@ -1262,8 +1271,10 @@ When adding a new table, append it here. When deleting a field, scan
   not (since the third fix round): a stored coupon whoever wrote it, a
   stored no coupon only when this rule wrote it and nothing since (since
   the fifth fix round THE RULE STAMP: its `source`, v113, carries the
-  rule's version, `r5-membership`, `r5-user` or `r5-payment`, and its
-  `source_checked_at` is its `checked_at`, `stampedByThisRule`; a step's
+  rule's version, `r6-membership`, `r6-user` or `r6-payment` since the
+  owner's paid plan and payment of 2026-10-26 (`r5-...` until then, which
+  production's build writes and this rule reads as an older rule's), and
+  its `source_checked_at` is its `checked_at`, `stampedByThisRule`; a step's
   word alone answered until then), when it names no code or the student's
   own 30% by the promo id on their own approved or applied request (since
   the fourth, `storedNoCouponAnswers`), and when the student's own row
@@ -1320,8 +1331,10 @@ When adding a new table, append it here. When deleting a field, scan
   line adding "The coupon check gave no answer."); until then the approve
   route went on with neither.
 - **No 30% without a real payment (the review of 2026-10-26; branch
-  `night/eighty`, not on production):** `checkMembershipDiscount`'s
-  answer carries `noRealPayment`: with no coupon, Whop shows no real
+  `night/eighty`, not on production; since the owner's answers of the
+  same day one case of "The paid plan and the payment", the next bullet,
+  where the names, the words and the verdict below were replaced):**
+  `checkMembershipDiscount`'s answer carried `noRealPayment`: with no coupon, Whop shows no real
   payment from the student (no course membership with a price answered,
   and no real course payment: `judgeStudentDiscount`'s `noRealPayment`
   on Whop's answer now, or `rowShowsNoRealPayment` on a stored no coupon
@@ -1350,7 +1363,58 @@ When adding a new table, append it here. When deleting a field, scan
   the owner's call), and with no answer from Whop or the stored row (the
   503s above stand). A real payment for another product (ETfB) is no
   course payment, so such a student reads as no real payment (the
-  owner's call too).
+  owner's call too). The owner decided both the same day (the next
+  bullet), and its names, words and verdict were replaced there.
+- **The paid plan and the payment (the owner, 2026-10-26, his answers to
+  the review of `night/eighty`; branch `night/eighty2`, not on
+  production):** "They shouldn't be able to apply. If they don't have a
+  payment and a paid plan - no applying to 30% off. Can't even give it to
+  them so there's no point." `checkMembershipDiscount`'s answer carries
+  `unpaid` (it was `noRealPayment`): with no coupon, Whop does not show
+  both a real course payment (paid, above 0, not refunded in full or lost
+  in a dispute) and a course membership on a paid plan (one renewing above
+  0 the check settles on: the one on file whatever its status, or one
+  found through the Whop user that grants access). `judgeStudentDiscount`
+  answers `noRealPayment` (no real course payment, whatever the
+  memberships) or `noPaidPlan` (a real course payment and no paid plan,
+  every renewal price read and the user's list answered); the stored
+  fallback reads `rowShowsUnpaid` (it was `rowShowsNoRealPayment`) on a
+  stored no coupon this rule wrote that answers. Refused: a payment for
+  another product alone (ETfB, an Apex seat's holder paying for ETfB),
+  the course's free plan with or without a real payment beside it, a
+  trial whose checkout was $0, a past_due membership whose only charge
+  failed, a canceled or expired membership after a full refund, no course
+  membership that grants access. Both request routes write nothing and
+  answer 400 `{ error: "The 30% needs a paid course plan and a payment
+  that went through.", state: "not-eligible" }` (`unpaidRefusal`,
+  `PAID_PLAN_LINE`; an empty `first_paid_at` keeps "We can't see your
+  first payment yet. Tell the team and they'll sort it out."); the
+  approve route refuses the normal Approve before the rule, 400
+  `{ error: "Cannot approve: the 30% needs a paid course plan and a
+  payment that went through, and Whop doesn't show both for this
+  student.", code: "rule" }` (`UNPAID_APPROVAL`), Approve anyway
+  (`override`) passing it, its log line adding "Whop does not show both a
+  paid course plan and a course payment that went through.". Let in: a
+  real course payer on a paid plan (a membership id on file; a payment's
+  id with the membership found through the Whop user; a partial refund;
+  canceled and joined again; a $0 first payment then 97.00; past_due after
+  a failed renewal, the first payment real), and where the plan is not
+  known (a membership whose renewal price does not read, v2's list
+  answering a 404 or another 4xx) any real course payment. An unpaid
+  answer's row holds no coupon, no code and no price, names the
+  membership on file when it is one, and carries the stamp even with the
+  user's list unread; every other answer holds a price. The stamp's
+  version is `r6`: an `r5-` row (production's build) never answers a no
+  coupon, and v113's check takes both. `GET /api/student/data` answers
+  `membershipUnpaid` from the stored row read with no stamp (no row, a row
+  with a price, one of another membership or a failed read: `false`), and
+  the map's `discountState` answers `not-eligible`, `unpaid`, right after
+  `has-discount`, so the 30% panel says the sentence with no Apply. The
+  cron counts `no_real_payment` and `no_paid_plan`. Not decided: a
+  canceled or expired membership on file renewing above 0, beside a real
+  course payment, passes (the status is not read); once v2's list is
+  gone (13 November 2026, until T-113) the payment decides wherever the
+  membership on file shows no paid plan.
 - **Required questions are enforced on the server (the owner's review,
   2026-10-21; branch `night/admin3`, not on production):** before
   anything is written, `POST /api/discounts/request` and
@@ -1441,8 +1505,10 @@ When adding a new table, append it here. When deleting a field, scan
   live read for the student of one pending request). One row per
   student, upserted on `student_id`.
 - **Depended on by:** `GET /api/student/data` (`whop_membership_id,
-  discounted` only; answers `membershipDiscounted`, never the code or the
-  prices, and a failed read is `false`, never a 500), the request and
+  discounted`, and since 2026-10-26 `promo_code_id` and `renewal_price`
+  for `rowShowsUnpaid`; answers `membershipDiscounted` and since then
+  `membershipUnpaid`, never the code or the prices, and a failed read is
+  `false` for both, never a 500), the request and
   approve routes (their fallback when Whop does not answer: `whop_membership_id,
   promo_code_id, promo_code, renewal_price, discounted, checked_at, source,
   source_checked_at`, `renewal_price` since 2026-10-26, read again without
@@ -1454,12 +1520,14 @@ When adding a new table, append it here. When deleting a field, scan
   rule's stamp from one write, `source` carrying the rule's version and
   `source_checked_at` equal to `checked_at`, and only when the student's
   own row could be read; such a no coupon with no code and no price is
-  the rule's "no real payment" answer, `rowShowsNoRealPayment`, on which
-  both request routes and the normal Approve refuse since the review of
-  2026-10-26), and
+  the rule's unpaid answer, `rowShowsUnpaid` since the owner's answers of
+  2026-10-26 (its "no real payment" answer, `rowShowsNoRealPayment`, from
+  the review of that day until then), on which both request routes and
+  the normal Approve refuse), and
   `GET /api/admin/thirty` (every column, for the coupon on a row and the
   verdict on a pending one, a row with no coupon, no code and no price
-  giving the verdict `no-real-payment` since the same review; on an
+  giving the verdict `unpaid` since the owner's answers of the same day
+  (`no-real-payment` from the review until then); on an
   Approved row only when Whop gives no answer to the route's own live
   read, since the review's fix round).
 - **Stable contract:** `student_id`, `whop_membership_id` (the membership
@@ -1476,7 +1544,9 @@ When adding a new table, append it here. When deleting a field, scan
   grants access read for a code too; until the third a promo code on the
   membership and a renewal below the plan's renewal price), `checked_at`.
   v113 (T-122, branch `night/admin3`, not pasted; THE RULE STAMP since its
-  fifth fix round) adds `source`, the rule's version and the step:
+  fifth fix round) adds `source`, the rule's version and the step (`r6-`
+  since the owner's paid plan and payment of 2026-10-26, its check taking
+  the `r5-` values beside them, which production's build writes):
   `r5-membership`, `r5-user` (a course membership found through the Whop
   user: the one that carries the code, an ended one too since the fourth
   fix round, or with none the first in the order that renews above 0, else
@@ -1491,11 +1561,14 @@ When adding a new table, append it here. When deleting a field, scan
   does not read), and `plan_renewal_price` its subtotal when it names a
   code or shows a discount naming none, 97.00 when the price judged it,
   else null, both null with no real payment (the one answer of the rule
-  that stores no price, which `rowShowsNoRealPayment` reads; since the
+  that stores no price, which `rowShowsNoRealPayment` read; since the
   review of 2026-10-26 a free plan settled on with no real course payment
   is that answer too, and its `whop_membership_id` is the membership on
   file when it is one, else the one whose read gave no price, else the
-  free one); until T-122's third fix round
+  free one; since the owner's answers of that day it is the unpaid
+  answer, `rowShowsUnpaid`, for no real course payment whatever the
+  memberships and for a real one beside no paid plan, its code null
+  too); until T-122's third fix round
   a payment in another currency was held against 97.00 at its
   `usd_total`'s rate, and until its first `discounted` was its total under
   97.00; the code is the payment's), the step's word alone until the fifth
@@ -2565,11 +2638,14 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     video, the owner's B; no first payment on file reads "There is no real
     payment on file for this student, and the 30% needs one."; since the
     review of the same day a stored coupon row showing no real payment
-    gives the verdict reason `no-real-payment`, "Whop shows no real
-    payment from this student, and the 30% needs one.", after the
+    gave the verdict reason `no-real-payment`, and since the owner's
+    answers of that day one showing the student unpaid gives the reason
+    `unpaid`, "The 30% needs a paid course plan and a payment that went
+    through, and Whop doesn't show both for this student.", after the
     coupon's and before the rule's, and `facts.secondsLeft` is the
     shortest videos' length), `coupon` (`code, promoCodeId, discounted,
-    noRealPayment` (since the review), `ours, renewalPrice,
+    unpaid` (since the owner's answers of 2026-10-26; `noRealPayment` from
+    the review until then), `ours, renewalPrice,
     planRenewalPrice, checkedAt`, or null) for the
     membership the student holds now (`ours`, since the render review's
     fix round: an Approved or Code Applied row's coupon is the request's
@@ -2644,10 +2720,12 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   `source_checked_at` (v113), but a no coupon judged without the user's
   list, stored with no source.
 - **Produces:**
-  - 200 `{ discounted, code, noRealPayment }`: Whop answered now and its
+  - 200 `{ discounted, code, unpaid }`: Whop answered now and its
     answer is stored; `code` is the code's name, or its promo id, or
-    null; `noRealPayment` (since the review of 2026-10-26) the check's
-    own, Whop showing no real payment from the student.
+    null; `unpaid` the check's own, Whop not showing both a paid course
+    plan and a course payment that went through (since the owner's
+    answers of 2026-10-26; `noRealPayment`, Whop showing no real payment,
+    from the review of that day until then).
   - 400 "Missing requestId" (no id, or a body that is not JSON).
   - 404 "This request no longer exists."
   - 409 "This request was already decided." (the page reads its list

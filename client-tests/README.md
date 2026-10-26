@@ -127,7 +127,11 @@ while the coupon check's stored row says Whop shows no real payment, through
 both request routes (refused, nothing written), the approve route (the
 normal Approve refused with code `rule`, Approve anyway passing for a
 founder and an admin, a csm's refused) and the 30% page's own list
-(`loadThirtyData` and `buildThirtyView`, the verdict `no-real-payment`);
+(`loadThirtyData` and `buildThirtyView`, the verdict `no-real-payment`;
+since the owner's paid plan and payment of the same day the unpaid
+sentence, "The 30% needs a paid course plan and a payment that went
+through.", the team's `UNPAID_APPROVAL` and the verdict `unpaid`, an empty
+`first_paid_at` keeping its own sentence);
 the refusal one short of the 49 naming the shortest video left ("about 2
 minutes", where the next in course order took 2.9 hours); and the closed
 line of a window that ended before the 80% rule (`expiredRuleLine`: the
@@ -464,8 +468,9 @@ read drops another student's row (the check fails for that student); with the
 real loader nothing is asked for twice and nothing differs. Since the review
 of 2026-10-26 its coupon fixture also holds C7, a student with no membership
 on file whose stored row is the coupon check's "no real payment" answer (the
-verdict `no-real-payment`, the count still on its line, Approve anyway
-skipping it as it skips the rule), and C8, the same row holding a 97.00
+verdict `no-real-payment`, since the owner's answers of the same day the
+unpaid one, `unpaid`, in the page's own words, the count still on its line,
+Approve anyway skipping it as it skips the rule), and C8, the same row holding a 97.00
 first payment (the rule's yes); and B's time left is the 4 shortest videos
 not watched, where it was the next 4 in course order. Since the review's
 second round of the same day a deadline before 26 October keeps every
@@ -1044,6 +1049,51 @@ no coupon with this rule's stamp; `admin-review` (100) answers a membership
 read with the id asked for (its stand-in answered `mem_x` for any) and names
 the course product for its stalled cron run, since a check with none named
 stops before any read.
+
+The owner's paid plan and payment (2026-10-26, `night/eighty2`): "If they
+don't have a payment and a paid plan - no applying to 30% off. Can't even
+give it to them so there's no point." `membership-discount` (759, +88) has
+a section of its own: ten refused cases (a payment for ETfB alone, an Apex
+seat's holder paying for ETfB, the free plan with no payment and beside a
+real 97.00, a trial whose checkout was $0, past_due with its only charge
+failed, canceled and expired after a full refund, no course membership with
+no payment and beside a real 97.00), each through `judgeStudentDiscount`
+(`noRealPayment` or `noPaidPlan`, the row with no coupon, no code and no
+price, naming the membership on file, stamped `r6-payment`), both request
+routes (400, "The 30% needs a paid course plan and a payment that went
+through.", nothing written), the normal Approve (400 code `rule`,
+`UNPAID_APPROVAL`, the 30% page's row read again saying `unpaid` in its own
+words) and Approve anyway (approved, its log line); eight real payers on a
+paid plan (a membership id on file, a payment's id found through the Whop
+user, a payment's id with v2 answering 404, a partial refund, canceled and
+joined again, a $0 first payment then 97.00, past_due after a failed
+renewal, a membership on file with no renewal price beside a real 97.00),
+each let in by the judge, both request routes and the normal Approve; Whop
+down with a stamped real payer's row (let in), a stamped row the payment
+answered (let in), a stamped unpaid row (refused) and the trial's `r5-` row
+(the 503: an older rule's); the map's data route (`membershipUnpaid` from
+the stored row, two booleans and no column of the row, read with no stamp:
+an `r5-` or unstamped unpaid row says it, a row with a price, of another
+membership or a failed read does not), `discountState` (`unpaid` after
+`has-discount`, a request already made deciding first, an empty or
+September first payment keeping its words) and `checkpointView` ("Closed",
+no chip); a trial that pays, read again by the cron two hours later, the
+map's flag gone; and the cron over every case (`no_real_payment` 8,
+`no_paid_plan` 2, each row as the rule says). Earlier checks moved with the
+rule: the stamp is `R6` (`r6-`, an `r5-` stamp an older rule's), the
+full-price users pay 97.00 for their membership (they had no payment), the
+cron's past_due student has its 97.00 checkout, the free plan beside a real
+payment and a real payment with no course membership listed are refused
+(both were let in; the second is let in with v2 answering 404), a
+membership with no code and no payment no longer stands in for a payment,
+and `rowShowsUnpaid` is held to both halves on 140 answers (it was
+`rowShowsNoRealPayment`, held to `noRealPayment`). `discount-eighty` (106,
++1), `thirty-view` (102), `admin-review` (100), `admin-render-fixes` (76),
+`admin-render-second` (53), `admin-discounts` (29), `admin-owner-review`
+(58), `discount-double-submit` (33) and `discount-september` (67) follow: the
+stored rows carry the `r6-` stamp, the unpaid words and the reason `unpaid`
+replace the no-real-payment ones, and `admin-review`'s stand-in pays the
+97.00 checkout.
 
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop

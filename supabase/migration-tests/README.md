@@ -26,15 +26,20 @@ to `run.mjs` merged without touching it), then `v112.test.mjs` (below), with
 `src/lib/achievement-rules.ts`, then `v113.test.mjs` (v113 and its undo,
 T-122: `student_membership_discounts.source`, the step of the coupon check
 that answered, since T-122's fifth fix round THE RULE STAMP, the rule's
-version and the step (`r5-membership`, `r5-user`, `r5-payment`), with
-`source_checked_at`, the `checked_at` of the write that set it; a row
-carrying them refused before v113, pasted twice, only this rule's three
-values or empty, an earlier round's words (`membership`, `user`, `payment`)
-refused and emptied from a database that holds the earlier copy of the file,
-the older builds' writes made as PostgREST makes them, an earlier round's
-refused whole and one from before T-122 keeping the stamp with a new
-`checked_at`, the undo dropping both columns and keeping every row, and v113
-on a database without v111), then `v114.test.mjs` (below), with
+version and the step (`r5-membership`, `r5-user`, `r5-payment`; since the
+owner's paid plan and payment of 2026-10-26 `r6-membership`, `r6-user`,
+`r6-payment` beside them), with `source_checked_at`, the `checked_at` of
+the write that set it; a row carrying them refused before v113, pasted
+twice, only the six values or empty (an `r7-` word refused), an earlier
+round's words (`membership`, `user`, `payment`) refused and emptied from a
+database that holds the earlier copy of the file, the older builds' writes
+made as PostgREST makes them, an earlier round's refused whole and one from
+before T-122 keeping the stamp with a new `checked_at`, the `r5` build's
+write over the `r6` build's row and the `r6` build's next write over it, the
+undo dropping both columns and keeping every row, this copy pasted over the
+copy taking the `r5-` values alone (the `r6` write refused there before it
+and taken after it, the `r5-` row kept), and v113 on a database without
+v111), then `v114.test.mjs` (below), with
 `--experimental-strip-types` because it imports `src/lib/progress.ts`, then
 `eighty-closed-windows.test.mjs` (below, since 2026-10-26). On
 `night/admin2` with the 5 lanes merged:
@@ -45,7 +50,9 @@ two, then `PASS 65 FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`,
 0`. On `night/v114` (2026-10-23): `PASS 702`, `PASS 22`, `PASS 65`, `PASS
 34`, then `PASS 51`, each with `FAIL 0`; after the review's fix round the
 same day: `PASS 702`, `PASS 22`, `PASS 65`, `PASS 34`, then `PASS 86`, each
-with `FAIL 0`.
+with `FAIL 0`. On `night/eighty2` (2026-10-26, the owner's paid plan and
+payment): `PASS 702`, `PASS 22`, `PASS 65`, `PASS 41`, `PASS 86`, then
+`PASS 32`, each with `FAIL 0`.
 
 `v114.test.mjs` (2026-10-23, Video Ads II's four editing breakdowns,
 `a4l02` to `a4l05`, become action items with a Discord link) builds

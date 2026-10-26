@@ -522,13 +522,18 @@ console.log('\n=== The coupon rule: a stored id that is not a membership, and a 
   ok(downAnswer.source === 'none' && downAnswer.liveFail === 'network' && warned.some((w) => w.includes('student s-pay: Whop gave no answer (network), so no answer is on file')),
      'Whop down for it: no answer on file (the request routes refuse, and since T-122\'s fourth fix round the normal Approve too), and a line says so', warned.join(' | '))
 
-  const members = Array.from({ length: 3 }, (_, i) => ({ id: `s-${i}`, whop_membership_id: `mem_${i}`, first_paid_at: '2026-10-10T08:00:00.000Z', membership_status: 'active' }))
+  // The run starts 10 minutes ago, and the three first paid 3 days before that, so their 30% window is open at its
+  // start whatever day the suite runs. A fixed date (10 October) left the window shut from 24 October on, the run
+  // then had nobody to read and answered ok: true, and this check failed on every branch.
+  const startedAtMs = Date.now() - 10 * 60_000
+  const paid = new Date(startedAtMs - 3 * 86_400_000).toISOString()
+  const members = Array.from({ length: 3 }, (_, i) => ({ id: `s-${i}`, whop_membership_id: `mem_${i}`, first_paid_at: paid, membership_status: 'active' }))
   // The course named, as on production: since T-122's fifth fix round a check with no course product named stops before
   // any read (no_course_product), where it read the membership on file first.
   const productsBefore = process.env.WHOP_PRODUCT_ID
   process.env.WHOP_PRODUCT_ID = 'prod_devCourse'
   const hung = await MD.refreshMembershipDiscounts(fakeClient(new FakeDb({ students: members, discount_requests: [], student_membership_discounts: [] })), {
-    mode: 'dry', startedAtMs: Date.now() - 10 * 60_000, apiKey: 'test-key',
+    mode: 'dry', startedAtMs, apiKey: 'test-key',
   })
   if (productsBefore === undefined) delete process.env.WHOP_PRODUCT_ID
   else process.env.WHOP_PRODUCT_ID = productsBefore

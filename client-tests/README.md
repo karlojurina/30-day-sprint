@@ -105,6 +105,23 @@ student who already holds a request from the old dashboard; the form's
 database function stands in from v29's body, and the migration harness
 (section 26) runs the real one on the same four cases.
 
+`discount-eighty.test.mjs` (2026-10-26) runs the owner's 80% rule and the
+30% with no real payment. It holds `videosNeeded` (`discount.ts`) to a count
+made another way for every N from 0 to 300; takes the real course's 61 at 48,
+49 and 61 watched through the map's `discountState`, the request routes'
+`decideDiscountRequest` and `approvalVerdict`, which must agree; closes the
+window; counts catalogs of 3, 5, 10, 12 with 2 unloaded and 62 videos; and
+drives the real routes on stub-server.ts's stand-in, both request routes and
+the approve route, at 48, 49 and 61 and with `first_paid_at` empty (both
+request routes refuse and write nothing, the normal Approve refuses, Approve
+anyway passes for a founder and an admin and is refused for a csm). The
+approve route is copied here with its login and Whop's promo code pointed at
+stub-admin.ts, as admin-discounts.test.mjs copies it, so the three roles can
+press it. It also checks the map's words and counts (`discountRule`,
+`checkpointCounts`), the 30% page's video line (`videoLine`) and what Copy @
+and Copy ID copy (`discordCopies`), and renders the admin's `CopyButton`,
+compiled as Next compiles it, greyed and not.
+
 `whop-catchup.test.mjs` (T-089, 2026-10-20) runs `POST /api/admin/whop-catchup`
 through its own `POST`: the route, the run (`src/lib/whop-catchup.ts`) and the
 real team login (`admin-auth.ts`, so 401 and 403 are its own answers, on the

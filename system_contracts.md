@@ -34,7 +34,10 @@ When adding a new table, append it here. When deleting a field, scan
 - **Depends on:** `auth.users` (Supabase auth)
 - **Depended on by:** essentially everything student-related —
   `AuthContext`, `StudentContext`, all student API routes, all CSM
-  cron jobs, admin UI, and `src/lib/student-app-gate.ts` (T-078, only
+  cron jobs, admin UI (the 30% page's list, `loadThirtyData` in
+  `src/lib/admin/thirty-data.ts`, reads `discord_username` and, since
+  2026-10-26, `discord_user_id` for its Copy @ and Copy ID), and
+  `src/lib/student-app-gate.ts` (T-078, only
   while `STUDENT_APP_CLOSED=true`: `whop_user_id` by `supabase_user_id`
   for a student route or the Field Journal, `supabase_user_id` by
   `whop_user_id` for the Whop login)
@@ -1108,7 +1111,14 @@ When adding a new table, append it here. When deleting a field, scan
   reads them through `StudentContext`, which since 2026-10-17 gets only
   `id`, `status`, `created_at` and `rejection_reason` from
   `/api/student/data`, never the promo code; `discountState()` lets the
-  latest request that counts decide what the student sees.
+  latest request that counts decide what the student sees. With none,
+  it is the rule: since the owner's 80% rule (2026-10-26) 80% of the
+  videos up to the gate by the deadline, `videosNeeded()` in
+  `discount.ts` (ceil(0.8 x N), 49 of 61), which the map, both request
+  routes, the approval and the 30% page all read; no first payment on
+  file (`first_paid_at` empty) is no window at all, so neither request
+  route writes a row for such a student and the normal Approve refuses
+  one (code `rule`; Approve anyway, a founder's or an admin's, passes).
   `requestCounts()` (T-080) counts every request from 2026-10-08 22:00
   UTC (the launch) on. An earlier one counts only for a student whose
   `first_paid_at` is from 2026-09-30 22:00 UTC (1 October in Croatia;
@@ -1327,7 +1337,8 @@ When adding a new table, append it here. When deleting a field, scan
 - **No ads check on approve (2026-10-20, the owner's decision):**
   `POST /api/discounts/approve` no longer reads
   `students.ad_submissions_verified`, on either course: the 30% already
-  asks for 61 videos, so the rule alone decides, and Generate anyway
+  asks for 61 videos (80% of them, 49, since 2026-10-26), so the rule
+  alone decides, and Generate anyway
   (`override`) skips it. Before, it refused with "Ad submissions not
   verified yet..." while the column was false. The column is still set
   from the student page and the journey drawer
@@ -2244,8 +2255,9 @@ called against a database or run on a deployment.
   sync row, celebrations, the DM log, region quizzes, ratings, the
   watch rows) are answered as before when they fail: empty, or null.
 - **Why:** each of those reads, failed, answered as a believable empty
-  state: no completions as every lantern out and all 61 videos left for
-  the 30%, no streak row as a streak of 0, no milestones as a
+  state: no completions as every lantern out and none of the 49 videos
+  the 30% needs watched (all 61 left until the 80% rule of 2026-10-26),
+  no streak row as a streak of 0, no milestones as a
   graduate's Playbook link gone, no discount row as an in-review
   request back to Apply, no lessons as "There are no lessons here
   yet.". postgrest-js retries a GET only after a network error or a
@@ -2460,7 +2472,8 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   then the decided ones; a request on both is kept once, decided; with
   its `whop_promo_id` since the render review's fix round), the
   `students` holding them (`id, name, email, discord_username,
-  membership_status, first_paid_at, whop_membership_id`), the catalog
+  discord_user_id, membership_status, first_paid_at,
+  whop_membership_id`; `discord_user_id` since 2026-10-26), the catalog
   (`LESSONS_TABLE`, by `sort_order`), `lesson_videos` (`lesson_id,
   created_at`; the service role alone can read it), their completions of
   the lessons the 30% asks for (each read holds as many students as fit in
@@ -2483,9 +2496,15 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     couponsUnread, requests }`, `requests` oldest first, each a
     `ThirtyRequestRow` (`thirty-view.ts`): `id, status, askedAt,
     reviewedAt, reviewedBy, appliedAt, appliedBy, promoCode,
-    rejectionReason`, `student` (`id, name, email, username, status,
-    whopPulled`; no plan, no ads tick), `facts` and `verdict` on a pending
-    row (null on the others), `coupon` (`code, promoCodeId, discounted,
+    rejectionReason`, `student` (`id, name, email, username, discordId,
+    status, whopPulled`; no plan, no ads tick; `discordId` is
+    `discord_user_id`, since 2026-10-26, which with `username` is what
+    the page's Copy ID and Copy @ copy), `facts` and `verdict` on a
+    pending row (null on the others; since the 80% rule of 2026-10-26
+    `facts` carries `videosNeeded`, the 80% of `videosTotal`, and the
+    verdict says yes exactly when `videosDone` reaches it, its sentences
+    naming the 80%; no first payment on file reads "There is no real
+    payment on file for this student, and the 30% needs one."), `coupon` (`code, promoCodeId, discounted,
     ours, renewalPrice, planRenewalPrice, checkedAt`, or null) for the
     membership the student holds now (`ours`, since the render review's
     fix round: an Approved or Code Applied row's coupon is the request's

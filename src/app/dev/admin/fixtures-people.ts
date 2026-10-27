@@ -131,8 +131,11 @@ interface Person {
   lastLesson?: string;
   exempt?: boolean;
   adVerified?: boolean;
-  /** The latest 30% request. */
-  request?: { status: string; code?: string; at: string };
+  /**
+   * The latest 30% request. `promoId`: the code's made-up Whop id, once Whop made it (whop_promo_id); a code with
+   * none is a claim, and the student's page offers no copy of it (the 30% that applies itself, T-137).
+   */
+  request?: { status: string; code?: string; promoId?: string; at: string };
   streak?: { current: number; last: string };
   /** The last Whop sync: before the switch (stale), after it, or none. */
   sync?: { at: string; fetched: number; matched: number; unmatched?: string[]; error?: string } | null;
@@ -143,13 +146,14 @@ const PEOPLE: Person[] = [
   {
     id: "p-maya", name: "Maya Lindqvist", email: "maya@example.com", username: "maya.lq", status: "active",
     paid: "2026-10-19T09:00:00.000Z", lastActive: "2026-10-21T07:50:00.000Z", done: 9, lastLesson: "2026-10-21T07:40:00.000Z",
-    request: { status: "pending", at: "2026-10-20T18:00:00.000Z" }, streak: { current: 3, last: "2026-10-21" },
+    // A claim: the app is making her code (a name, no Whop id yet), so her page offers no copy of it.
+    request: { status: "pending", code: "ECOM30-K7Q2MX", at: "2026-10-20T18:00:00.000Z" }, streak: { current: 3, last: "2026-10-21" },
     sync: { at: "2026-10-21T06:00:00.000Z", fetched: 12, matched: 12 }, adVerified: true,
   },
   {
     id: "p-jonah", name: "Jonah Pereira", email: "jonah@example.com", username: "jonah_p", status: "active",
     paid: "2026-10-14T15:00:00.000Z", lastActive: "2026-10-17T10:00:00.000Z", done: 5, lastLesson: "2026-10-17T09:00:00.000Z",
-    request: { status: "approved", code: "ECOM30-7B20C4", at: "2026-10-19T19:00:00.000Z" }, streak: { current: 0, last: "2026-10-17" },
+    request: { status: "approved", code: "ECOM30-7B20C4", promoId: "promo_devecom307b20c4", at: "2026-10-19T19:00:00.000Z" }, streak: { current: 0, last: "2026-10-17" },
     sync: { at: "2026-10-18T10:00:00.000Z", fetched: 6, matched: 5, unmatched: ["les_madeup0001"] },
   },
   {
@@ -175,7 +179,7 @@ const PEOPLE: Person[] = [
     // On the hidden $97 plan: on All students and the journey like everyone on the visible one.
     id: "p-omar", name: "Omar Haddad", email: "omar@example.com", status: "active", plan: HIDDEN_97,
     paid: "2026-10-16T12:00:00.000Z", lastActive: "2026-10-19T20:00:00.000Z", done: 4, lastLesson: "2026-10-16T20:00:00.000Z",
-    request: { status: "applied", code: "ECOM30-A1D9E0", at: "2026-10-18T08:00:00.000Z" },
+    request: { status: "applied", code: "ECOM30-A1D9E0", promoId: "promo_devecom30a1d9e0", at: "2026-10-18T08:00:00.000Z" },
   },
   {
     // A username longer than a journey card is wide: it ends in an ellipsis there, its whole text in a title.
@@ -340,7 +344,9 @@ export function fixturePeopleTransport(opts: { state: PeopleState; reloadFails?:
         regions: ok(REGIONS),
         lessons: ok(LESSONS),
         completions: partial ? bad() : ok(completionsOf(p)),
-        discount: partial ? bad() : ok(p.request ? { status: p.request.status, promo_code: p.request.code ?? null, created_at: p.request.at } : null),
+        discount: partial
+          ? bad()
+          : ok(p.request ? { status: p.request.status, promo_code: p.request.code ?? null, whop_promo_id: p.request.promoId ?? null, created_at: p.request.at } : null),
         streak: partial ? bad() : ok(p.streak ? { current_streak: p.streak.current, last_streak_date: p.streak.last } : null),
         sync: partial
           ? bad()

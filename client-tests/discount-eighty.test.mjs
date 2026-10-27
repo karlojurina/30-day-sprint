@@ -759,14 +759,19 @@ console.log('\n=== 8. The 30% page: the video line, Copy Discord ID and Copy use
   ok(/>Copy Discord ID</.test(off) && /aria-disabled="true"/.test(off) && off.includes(`title="${NO_DISCORD_ID}"`) && !/ disabled=""/.test(off) && /opacity:0\.4/.test(off) && /cursor:not-allowed/.test(off),
      'with nothing: greyed, aria-disabled (still in the keyboard\'s path), its tip as its title', off)
 
-  // Where the page puts them (ThirtyView.tsx): beside "Copy code" on a row with a code, and on every Applied row.
+  // Where the page puts them (ThirtyView.tsx): beside "Copy code" on a row with a code, and on every pending row. Since
+  // the 30% that applies itself (T-137, R4) the page is one list: an approved row with a code, and a rejected or applied
+  // row listed for a write_failed, with the code Whop made or attached (its failure's, else the row's).
   const page = fromSrc('src/components/admin/thirty/ThirtyView.tsx')
+  const approvedRow = page.slice(page.indexOf('function ApprovedRow('), page.indexOf('function DecidedRow('))
+  const decidedRow = page.slice(page.indexOf('function DecidedRow('))
   ok(/<CopyButton text=\{code\} label="Copy code" \/>\s*<StudentCopies student=\{student\} \/>/.test(page)
-       && /\{row\.promoCode && row\.status !== "rejected" && <CodeWithCopy code=\{row\.promoCode\} student=\{row\.student\} \/>\}/.test(page),
-     'in the source: Copy Discord ID and Copy username beside "Copy code" (it said "Copy"), on every Approved and Code Applied row with a code')
+       && /\{row\.promoCode \? \(\s*<CodeWithCopy code=\{row\.promoCode\} student=\{row\.student\} \/>/.test(approvedRow)
+       && /const code = row\.lastFailure\?\.code \?\? row\.promoCode;/.test(decidedRow) && /\{code && <CodeWithCopy code=\{code\} student=\{row\.student\} \/>\}/.test(decidedRow),
+     'in the source: Copy Discord ID and Copy username beside "Copy code" (it said "Copy"), on every approved row with a code and every rejected or applied row listed for a write_failed')
   const pendingRow = page.slice(page.indexOf('function PendingRow('), page.indexOf('function CodeWithCopy('))
-  ok(/<StudentCopies student=\{row\.student\} \/>/.test(pendingRow) && /const detail = videoLine\(row, verdict\);/.test(pendingRow),
-     'in the source: every Applied row has them, and its verdict line is videoLine\'s')
+  ok(/<StudentCopies student=\{row\.student\} \/>/.test(pendingRow) && /const detail = videoLine\(row, verdict\);/.test(pendingRow) && !/<CodeWithCopy/.test(pendingRow),
+     'in the source: every pending row has them, with no Copy code (its code name may be a claim whose code does not exist), and its verdict line is videoLine\'s')
   const copies = page.slice(page.indexOf('function StudentCopies('), page.indexOf('function PendingRow('))
   ok(copies.indexOf('label="Copy Discord ID"') > 0 && copies.indexOf('label="Copy Discord ID"') < copies.indexOf('label="Copy username"') && /if \(none\) \{/.test(copies)
        && copies.indexOf('label="Copy username"') < copies.indexOf('data-username-note')

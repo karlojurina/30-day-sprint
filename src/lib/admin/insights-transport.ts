@@ -1,7 +1,7 @@
 "use client";
 
 import { createClient } from "@/lib/supabase-browser";
-import { loadBountyClaims, loadResetAt, loadSnapshots, loadSprinters } from "@/lib/admin/insights-data";
+import { loadBountyClaims, loadResetAt, loadSnapshots, loadSprinters, loadThirtyApplied } from "@/lib/admin/insights-data";
 import type { InsightsTransport } from "@/lib/admin/insights-data";
 
 /** The Insights page's real reads (admin rebuild 2, WI-9), with the team member's client. */
@@ -10,4 +10,5 @@ export const insightsTransport: InsightsTransport = {
   loadBountyClaims: () => loadBountyClaims(createClient()),
   loadSprinters: () => loadSprinters(createClient()),
   loadResetAt: () => loadResetAt(createClient()),
+  loadThirtyApplied: () => loadThirtyApplied(createClient()),
 };

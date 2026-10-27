@@ -137,6 +137,37 @@ console.log('\n=== The current sprinters ===')
   }
 }
 
+console.log('\n=== The 30% codes applied (the 30% that applies itself, T-137, R5) ===')
+{
+  const rows = [
+    { id: 'r-a', status: 'applied', created_at: '2026-10-05T10:00:00.000Z', applied_at: '2026-10-06T09:00:00.000Z' },
+    // Marked applied before applied_at was written: the day it was made stands in.
+    { id: 'r-b', status: 'applied', created_at: '2026-10-20T10:00:00.000Z', applied_at: null },
+    { id: 'r-c', status: 'approved', created_at: '2026-10-10T10:00:00.000Z' },
+    { id: 'r-d', status: 'rejected', created_at: '2026-10-11T10:00:00.000Z' },
+    // Made before 1 October: not counted, as the Dashboard's "30% off applied" does not count it.
+    { id: 'r-e', status: 'applied', created_at: '2026-09-29T10:00:00.000Z', applied_at: '2026-10-02T10:00:00.000Z' },
+    // Postgres's own text for a moment, as PostgREST hands a timestamptz back: an ISO moment on the card.
+    { id: 'r-f', status: 'applied', created_at: '2026-10-12T10:00:00.000Z', applied_at: '2026-10-12T10:00:00.5+00:00' },
+  ]
+  const db = new FakeDb({ discount_requests: rows })
+  db.shuffle = 3
+  const r = await INSIGHTS.loadThirtyApplied(fakeClient(db))
+  ok(r.ok && show(r.data) === show([{ at: '2026-10-06T09:00:00.000Z' }, { at: '2026-10-12T10:00:00.500Z' }, { at: '2026-10-20T10:00:00.000Z' }]),
+     'every applied request from 1 October, by when its code went on (applied_at, else created_at), oldest first; not approved, rejected or from September', show(r))
+  const q = db.calls('discount_requests', 'select')[0]
+  ok(q.columns === 'id, applied_at, created_at' && q.filters.includes('status=applied') && q.filters.some((x) => x.startsWith('created_at>=2026-09-30T22:00:00')),
+     'its read: three columns, the applied ones from DISCOUNT_ELIGIBLE_FROM', show(q))
+  const many = new FakeDb({ discount_requests: Array.from({ length: 1205 }, (_, i) => ({ id: `r-${String(i).padStart(5, '0')}`, status: 'applied', created_at: '2026-10-15T10:00:00.000Z', applied_at: '2026-10-16T10:00:00.000Z' })) })
+  many.shuffle = 9
+  const all = await INSIGHTS.loadThirtyApplied(fakeClient(many))
+  ok(all.ok && all.data.length === 1205, `past PostgREST's 1000 rows: every one read, in pages by id (${all.ok && all.data.length})`)
+  const down = new FakeDb({ discount_requests: rows })
+  down.fail['discount_requests.select'] = { message: 'timeout' }
+  const failed = await INSIGHTS.loadThirtyApplied(fakeClient(down))
+  ok(!failed.ok && failed.error === 'the applied 30% requests could not be read: timeout', 'a read that fails says so: the card shows ReadFailed, never 0', show(failed))
+}
+
 console.log('\n=== The words the team reads ===')
 {
   const files = ['src/components/admin/insights/InsightsView.tsx', 'src/lib/admin/insights-data.ts',

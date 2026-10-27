@@ -18,8 +18,10 @@ import type { ChartPoint, InsightsMetric, InsightsTransport, SprinterProgress } 
  * /admin/insights/progress (admin rebuild 2, WI-9: the brand kit's dark
  * look). Three trend charts from daily_progress_snapshots (Avg progress,
  * Active students, Churned), the pace (or, after the course switch, the
- * activity) of the students right now, the current sprinters, and the
- * Bounty Program claims, over one range (7, 14, 30 or 90 days, all, or two
+ * activity) of the students right now, the current sprinters, the Bounty
+ * Program claims, and since the 30% that applies itself (T-137, R5) the 30%
+ * codes put on students' Whop memberships per day, drawn as the Bounty
+ * Program's card is, over one range (7, 14, 30 or 90 days, all, or two
  * dates).
  *
  * `transport` holds the page's reads (src/lib/admin/insights-data.ts) and
@@ -144,18 +146,21 @@ export function InsightsView({ transport, pace }: { transport: InsightsTransport
   const bountyRun = useCallback(() => transport.loadBountyClaims(), [transport]);
   const sprintersRun = useCallback(() => transport.loadSprinters(), [transport]);
   const resetRun = useCallback(() => transport.loadResetAt(), [transport]);
+  const thirtyRun = useCallback(() => transport.loadThirtyApplied(), [transport]);
   const [snapshots, retrySnapshots] = useRead(snapshotsRun);
   const [bounty, retryBounty] = useRead(bountyRun);
   const [sprinters, retrySprinters] = useRead(sprintersRun);
   const [reset, retryReset] = useRead(resetRun);
+  const [thirty, retryThirty] = useRead(thirtyRun);
 
   const refreshAll = () => {
     retrySnapshots();
     retryBounty();
     retrySprinters();
     retryReset();
+    retryThirty();
   };
-  const loading = [snapshots, bounty, sprinters, reset].some((r) => r.kind === "loading");
+  const loading = [snapshots, bounty, sprinters, reset, thirty].some((r) => r.kind === "loading");
   const updatedAt = snapshots.kind === "ready" ? snapshots.at : null;
 
   return (
@@ -204,6 +209,7 @@ export function InsightsView({ transport, pace }: { transport: InsightsTransport
       <PaceCard counts={pace} />
       <SprintersCard read={sprinters} onRetry={retrySprinters} />
       <BountyCard read={bounty} range={range} preset={preset} onRetry={retryBounty} />
+      <ThirtyCard read={thirty} range={range} preset={preset} onRetry={retryThirty} />
 
       {snapshots.kind === "loading" ? (
         <Card padding={20}>
@@ -544,17 +550,50 @@ function MetricCard({ metric, line }: { metric: InsightsMetric; line: { ok: true
   );
 }
 
-function BountyCard({
-  read,
-  range,
-  preset,
-  onRetry,
-}: {
+/** What a card of moments counted per day takes: the moments, the range and its preset, and Retry. */
+interface DayCountProps {
   read: Read<string[]>;
   range: { from: string; to: string };
   preset: RangePreset;
   onRetry: () => void;
-}) {
+}
+
+function BountyCard(props: DayCountProps) {
+  return (
+    <DayCountCard
+      {...props}
+      title="Onboarded to the Bounty Program"
+      chartLabel="Joined the Bounty Program"
+      emptyText="No Bounty Program claims in this range."
+    />
+  );
+}
+
+/**
+ * "30% off applied" (the 30% that applies itself, T-137, R5): the 30% codes
+ * put on students' Whop memberships, by the day each went on
+ * (loadThirtyApplied), drawn as the Bounty Program's card is: the count in
+ * the range against the period before, and bars per day.
+ */
+function ThirtyCard({ read, ...rest }: Omit<DayCountProps, "read"> & { read: Read<Array<{ at: string }>> }) {
+  const stamps = useMemo<Read<string[]>>(() => (read.kind === "ready" ? { ...read, data: read.data.map((x) => x.at) } : read), [read]);
+  return <DayCountCard {...rest} read={stamps} title="30% off applied" chartLabel="30% off applied" emptyText="No 30% code went on in this range." />;
+}
+
+/**
+ * A count per UTC day over the range (the Bounty Program's claims, the 30%
+ * codes applied): the count in the range, against the period before it but
+ * for "All", and bars per day; a read that failed says so with Retry.
+ */
+function DayCountCard({
+  read,
+  range,
+  preset,
+  onRetry,
+  title,
+  chartLabel,
+  emptyText,
+}: DayCountProps & { title: string; chartLabel: string; emptyText: string }) {
   const claims = read.kind === "ready" ? read.data : null;
   // "All" starts on the first claim; any other range on its own first day.
   const days = useMemo(() => {
@@ -564,7 +603,7 @@ function BountyCard({
   }, [claims, preset, range]);
   const line = useMemo(() => (claims ? claimsLine(claims, days) : []), [claims, days]);
 
-  if (read.kind === "error") return <ReadFailed title="Onboarded to the Bounty Program" error={read.error} onRetry={onRetry} />;
+  if (read.kind === "error") return <ReadFailed title={title} error={read.error} onRetry={onRetry} />;
 
   let current: number | null = null;
   let delta: number | null = null;
@@ -587,7 +626,7 @@ function BountyCard({
 
   return (
     <Card padding={16} style={CARD}>
-      <CardHead title="Onboarded to the Bounty Program" note={claims ? `${claims.length} in all time` : "Loading"} />
+      <CardHead title={title} note={claims ? `${claims.length} in all time` : "Loading"} />
       <div className="flex flex-wrap items-baseline" style={{ gap: 12, marginBottom: 10 }}>
         <span style={{ fontSize: 28, fontWeight: 600, lineHeight: 1, fontVariantNumeric: "tabular-nums", color: "var(--color-text-primary)" }}>
           {current == null ? "…" : current}
@@ -605,14 +644,14 @@ function BountyCard({
       </div>
       {claims &&
         (line.length === 0 || values.every((v) => v === 0) ? (
-          <p style={{ ...T.bodyDim, padding: "16px 0" }}>No Bounty Program claims in this range.</p>
+          <p style={{ ...T.bodyDim, padding: "16px 0" }}>{emptyText}</p>
         ) : (
           <div style={{ marginTop: 16 }}>
             <TrendChart
               points={line}
               kind="bars"
               height={120}
-              label="Joined the Bounty Program"
+              label={chartLabel}
               format={int}
               axis
               domain={axis.domain}
@@ -644,6 +683,7 @@ function CalcNotes({ courseIsNew }: { courseIsNew: boolean }) {
           body: "A live count of students on the 30-day plan, by lessons finished against lessons expected: Behind under half, Ahead over one and a half times.",
         },
     { label: "Onboarded to the Bounty Program", body: "A live count of students who claimed the Bounty Program, stamped by its webhook, per UTC day." },
+    { label: "30% off applied", body: "Requests whose code is on the student's Whop membership, by the day it went on." },
   ];
   return (
     <details style={{ marginTop: 24 }}>

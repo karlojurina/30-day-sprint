@@ -13,6 +13,11 @@
  * configReads), never as an empty list or a 0 standing in for a failure.
  * Paged reads go by key (fetchAllRowsByKey): pages read by offset with no
  * stable order can repeat some rows and skip others.
+ *
+ * "30% needs a hand" counts the 30% page's own list (readNeedsHand,
+ * src/lib/admin/thirty-data.ts: the same reads GET /api/admin/thirty makes,
+ * here under the team's RLS policies on discount_requests and
+ * discount_request_events), so the tile and the page always agree.
  */
 
 import { useState } from "react";
@@ -44,6 +49,7 @@ import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import { fetchAllRowsByKey } from "@/lib/supabase-pagination";
 import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
+import { readNeedsHand } from "@/lib/admin/thirty-data";
 
 /** Every read the Dashboard makes, at once (the open tasks after the settings, whose reset date is their floor). */
 async function readDashboard(supabase: SupabaseClient, nowMs: number): Promise<DashboardReads> {
@@ -113,14 +119,19 @@ async function readDashboard(supabase: SupabaseClient, nowMs: number): Promise<D
     return countRead(await query);
   });
 
-  // 30% to decide: the 30% page's Applied tab, the pending requests made from
-  // DISCOUNT_ELIGIBLE_FROM on (D4: older ones stay in the database, unlisted).
-  const toDecide = (async () =>
+  // 30% needs a hand: the requests the 30% page lists, by its own reads (readNeedsHand), at the same moment.
+  const needsHand = (async (): Promise<DashRead<number>> => {
+    const r = await readNeedsHand(supabase, nowMs);
+    return r.ok ? { ok: true, data: r.requests.length } : { ok: false, error: r.failed.join("; ") };
+  })();
+
+  // 30% off applied: the codes on students' Whop memberships, requests made from DISCOUNT_ELIGIBLE_FROM on.
+  const thirtyApplied = (async () =>
     countRead(
       await supabase
         .from("discount_requests")
         .select("id", { count: "exact", head: true })
-        .eq("status", "pending")
+        .eq("status", "applied")
         .gte("created_at", DISCOUNT_ELIGIBLE_FROM),
     ))();
 
@@ -144,12 +155,13 @@ async function readDashboard(supabase: SupabaseClient, nowMs: number): Promise<D
         .order("snapshot_date"),
     ))();
 
-  const [c, s, b, o, t, snaps, cancel] = await Promise.all([
+  const [c, s, b, o, hand, applied, snaps, cancel] = await Promise.all([
     config,
     students,
     bounty,
     openTasks,
-    toDecide,
+    needsHand,
+    thirtyApplied,
     snapshots,
     canceling,
   ]);
@@ -158,7 +170,8 @@ async function readDashboard(supabase: SupabaseClient, nowMs: number): Promise<D
     bounty: b,
     openTasks: o,
     tasksResetAt: c.tasksResetAt,
-    toDecide: t,
+    needsHand: hand,
+    thirtyApplied: applied,
     snapshots: snaps,
     canceling: cancel,
     resetAt: c.resetAt,

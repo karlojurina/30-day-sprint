@@ -272,9 +272,10 @@ console.log('\n=== One name and one colour for each 30% status, on every page ==
   }, { ok: true, resetAt: null, lastByStudent: new Map() }, '2026-10-20T08:00:00.000Z')
   ok(four.every((s) => { const d = detail(s).discount.data; return d.text === map[s].label && d.tone === map[s].tone }),
      'a student\'s page and the journey\'s drawer: the same words and tones', show(four.map((s) => detail(s).discount.data.text)))
+  // Since the 30% that applies itself (T-137, R4) the 30% page is one list with no tabs, so it names no status itself.
   const thirty = fromSrc('src/components/admin/thirty/ThirtyView.tsx')
-  ok(thirty.includes('TAB_ORDER.map((t) => [t, DISCOUNT_STATUS[TAB_STATUS[t]].label])') && !/"Code Applied"/.test(thirty),
-     'the 30% page\'s tabs are named from it')
+  ok(!/TabStrip|TAB_ORDER|role="tablist"/.test(thirty) && !/"Code Applied"|"Approved"|"Rejected"/.test(thirty),
+     'the 30% page has no tabs since the 30% applies itself, and spells no status name of its own')
   const page = fromSrc('src/components/admin/students/StudentDetailView.tsx')
   ok(!/DISCOUNT_TONE|DISCOUNT_STATUS_TEXT/.test(page + fromSrc('src/lib/admin/student-detail.ts')) && page.includes('<Pill tone={d.data.tone as PillTone}>{d.data.text}</Pill>'),
      'the student page\'s own map and words are gone')
@@ -434,9 +435,12 @@ console.log("\n=== The 30% page: every row's coupon check ===")
     globalThis.fetch = realFetch
   }
   const route = fromSrc('src/app/api/admin/thirty/route.ts')
-  ok(route.includes('const live = await readApprovedCoupons(load.data, process.env.WHOP_API_KEY ?? null);') && route.includes('buildThirtyView(load.data, new Date(), resetAt, live)')
+  // Since the 30% that applies itself (T-137, R7) the call also hands over whether THIRTY_AUTO_APPLY pauses it, at the moment the list was read.
+  ok(route.includes('const live = await readApprovedCoupons(load.data, process.env.WHOP_API_KEY ?? null);')
+       && route.includes('const paused = thirtyAutoApplyPaused();') && route.includes('buildThirtyView(load.data, now, resetAt, live, paused)')
+       && route.includes('const load = await loadThirtyData(supabase, now.getTime());')
        && /console\.warn\(`\[admin thirty\] Whop gave no answer/.test(route),
-     'GET /api/admin/thirty asks Whop about the Approved rows, hands the answers to the page, and logs a read that gave none')
+     'GET /api/admin/thirty asks Whop about the approved rows, hands the answers and `paused` to the page at one moment, and logs a read that gave none')
 
   const page = fromSrc('src/components/admin/thirty/ThirtyView.tsx')
   // The render review's fix round: a row the coupon refuses has no Approve, so no "Approve asks Whop again first"
@@ -465,11 +469,10 @@ console.log("\n=== The 30% page: every row's coupon check ===")
   ok(/<Button\s+variant=\{coupon \? "raised" : "ghost"\}\s+size="md"\s+disabled=\{off\}\s+expanded=\{confirm === "reject"\}/.test(pending)
        && /variant="danger"[\s\S]{0,400}Reject the request/.test(pending),
      'Reject is ghost, the row\'s "no", as Dismiss is on Tasks (raised on the coupon\'s row, its one action); "Reject the request", which the student cannot ask again after, is the danger button')
-  ok(page.includes('max-[399px]:flex-nowrap max-[399px]:overflow-x-auto max-[399px]:gap-1 max-[399px]:[--tab-pad:8px] max-[399px]:[--tab-gap:4px] max-[399px]:[--tab-font:12px]') && page.includes('padding: "0 var(--tab-pad, 12px)"'),
-     'under 400px the tabs narrow to one line, and scroll sideways rather than wrap')
-  ok(/\{header\("Loading", <RefreshButton onPress=\{\(\) => \{\}\} busy disabled \/>\)\}\s*\{blankTabs\}/.test(page)
-       && page.includes('{header(<FailedMeta />, <RefreshButton onPress={() => void retry()} busy={retrying} />)}') && /count: null/.test(page),
-     'while it loads or failed, the header keeps Refresh and the tabs stay, with no counts (failed, the header says so: the render review\'s fix round)')
+  // The tabs went with the 30% that applies itself (T-137, R4): one list, so there is no tab row to keep on one line.
+  ok(/\{header\("Loading", <RefreshButton onPress=\{\(\) => \{\}\} busy disabled \/>\)\}\s*<SkeletonRows /.test(page)
+       && page.includes('{header(<FailedMeta />, <RefreshButton onPress={() => void retry()} busy={retrying} />)}') && !page.includes('blankTabs'),
+     'while it loads or failed, the header keeps Refresh (failed, the header says so: the render review\'s fix round); one list, no tabs to keep')
 }
 
 console.log('\n=== The coupon rule: a stored id that is not a membership, and a cron Whop never answered ===')

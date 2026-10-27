@@ -21,8 +21,16 @@
  *   Open tasks          the database's count of the open tasks the Tasks page
  *                       lists, from admin_config.tasks_reset_at on once the
  *                       tasks reset (v109) has run.
- *   30% to decide       the database's count of pending requests made from
- *                       DISCOUNT_ELIGIBLE_FROM on: the 30% page's Applied tab.
+ *   30% needs a hand    the requests the 30% page lists, by its own reads
+ *                       (thirty-data.ts readNeedsHand): from 1 October still
+ *                       pending or approved 30 minutes after the student
+ *                       applied, or with a write_failed as their newest event
+ *                       in the last 30 days (the 30% that applies itself,
+ *                       T-137, R5; "30% to decide", the pending ones, until
+ *                       then).
+ *   30% off applied     the database's count of applied requests made from
+ *                       DISCOUNT_ELIGIBLE_FROM on: the codes on students' Whop
+ *                       memberships (R5), the program's last card.
  *   Active on platform  unchanged: isPayingMember now; the line is the nightly
  *                       snapshot's active_count_cohort.
  *   Canceling           unchanged: isCanceling now; the line is
@@ -156,8 +164,10 @@ export interface DashboardReads {
   openTasks: DashRead<number>;
   /** admin_config.tasks_reset_at: the floor of that count, null before the reset. */
   tasksResetAt: DashRead<string | null>;
-  /** Pending requests made from DISCOUNT_ELIGIBLE_FROM on, counted by the database. */
-  toDecide: DashRead<number>;
+  /** The requests the 30% page lists (readNeedsHand), counted: from 1 October, waiting 30 minutes or more, or a write_failed. */
+  needsHand: DashRead<number>;
+  /** Applied requests made from DISCOUNT_ELIGIBLE_FROM on, counted by the database. */
+  thirtyApplied: DashRead<number>;
   /** The snapshot rows of the 14 days. */
   snapshots: DashRead<SnapshotRow[]>;
   /** The canceling rows of the 14 days. */
@@ -568,7 +578,8 @@ export interface DashboardModel {
   monthTwo: Tile<MonthTwo>;
   bounty: Tile<Bounty>;
   openTasks: Tile<{ count: number; since: string | null }>;
-  toDecide: Tile<{ count: number; since: string }>;
+  needsHand: Tile<{ count: number; since: string }>;
+  thirtyApplied: Tile<{ count: number; since: string }>;
   active: Tile<WithLine>;
   canceling: Tile<WithLine>;
   churned: Tile<Churned>;
@@ -584,7 +595,8 @@ const READ_NAMES: Record<keyof DashboardReads, string> = {
   tasksResetAt: "Admin config",
   resetAt: "Admin config",
   openTasks: "Open tasks",
-  toDecide: "30% requests",
+  needsHand: "30% needs a hand",
+  thirtyApplied: "30% off applied",
   snapshots: "Daily snapshots",
   canceling: "Canceling snapshots",
 };
@@ -610,7 +622,7 @@ function failedReads(reads: DashboardReads): DashboardModel["failed"] {
 }
 
 /** Every tile of the page, the numbers the team reads. */
-const TILES = ["monthTwo", "bounty", "openTasks", "toDecide", "active", "canceling", "churned", "avgProgress"] as const;
+const TILES = ["monthTwo", "bounty", "openTasks", "needsHand", "thirtyApplied", "active", "canceling", "churned", "avgProgress"] as const;
 
 /**
  * No tile could be drawn: the reads every tile needs failed (every read, or
@@ -631,7 +643,8 @@ export function allFailed(error: string): DashboardReads {
     bounty: no,
     openTasks: no,
     tasksResetAt: no,
-    toDecide: no,
+    needsHand: no,
+    thirtyApplied: no,
     snapshots: no,
     canceling: no,
     resetAt: no,
@@ -672,9 +685,12 @@ export function buildDashboard(reads: DashboardReads, nowMs: number): DashboardM
       : !reads.openTasks.ok
         ? fail(reads.openTasks.error)
         : { ok: true, value: { count: reads.openTasks.data, since: reads.tasksResetAt.data } },
-    toDecide: reads.toDecide.ok
-      ? { ok: true, value: { count: reads.toDecide.data, since: DISCOUNT_ELIGIBLE_FROM } }
-      : fail(reads.toDecide.error),
+    needsHand: reads.needsHand.ok
+      ? { ok: true, value: { count: reads.needsHand.data, since: DISCOUNT_ELIGIBLE_FROM } }
+      : fail(reads.needsHand.error),
+    thirtyApplied: reads.thirtyApplied.ok
+      ? { ok: true, value: { count: reads.thirtyApplied.data, since: DISCOUNT_ELIGIBLE_FROM } }
+      : fail(reads.thirtyApplied.error),
     active: students.ok ? { ok: true, value: active(students.data, snapshots, days) } : fail(students.error),
     canceling: students.ok ? { ok: true, value: canceling(students.data, reads.canceling, days) } : fail(students.error),
     churned: snapshots.ok ? { ok: true, value: churned(snapshots.data, days) } : fail(snapshots.error),

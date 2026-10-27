@@ -5,6 +5,10 @@
  * with made-up answers, and client-tests/insights-page.test.mjs runs them
  * on the stand-in database.
  *
+ * The 30% that applies itself (T-137, R5) added loadThirtyApplied: every
+ * applied 30% request from 1 October, by the day its code went on, for the
+ * "30% off applied" card.
+ *
  * The queries and their filters are the page's own, so a read that works
  * gives the numbers it gave. Two things changed with the move:
  *   - a read that fails says so (`{ ok: false, error }`): the bounty card
@@ -20,6 +24,7 @@ import { ADMIN_STUDENT_JOIN_CUTOFF } from "./constants.ts";
 import { getCurriculumResetAt, resetDateUtc } from "./curriculum-reset.ts";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "./metrics-definitions.ts";
 import { fetchAllRowsByKey } from "./supabase-pagination.ts";
+import { DISCOUNT_ELIGIBLE_FROM } from "./discount.ts";
 
 export interface SnapshotRow {
   snapshot_date: string;
@@ -53,6 +58,8 @@ export interface InsightsTransport {
   loadSprinters(): Promise<Answer<SprinterProgress>>;
   /** admin_config.curriculum_reset_at: the course switch, null before it. Avg progress's line starts there. */
   loadResetAt(): Promise<Answer<string | null>>;
+  /** Every applied 30% request from 1 October: when its code went on (`at`), oldest first (T-137, R5). */
+  loadThirtyApplied(): Promise<Answer<Array<{ at: string }>>>;
 }
 
 /** The course switch, as getCurriculumResetAt reads it, or why it could not be read. */
@@ -134,6 +141,35 @@ export async function loadBountyClaims(supabase: SupabaseClient): Promise<Answer
     .map((m) => m.bounty_access_claimed_at as string)
     .sort();
   return { ok: true, status: 200, data: claims };
+}
+
+/**
+ * Every applied 30% request made from DISCOUNT_ELIGIBLE_FROM on (the
+ * Dashboard's "30% off applied" counts the same): when its code went on the
+ * student's Whop membership, applied_at, else created_at for a row that has
+ * none (marked applied before applied_at was written), as an ISO moment,
+ * oldest first. Paged by id. A read that fails says so; never an empty list.
+ */
+export async function loadThirtyApplied(supabase: SupabaseClient): Promise<Answer<Array<{ at: string }>>> {
+  const r = await fetchAllRowsByKey<{ id: string; applied_at: string | null; created_at: string }>(
+    () =>
+      supabase
+        .from("discount_requests")
+        .select("id, applied_at, created_at")
+        .eq("status", "applied")
+        .gte("created_at", DISCOUNT_ELIGIBLE_FROM)
+        .order("id"),
+    "id",
+  );
+  if (r.error) return { ok: false, status: 500, error: `the applied 30% requests could not be read: ${r.error.message}` };
+  const at = r.data
+    .map((x) => {
+      const raw = x.applied_at ?? x.created_at;
+      const t = Date.parse(raw);
+      return Number.isFinite(t) ? new Date(t).toISOString() : raw;
+    })
+    .sort();
+  return { ok: true, status: 200, data: at.map((x) => ({ at: x })) };
 }
 
 export async function loadSprinters(supabase: SupabaseClient, now: number = Date.now()): Promise<Answer<SprinterProgress>> {

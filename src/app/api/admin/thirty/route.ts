@@ -1,22 +1,28 @@
 /**
  * GET /api/admin/thirty: everything the 30% page (/admin/discounts) shows, in
- * one answer (admin rebuild PRD, section 8; admin rebuild 2, D4 and D5).
+ * one answer (admin rebuild PRD, section 8; admin rebuild 2, D4 and D5; the
+ * 30% that applies itself, T-137, R4).
  *
- * Every request made from 1 October, oldest first, each with the student
- * (name, @username, membership), who decided it and when, the 30% code, the
- * coupon stored for the student's membership, and for a pending one the
- * approve route's own verdict: the coupon first (a discount already on the
- * next renewal, no override), then the rule (approvalVerdict, then
- * explainOldCourseRequest). loadThirtyData (src/lib/admin/thirty-data.ts)
- * reads it all at once, paged; buildThirtyView (thirty-view.ts) runs the
- * student app's own rule over it. Neither changes the rule.
+ * The requests that need a hand, oldest first: pending or approved 30
+ * minutes after the student applied (from 1 October), or with a write_failed
+ * as their newest event in the last 30 days. Each with the student (name,
+ * @username, membership), who decided it and when, the 30% code, the coupon
+ * stored for the student's membership, its newest failed attempt and its Why
+ * line, and for a pending one the approve route's own verdict: the coupon
+ * first (a discount already on the next renewal, no override), then the rule
+ * (approvalVerdict, then explainOldCourseRequest). loadThirtyData
+ * (src/lib/admin/thirty-data.ts) reads it all at once, paged; buildThirtyView
+ * (thirty-view.ts) runs the student app's own rule over it. Neither changes
+ * the rule. The answer's `paused` says whether THIRTY_AUTO_APPLY pauses the
+ * automatic part (thirtyAutoApplyPaused, the switch the request routes and
+ * the job read).
  *
  * Why a route: lesson_videos is readable by the service role alone, and the
  * rule needs it. A browser page reading it would see no videos and no error,
  * and the rule would then close the offer for everyone. requireTeam hands
  * this route the service-role client.
  *
- * The Approved rows' coupon is read from Whop now (readApprovedCoupons, a
+ * The approved rows' coupon is read from Whop now (readApprovedCoupons, a
  * handful of reads within the request routes' 6 and 8 second limits): the
  * cron leaves students with an approved request out, so the stored row of
  * a request approved before the coupon rule never existed, and the warning
@@ -41,15 +47,18 @@ import { requireTeam, isAuthFailure } from "@/lib/admin-auth";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
 import { loadThirtyData, readApprovedCoupons } from "@/lib/admin/thirty-data";
 import { buildThirtyView } from "@/lib/admin/thirty-view";
+import { thirtyAutoApplyPaused } from "@/lib/thirty-apply";
 
 export const dynamic = "force-dynamic";
-// The students holding a request from 1 October, read in pages of 1000 and batches of 100.
+// The students holding a listed request, read in pages of 1000 and batches of 100.
 export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   const auth = await requireTeam(request);
   if (isAuthFailure(auth)) return auth.error;
   const { supabase } = auth;
+  // One moment for the list's 30 minutes and 30 days and for the rows' ages.
+  const now = new Date();
 
   let resetAt: string | null;
   try {
@@ -62,7 +71,7 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const load = await loadThirtyData(supabase);
+  const load = await loadThirtyData(supabase, now.getTime());
   if (!load.ok) {
     console.error(`[admin thirty] reads failed: ${load.failed.join("; ")}`);
     return NextResponse.json(
@@ -81,5 +90,6 @@ export async function GET(request: NextRequest) {
     console.warn(`[admin thirty] Whop gave no answer for ${fails.length} approved student(s)' coupon (${[...new Set(fails)].join(", ")})`);
   }
 
-  return NextResponse.json(buildThirtyView(load.data, new Date(), resetAt, live));
+  const paused = thirtyAutoApplyPaused();
+  return NextResponse.json(buildThirtyView(load.data, now, resetAt, live, paused));
 }

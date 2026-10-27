@@ -187,8 +187,10 @@ console.log('\n=== The answer is the builder\'s, at the same moment ===')
   const r = await at(NOW, () => getThirty('tok-csm-1'))
   const body = r.body
   ok(r.status === 200, 'as a csm: 200')
-  ok(Object.keys(body).sort().join() === 'couponsUnread,generatedAt,listedFrom,requests,requiredCount,sharedDeadline',
-     'the fields of admin rebuild 2 (D4): no Can still earn, no survey questions', Object.keys(body).join(', '))
+  ok(Object.keys(body).sort().join() === 'couponsUnread,generatedAt,listedFrom,paused,requests,requiredCount,sharedDeadline',
+     'the fields of admin rebuild 2 (D4), and since the 30% that applies itself `paused` (T-137, R7): no Can still earn, no survey questions', Object.keys(body).join(', '))
+  ok(body.paused === false && body.requests.every((x) => x.why === 'The app hasn\'t tried yet.' || x.why.startsWith('The app only tries')),
+     'THIRTY_AUTO_APPLY unset: not paused, and each Why line says what the app does next', show(body.requests.map((x) => x.why)))
   ok(body.requests.map((x) => x.id).join() === 'r-yes,r-old,r-earn' && body.couponsUnread === false,
      'the requests from 1 October, oldest first (one from 25 September is not listed); the coupons read', body.requests.map((x) => x.id).join())
   ok(body.generatedAt === NOW, 'generatedAt is the moment of the call', body.generatedAt)
@@ -212,10 +214,30 @@ console.log('\n=== The answer is the builder\'s, at the same moment ===')
 
   // The route's answer, against loadThirtyData and buildThirtyView run on the same database at the same moment.
   const load = await at(NOW, () => loadThirtyData(fakeClient(db)))
-  const built = load.ok ? JSON.parse(JSON.stringify(buildThirtyView(load.data, new RealDate(NOW), RESET))) : null
-  ok(isDeepStrictEqual(body, built), 'the answer is exactly buildThirtyView over loadThirtyData, with the switch from admin_config')
+  const built = load.ok ? JSON.parse(JSON.stringify(buildThirtyView(load.data, new RealDate(NOW), RESET, undefined, false))) : null
+  ok(isDeepStrictEqual(body, built), 'the answer is exactly buildThirtyView over loadThirtyData, with the switch from admin_config and `paused: false`')
 
   ok(!JSON.stringify(body).toLowerCase().includes('tella'), 'no Tella id anywhere in the answer')
+}
+
+console.log('\n=== THIRTY_AUTO_APPLY off: the answer says the automatic 30% is paused (T-137, R7) ===')
+{
+  freshDb()
+  const was = process.env.THIRTY_AUTO_APPLY
+  const seen = {}
+  try {
+    for (const value of ['off', 'OFF', 'false', '0', 'no', 'on', '']) {
+      process.env.THIRTY_AUTO_APPLY = value
+      seen[value] = (await at(NOW, () => getThirty('tok-csm-1'))).body
+    }
+  } finally {
+    if (was === undefined) delete process.env.THIRTY_AUTO_APPLY
+    else process.env.THIRTY_AUTO_APPLY = was
+  }
+  ok(['off', 'OFF', 'false', '0', 'no'].every((v) => seen[v].paused === true) && seen.on.paused === false && seen[''].paused === false,
+     'off, OFF, false, 0 and no: paused; on and empty: not (thirtyAutoApplyPaused, the switch the request routes and the job read)', show(Object.fromEntries(Object.entries(seen).map(([k, v]) => [k, v.paused]))))
+  ok(seen.off.requests.length === 3 && seen.off.requests.every((x) => x.why === 'The app is paused. Approve or reject it.'),
+     'paused: every pending row\'s Why line names the team', show(seen.off.requests.map((x) => x.why)))
 }
 
 console.log('\n=== It reads and never writes ===')

@@ -5,9 +5,11 @@ import { useAuth } from "@/contexts/AuthContext";
 
 /**
  * The 30% page with the signed-in team member's role (the owner's review,
- * 2026-10-21): Approve anyway is a founder's or an admin's, on every Applied
- * row a check refuses. POST /api/discounts/approve refuses a csm's override
- * too, so this only decides what the page offers.
+ * 2026-10-21): Approve anyway is a founder's or an admin's, on every pending
+ * row a check refuses, and since the 30% applies itself (T-137) so is Reject
+ * on a request whose code may exist. POST /api/discounts/approve and
+ * /api/discounts/reject refuse a csm there too, so this only decides what
+ * the page offers.
  */
 export function ThirtyPage() {
   const { teamMember } = useAuth();

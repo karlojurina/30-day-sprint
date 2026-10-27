@@ -28,10 +28,16 @@ import type { FixtureCall } from "../fixtures";
  *                               with no Approve, and Maya's Approve is
  *                               refused (fixtures.ts; the owner's rule of
  *                               2026-10-26, ?state=nopayment until then)
+ *          paused               THIRTY_AUTO_APPLY off: the page says so, and
+ *                               every Why line names the team (T-137, R7)
+ *          reasons              every other reason a request waits for, and
+ *                               the rows whose Approve, Try again or Reject
+ *                               answers each line of the PRD's tables
  *   ?role=admin | founder | csm   whose page (default admin): Approve anyway
  *                 is a founder's or an admin's (the owner's review,
- *                 2026-10-21), and the stand-in refuses a csm's override
- *                 as the approve route does
+ *                 2026-10-21), and so is Reject on a request whose code may
+ *                 exist (T-137); the stand-in refuses both to a csm, as the
+ *                 routes do
  *   ?approve=coursechanged   a plain Approve answers the old course's 409,
  *                 "The course changed and this check cannot run. Nothing was
  *                 approved." (code "rule"), as a deployment without the
@@ -40,9 +46,10 @@ import type { FixtureCall } from "../fixtures";
  *                 decided the request first (fixtures.ts says how)
  *   ?reload=fail  the list loads once, then every read of it fails
  *   ?whop=down    Check Whop again gets no answer from Whop
- *   ?tab=applied | approved | rejected | code-applied
- *   ?student=<id>  one student on every tab, as the student page links it
- *                  (p-maya, p-ethan, p-omar ... in fixtures.ts)
+ *   ?student=<id>  one student's rows, as the student page links it
+ *                  (p-maya, p-ethan, p-iris ... in fixtures.ts). Since the
+ *                  30% applies itself the page is one list: a ?tab= from
+ *                  before opens the list
  *
  * The calls the page made are on window.__adminCalls, for world-tests.
  */

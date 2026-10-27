@@ -8,9 +8,12 @@
  * (loadResetAt), so the page's line starts there.
  *
  *   ?state=full | empty | loading | error   (default full)
- *          partial   the snapshots load, the sprinters' and the Bounty
- *                    Program's reads fail
+ *          partial   the snapshots load, the sprinters', the Bounty
+ *                    Program's and the 30% codes' reads fail
  *          noreset   everything loads but the course switch's date
+ *
+ * The 30% codes applied (the 30% that applies itself, T-137, R5): one to four
+ * a day over the last 25 days, none on some days, ending today.
  *   ?course=new | old   activity or pace in the first card (default new)
  */
 
@@ -64,6 +67,17 @@ function claims(): string[] {
   return out;
 }
 
+/** The moments 30% codes went on students' memberships: made up, ending today. */
+function thirtyApplied(): Array<{ at: string }> {
+  const today = Math.floor(Date.now() / DAY) * DAY;
+  const out: Array<{ at: string }> = [];
+  for (let i = 24; i >= 0; i--) {
+    const n = i % 7 === 3 ? 0 : 1 + ((i * 5) % 4);
+    for (let k = 0; k < n; k++) out.push({ at: new Date(today - i * DAY + (k + 8) * 3_600_000 + 17 * 60_000).toISOString() });
+  }
+  return out;
+}
+
 export function fixturePace(course: string | null): PaceCounts {
   const old = course === "old";
   return {
@@ -111,6 +125,12 @@ export function fixtureInsightsTransport(state: InsightsFixtureState): InsightsT
       // The course switch: 2 days ago, at the live switch's time of day.
       const today = Math.floor(Date.now() / DAY) * DAY;
       return later<string | null>({ ok: true, status: 200, data: `${new Date(today - 2 * DAY).toISOString().slice(0, 10)}T14:33:33.972Z` });
+    },
+    loadThirtyApplied() {
+      if (state === "error" || state === "partial") {
+        return later<Array<{ at: string }>>({ ok: false, status: 500, error: `the applied 30% requests could not be read: ${READ_FAILED}` });
+      }
+      return later({ ok: true, status: 200, data: state === "empty" ? [] : thirtyApplied() });
     },
     loadSprinters() {
       if (state === "error" || state === "partial") {

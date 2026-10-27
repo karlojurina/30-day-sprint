@@ -129,7 +129,7 @@ console.log('\n=== The Dashboard: the Bounty Program\'s arrow ===')
   ok(show(got) === show(cases.map((c) => c[2])), 'up when the last 14 days beat the 14 before, down when they hold fewer, no arrow when equal (0 and 0 too)', show(got))
   const dash = M.buildDashboard({
     students: { ok: true, data: students }, bounty: { ok: true, data: stamps }, openTasks: { ok: true, data: 0 }, tasksResetAt: { ok: true, data: null },
-    toDecide: { ok: true, data: 0 }, snapshots: { ok: true, data: [] }, canceling: { ok: true, data: [] }, resetAt: { ok: true, data: null },
+    needsHand: { ok: true, data: 0 }, thirtyApplied: { ok: true, data: 0 }, snapshots: { ok: true, data: [] }, canceling: { ok: true, data: [] }, resetAt: { ok: true, data: null },
   }, NOW)
   ok(dash.bounty.ok && dash.bounty.value.previous14 === 2, 'the Dashboard\'s Bounty tile carries the earlier count', show(dash.bounty.ok && dash.bounty.value.previous14))
 

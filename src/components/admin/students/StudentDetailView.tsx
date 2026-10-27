@@ -446,7 +446,12 @@ function SyncNumber({ label, value }: { label: string; value: number | null }) {
   );
 }
 
-/** The latest 30% request (any date), in the 30% page's words and colours, and the link to the 30% page. */
+/**
+ * The latest 30% request (any date), in the 30% page's words and colours, and
+ * the link to the 30% page. "Copy <code>" only once Whop made the code (its
+ * Whop id on the request): a pending request holding a code name with no id
+ * is a claim the app is working on, and that code may not exist.
+ */
 export function DiscountBlock({ student: s }: { student: StudentDetail }) {
   const d = s.discount;
   return (
@@ -458,7 +463,7 @@ export function DiscountBlock({ student: s }: { student: StudentDetail }) {
           <>
             <Pill tone={d.data.tone as PillTone}>{d.data.text}</Pill>
             <span style={{ ...T.bodyDim, fontSize: 12 }}>Asked {dayLabel(d.data.askedAt)}</span>
-            {d.data.code && <CopyButton text={d.data.code} label={`Copy ${d.data.code}`} />}
+            {d.data.code && d.data.whopPromoId && <CopyButton text={d.data.code} label={`Copy ${d.data.code}`} />}
           </>
         ) : (
           <span style={T.bodyDim}>No 30% request.</span>

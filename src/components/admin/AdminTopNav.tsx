@@ -17,19 +17,21 @@ import tokens from "./admin-tokens.module.css";
 /**
  * The admin's top bar (admin rebuild 2, D1), in the dark look of
  * admin-tokens.module.css: the white Ecom University lockup (to the
- * Dashboard), then Dashboard, 30% off, Tasks, Students (two pages), Feedback
- * (two pages), Templates, Insights and Team, and the profile on the right.
+ * Dashboard), then Dashboard, Tasks, Students (two pages), Feedback (two
+ * pages), Templates, Insights and Team, and the profile on the right. The
+ * 30% page has no entry since the 30% applies itself (T-137): the
+ * Dashboard's "30% needs a hand" and a student's page lead to it.
  * The entries and their role flags are ADMIN_NAV in
  * src/lib/admin/admin-frame.ts.
  *
  * From 1100px wide the entries sit in the bar and the two groups open as
  * dropdowns. Under 1100px one Menu button opens every entry, and the
  * profile, as a full-width list under the bar. Nothing in the bar scrolls
- * sideways: at 1100px a founder's 8 entries fit beside a name of about
+ * sideways: at 1100px a founder's 7 entries fit beside a name of about
  * 120px with the lockup at full size (216px); a longer name, up to the
- * profile's 180px, shrinks the lockup first (to 128px at 1100px, measured
- * 2026-10-20), and on a narrow phone too the lockup shrinks before anything
- * overflows. The nav itself still gets no overflow rule, because that would
+ * profile's 180px, shrinks the lockup first (to 202px at 1100px, measured
+ * 2026-10-27; 128px when the bar had 8 entries), and on a narrow phone too
+ * the lockup shrinks before anything overflows. The nav itself still gets no overflow rule, because that would
  * clip the dropdowns.
  *
  * The member, the address and sign-out come in as props, so the dev page

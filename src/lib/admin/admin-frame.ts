@@ -35,14 +35,16 @@ export type NavGroup = {
 export type NavEntry = NavLeaf | NavGroup;
 
 /**
- * Dashboard · 30% off · Tasks · Students (All students, Student journey) ·
- * Feedback (Lesson feedback, Survey) · Templates · Insights · Team. No
- * "More": Today, Brand Owners, Stats, Settings and Discord test were removed
- * (D2), and everything left has a place of its own.
+ * Dashboard · Tasks · Students (All students, Student journey) · Feedback
+ * (Lesson feedback, Survey) · Templates · Insights · Team. No "More": Today,
+ * Brand Owners, Stats, Settings and Discord test were removed (D2), and
+ * everything left has a place of its own. The 30% page (/admin/discounts)
+ * left the bar with the 30% that applies itself (T-137, R4): the 30% goes on
+ * by itself, the page lists only the requests that need a hand, and the
+ * Dashboard's "30% needs a hand" tile and a student's page link to it.
  */
 export const ADMIN_NAV: NavEntry[] = [
   { type: "leaf", href: ADMIN_HOME, label: "Dashboard", exact: true },
-  { type: "leaf", href: "/admin/discounts", label: "30% off" },
   { type: "leaf", href: "/admin/tasks", label: "Tasks" },
   {
     type: "group",

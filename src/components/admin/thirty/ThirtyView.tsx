@@ -16,14 +16,12 @@ import {
   SkeletonRows,
   TAP,
   firstName,
-  pressPill,
 } from "@/components/admin/list-parts";
 import type { Notice } from "@/components/admin/list-parts";
 import { StudentName } from "@/components/admin/student-name";
 import { adminTransport } from "@/lib/admin/admin-transport";
-import type { Answer, ThirtyTransport } from "@/lib/admin/admin-transport";
+import type { Answer, ApproveAnswer, ThirtyTransport } from "@/lib/admin/admin-transport";
 import { clockLabel, dayLabel } from "@/lib/admin/croatia-dates";
-import { DISCOUNT_STATUS } from "@/lib/admin/discount-status";
 import { COUPON_REJECT_REASON, anywaySkip, approveAnywayText, couponWarns, studentCopies, videoLine } from "@/lib/admin/thirty-view";
 import type {
   StudentBrief,
@@ -32,24 +30,45 @@ import type {
   ThirtyView as ThirtyPayload,
   Verdict,
 } from "@/lib/admin/thirty-view";
+import { thirtyWords } from "@/lib/thirty-words";
 import { couponApprovalRefusal } from "@/lib/world/discount-server";
-import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/lib/world/discount";
+import { DISCOUNT_LAUNCH_DATE, requestCounts } from "@/lib/world/discount";
 
 /**
- * The 30% page, /admin/discounts (admin rebuild 2, D4 and D5).
+ * The 30% page, /admin/discounts (admin rebuild 2, D4 and D5; the 30% that
+ * applies itself, T-137, R4).
  *
- * Four tabs, each with its count, every row oldest first: Applied (the
- * requests waiting for a decision, status pending), Approved (the code is
- * made), Rejected, and Code Applied (the code is on the membership, status
- * applied). Requests from 1 October on (DISCOUNT_ELIGIBLE_FROM); older ones
- * stay in the database.
+ * The 30% goes on by itself: a student's Apply claims the request, makes the
+ * code and puts it on their Whop membership, and a job every 10 minutes
+ * finishes what the moment could not. So the page is one list of the
+ * requests the app could not finish, oldest first (GET /api/admin/thirty):
+ * from 1 October, still pending or approved 30 minutes after the student
+ * applied, and any request whose newest event is a write_failed from the last
+ * 30 days, whatever its status. The four tabs (Applied, Approved, Rejected,
+ * Code Applied) and the nav's "30% off" went; an old ?tab= link opens the
+ * list. Every row carries a Why line (thirtyWords, built by thirty-view.ts):
+ * what went wrong, and what happens next, by who will act. With
+ * THIRTY_AUTO_APPLY off, a line under the header says the automatic part is
+ * paused, and every Why line names the team.
  *
  * A row's top line is the student: their name (to the student page),
  * @username (student-name.tsx, the one name part of every admin page) and
- * whether the membership is active. Then only the date applied, the verdict
- * line (meets the rule, or why not), the coupon, and the actions, on the
- * right from 768px wide and under the words on a phone (RowSplit): Approve
- * and Reject (with a reason) on Applied, Mark code applied on Approved.
+ * whether the membership is active. Then the dates, the verdict and the Why
+ * line, the coupon, and the actions, on the right from 768px wide and under
+ * the words on a phone (RowSplit):
+ *   pending   Approve, Approve anyway and Reject, as before the 30% applied
+ *             itself (Approve now makes the code and puts it on). A pending
+ *             row whose code may exist (a claimed name, or a code reopened by
+ *             hand) shows Reject to a founder or an admin alone: the reject
+ *             route asks Whop where its code is first, and refuses a csm.
+ *   approved  Try again (every role): the approve route asks Whop where the
+ *             code is, puts it on the student's own membership, and marks the
+ *             request applied once Whop shows it there (it replaced Mark code
+ *             applied). Reject (a founder or an admin), confirmed first: the
+ *             code stays usable at checkout until someone switches it off in
+ *             Whop. The coupon warning and the copy buttons as before.
+ *   rejected or applied, listed for a write_failed: the words and the copy
+ *             buttons only, since only Whop can change what happened.
  *
  * The verdict line's count (the 80% rule, the owner's of 2026-10-26): how
  * many of the videos up to the checkpoint were watched (by the deadline, once
@@ -61,7 +80,7 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  *
  * COPY DISCORD ID AND COPY USERNAME (the owner, 2026-10-26: "We have 'Copy
  * the code,' which is very good, and then 'Copy Discord username' or 'their
- * ID' or whatever. I think ID might be best"): on every Applied row, and
+ * ID' or whatever. I think ID might be best"): on every pending row, and
  * beside "Copy code" on every row that has a code, Copy Discord ID copies
  * the student's Discord user id, and Copy username the username on file
  * with one "@" in front whether or not the stored one has it. The username
@@ -88,7 +107,7 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * APPROVE ANYWAY (the owner's review, 2026-10-21: approving past any check).
  * A founder or an admin (`canApproveAnyway`; the
  * approve route refuses a csm's override too) gets "Approve anyway", a small
- * link, on every Applied row a check refuses: the rule's verdict, the
+ * link, on every pending row a check refuses: the rule's verdict, the
  * coupon's, and a refusal the approve route answered when Approve was
  * pressed (its code "rule": the rule said no, or could not run, as "The
  * course changed and this check cannot run"). It asks once, inline, naming
@@ -109,80 +128,57 @@ import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_LAUNCH_DATE, requestCounts } from "@/l
  * is read again, so a coupon taken off the membership since the stored read
  * brings Approve back. The verdicts, the counts
  * and the coupons come from GET /api/admin/thirty, which runs the student
- * app's own rule and asks Whop now about the Approved rows' coupons; this
+ * app's own rule and asks Whop now about the approved rows' coupons; this
  * file only shows them and sends the team's decisions to the existing
- * routes. An Applied row the rule says yes to, whose membership has no
+ * routes. A pending row the rule says yes to, whose membership has no
  * stored check, says "Coupon not checked yet" (a row refused for another
- * reason does not); one whose Whop id is missing or is not a membership's
- * (Approve cannot ask Whop then, and nothing blocks the 30%) says to check
- * Whop by hand; an Approved row says when Whop could not be asked. The
+ * reason does not); an approved row says when Whop could not be asked. The
  * team's own 30% code on a membership (an ECOM30 code, or the request's own
  * Whop promo id: thirty-view.ts, Coupon.ours) is never warned about. When the
  * stored coupons cannot be read at all, the rows show no coupon and the page
  * says nothing more (the owner's review: the sentence above the list went).
  *
  * Buttons (the brand kit: one ink primary at most, verbs that say what
- * happens): Approve, Mark code applied and Refresh are raised; Reject is
- * ghost, the "no" of the row, as Dismiss is on Tasks, and raised on the
- * coupon's row, where it is the one decision; "Reject the request", which
- * the student cannot undo by asking again, is the danger button.
+ * happens): Approve, Try again and Refresh are raised; Reject is ghost, the
+ * "no" of the row, as Dismiss is on Tasks, and raised on the coupon's row,
+ * where it is the one decision; "Reject the request", which the student
+ * cannot undo by asking again, is the danger button.
  *
- * What a decision did shows in a fixed place at the bottom of the window
+ * What a press did shows in a fixed place at the bottom of the window
  * (NoticeStack, list-parts.tsx), where it is seen however far down the row
- * was: a success hides itself after 15 seconds, a refusal stays until it is
- * dismissed, and a Whop code in either can be copied from it. When the list
- * cannot be read again after a change, a second line says so and the row
- * just decided keeps its buttons off until a read works.
+ * was, in the words of the PRD's tables (§9.4): a success hides itself after
+ * 15 seconds; a refusal, and a notice that leaves the team something to do in
+ * Whop (a code made but not on the membership yet, a code left usable at
+ * checkout), stays until it is dismissed; a Whop code in any of them can be
+ * copied from it. When the list cannot be read again after a change, a
+ * second line says so and the row just decided keeps its buttons off until a
+ * read works.
  *
- * The address: ?student=<id> keeps every tab to that student (the student
- * page links here), ?tab= picks the tab (applied, approved, rejected,
- * code-applied; the old decide and code-added still open theirs).
+ * The address: ?student=<id> keeps the list to that student (the student
+ * page links here); ?tab= from before the one list is ignored.
  *
  * The calls go through `transport` (src/lib/admin/admin-transport.ts), so
  * the dev page /dev/admin/discounts renders this same component with
  * made-up data and no login.
  */
 
-type TabKey = "applied" | "approved" | "rejected" | "code-applied";
+/** The header's line (R4): the page lists only what the app could not finish. */
+const HEADER_LINE = "The 30% goes on automatically. These are the requests the app couldn't finish, oldest first.";
+/** Under the header while THIRTY_AUTO_APPLY pauses the automatic part (R7). */
+export const PAUSED_LINE = "The automatic 30% is paused (THIRTY_AUTO_APPLY is off). Requests wait here for the team.";
+const EMPTY = "Nothing needs a hand.";
+const EMPTY_STUDENT = "Nothing of theirs needs a hand.";
 
-const TAB_ORDER: TabKey[] = ["applied", "approved", "rejected", "code-applied"];
-const TAB_STATUS: Record<TabKey, ThirtyRequestRow["status"]> = {
-  applied: "pending",
-  approved: "approved",
-  rejected: "rejected",
-  "code-applied": "applied",
-};
-/** The tabs' names: the one map every admin page names the statuses by (discount-status.ts). */
-const TAB_LABEL = Object.fromEntries(TAB_ORDER.map((t) => [t, DISCOUNT_STATUS[TAB_STATUS[t]].label])) as Record<TabKey, string>;
-/** The tab names before admin rebuild 2, so an old link still opens its tab. */
-const OLD_TAB: Record<string, TabKey> = { decide: "applied", "code-added": "code-applied" };
-
-const FROM_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
-const LAUNCH_DAY = dayLabel(DISCOUNT_LAUNCH_DATE);
-
-/** One line under the tabs where the team has something to do. */
-const TAB_NOTE: Partial<Record<TabKey, string>> = {
-  applied: "Approve creates the student's Whop code.",
-  approved: "Add the code to the student's membership in Whop, then press Mark code applied.",
-};
-
-const TAB_EMPTY: Record<TabKey, string> = {
-  applied: "No request is waiting for a decision.",
-  approved: "No code is waiting to be applied in Whop.",
-  rejected: "No request has been rejected.",
-  "code-applied": "No code has been applied in Whop yet.",
-};
+/** Reject's confirm on an approved row (§9.6): the code made stays usable. */
+const staysUsable = (code: string) => `The code ${code} stays usable at checkout until someone switches it off in Whop.`;
 
 /** The id of the "may be out of date" line among the notices. */
 const STALE_ID = -1;
 
-/** A Whop code in a sentence: the approve route's 409 names the code that must be deleted in Whop. */
+/** A Whop code in a sentence: the approve route's 409s name the code to delete, or the one Whop attached. */
 const WHOP_CODE = /\bECOM30-[A-Z0-9]{4,}\b/;
 
-function parseTab(value: string | null): TabKey | null {
-  if (value && value in OLD_TAB) return OLD_TAB[value];
-  return TAB_ORDER.find((t) => t === value) ?? null;
-}
+const LAUNCH_DAY = dayLabel(DISCOUNT_LAUNCH_DATE);
 
 type Loaded = { kind: "loading" } | { kind: "error"; error: string } | { kind: "ready"; data: ThirtyPayload };
 
@@ -204,8 +200,8 @@ function byWhom(ref: TeamRef | null): string {
   return n ? ` by ${n}` : "";
 }
 
-/** What a row's button asked: a decision, or "check" (Check Whop again). */
-type RowCall = "approve" | "reject" | "applied" | "check";
+/** What a row's button asked: Approve (and Try again, the same route), Reject, or "check" (Check Whop again). */
+type RowCall = "approve" | "reject" | "check";
 
 /**
  * How Approve asks: "plain" runs every check; Approve anyway skips the 30%
@@ -216,11 +212,14 @@ type ApproveHow = "plain" | "rule" | "coupon";
 
 /**
  * The page's own words for a call the route refused. A 409 is the route's
- * sentence as it is (it names the Whop code to delete), and so is the
- * coupon's refusal (it names the code on the membership). The approve route's
- * other 400s name a button this page does not have, so they get the page's
- * words; the row's verdict then says why. Check Whop again's refusals are
- * its route's sentences.
+ * sentence as it is (it names the Whop code to delete, the code Whop
+ * attached after a reject, or why a Reject did not go through), and so is
+ * the coupon's refusal (it names the code on the membership). The approve
+ * route's other 400s name a button this page does not have, so they get the
+ * page's words; the row's verdict then says why. Reject's 503 ("Couldn't ask
+ * Whop") is the route's sentence too; a failure of the server is the page's
+ * "Couldn't save the rejection." Check Whop again's refusals are its route's
+ * sentences.
  */
 function decisionError(kind: RowCall, r: Refusal): string {
   if (r.status === 409) return r.error;
@@ -230,15 +229,52 @@ function decisionError(kind: RowCall, r: Refusal): string {
     if (/already processed/i.test(r.error)) return "This request was already decided.";
     return "Not approved: the 30% rule says no for this request now. Its row shows why.";
   }
-  if (kind === "applied" && r.status === 400) return "This request is no longer approved, so the code was not marked as applied.";
-  if (kind === "reject" && r.status >= 500) return "Couldn't save the rejection. Try again.";
-  if (kind === "applied" && r.status >= 500) return "Couldn't mark the code as applied. Try again.";
+  if (kind === "reject" && r.status >= 500 && r.status !== 503) return "Couldn't save the rejection. Try again.";
   return r.error;
 }
 
 /** A refusal that means the list is out of date: show it in the notices and read the list again. */
 function listIsStale(kind: RowCall, status: number): boolean {
-  return status === 409 || status === 404 || (status === 400 && (kind === "approve" || kind === "applied"));
+  return status === 409 || status === 404 || (status === 400 && kind === "approve");
+}
+
+/**
+ * The notice after Approve or Try again went through (2xx), in the words of
+ * the approve table (PRD §9.4): the code on the membership; made but not on
+ * it yet, and why; Whop silent while making it; or no code made yet, and why.
+ * The why is thirtyWords for the answer's reason, the row's age and the
+ * switch, as the row's Why line says it.
+ */
+export function approveNotice(row: ThirtyRequestRow, answer: ApproveAnswer, tryAgain: boolean, paused: boolean): PageNotice {
+  const name = studentName(row.student);
+  const code = answer.promoCode ?? row.promoCode;
+  const named = code ?? "the code";
+  const copy = code ? { copy: { label: "Copy code", text: code } } : {};
+  const why = () =>
+    thirtyWords(answer.reason, answer.step, {
+      ageHours: row.ageHours,
+      status: answer.status ?? row.status,
+      paused,
+      claimed: answer.status === "pending" && answer.promoCode !== null,
+      code,
+      membershipStatus: answer.membershipStatus,
+      message: answer.message,
+    });
+  const said = (head: string) => [head, why()].filter((s) => s !== "").join(" ");
+  if (answer.status === "applied") {
+    return { tone: "success", text: tryAgain ? `${name}: the code ${named} is on their membership.` : `Approved ${name}. The code ${named} is on their membership.`, ...copy };
+  }
+  if (answer.status === "approved") {
+    return { tone: "warning", text: said(`${name}: the code ${named} is made but not on their membership yet.`), ...copy };
+  }
+  if (answer.status === "pending" && (answer.step === "create" || answer.step === "create_no_id")) {
+    return {
+      tone: "warning",
+      text: `${name}: Whop didn't answer while making ${named}. Press Approve again in 5 minutes to look for it on Whop now; otherwise the app looks within the hour.`,
+      ...copy,
+    };
+  }
+  return { tone: "warning", text: said(`${name}: no code was made yet.`) };
 }
 
 export function ThirtyView({
@@ -246,13 +282,16 @@ export function ThirtyView({
   canApproveAnyway = false,
 }: {
   transport?: ThirtyTransport;
-  /** A founder or an admin: Approve anyway on every Applied row a check refuses (the approve route allows no one else). */
+  /**
+   * A founder or an admin: Approve anyway on every pending row a check
+   * refuses (the approve route allows no one else), and Reject on a row whose
+   * code may exist (the reject route allows no one else).
+   */
   canApproveAnyway?: boolean;
 }) {
   const params = useSearchParams();
   const pathname = usePathname();
   const student = params.get("student") || null;
-  const urlTab = parseTab(params.get("tab"));
 
   const [loaded, setLoaded] = useState<Loaded>({ kind: "loading" });
   const [reloading, setReloading] = useState(false);
@@ -269,7 +308,6 @@ export function ThirtyView({
    * is offered on them whatever the list's verdict.
    */
   const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(() => new Map());
-  const [pickedTab, setPickedTab] = useState<TabKey | null>(null);
   const seq = useRef(0);
 
   const show = useCallback((n: PageNotice) => setNotice((prev) => ({ ...n, id: (prev?.id ?? 0) + 1 })), []);
@@ -319,25 +357,12 @@ export function ThirtyView({
     setLocked((cur) => new Set(cur).add(key));
   }
 
-  /** Puts `params` in the address without loading anything. */
-  function setAddress(next: URLSearchParams) {
-    const q = next.toString();
-    window.history.replaceState(null, "", q ? `${pathname}?${q}` : pathname);
-  }
-
-  function chooseTab(t: TabKey) {
-    setPickedTab(t);
-    const next = new URLSearchParams(params.toString());
-    next.set("tab", t);
-    setAddress(next);
-  }
-
-  function showEveryone(current: TabKey) {
-    setPickedTab(current);
+  /** The list for everyone: the student filter goes from the address, nothing is loaded. */
+  function showEveryone() {
     const next = new URLSearchParams(params.toString());
     next.delete("student");
-    next.set("tab", current);
-    setAddress(next);
+    const q = next.toString();
+    window.history.replaceState(null, "", q ? `${pathname}?${q}` : pathname);
   }
 
   async function refused(kind: RowCall, row: ThirtyRequestRow, r: Refusal): RowResult {
@@ -350,13 +375,16 @@ export function ThirtyView({
     return null;
   }
 
+  const paused = loaded.kind === "ready" ? loaded.data.paused : false;
+
   /**
    * Approve, or Approve anyway (`how`). A refusal of a check (the route's
    * code "rule": the rule said no, or a check could not run, as the 409
    * "The course changed and this check cannot run") stays on the row in the
    * route's words or the page's, and is remembered, so a founder or an admin
    * gets Approve anyway there even where the list's verdict says yes; the
-   * list is read again, since its verdict may have changed.
+   * list is read again, since its verdict may have changed. What went through
+   * is said in the approve table's words (approveNotice).
    */
   async function approve(row: ThirtyRequestRow, how: ApproveHow): RowResult {
     const r = await transport.approve(row.id, how !== "plain", how === "coupon");
@@ -368,31 +396,40 @@ export function ThirtyView({
     }
     if (!r.ok) return refused("approve", row, r);
     lock(row.id);
-    const name = studentName(row.student);
-    const code = r.data.promoCode;
-    show({
-      tone: "success",
-      text: code ? `Approved ${name}. The code ${code} is on the Approved tab.` : `Approved ${name}. The code is on the Approved tab.`,
-      ...(code ? { copy: { label: "Copy code", text: code } } : {}),
-    });
+    show(approveNotice(row, r.data, false, paused));
     await reload();
     return null;
   }
 
+  /** Try again on an approved row: the approve route asks Whop where the code is, puts it on, and marks it applied. */
+  async function tryAgain(row: ThirtyRequestRow): RowResult {
+    const r = await transport.approve(row.id, false, false);
+    if (!r.ok) return refused("approve", row, r);
+    lock(row.id);
+    show(approveNotice(row, r.data, true, paused));
+    await reload();
+    return null;
+  }
+
+  /**
+   * Reject. What it did is said in the reject table's words (PRD §9.4): no
+   * code made; a code left usable at checkout, made and on nobody's
+   * membership; or a code Whop may have made, which the app could not ask
+   * about. The last two stay until dismissed, with the code to copy.
+   */
   async function reject(row: ThirtyRequestRow, reason: string | null): RowResult {
     const r = await transport.reject(row.id, reason);
     if (!r.ok) return refused("reject", row, r);
     lock(row.id);
-    show({ tone: "success", text: `Rejected the request from ${studentName(row.student)}.` });
-    await reload();
-    return null;
-  }
-
-  async function markApplied(row: ThirtyRequestRow): RowResult {
-    const r = await transport.markApplied(row.id);
-    if (!r.ok) return refused("applied", row, r);
-    lock(row.id);
-    show({ tone: "success", text: `Marked the code as applied in Whop for ${studentName(row.student)}.` });
+    const code = r.data.code ?? row.promoCode ?? "the code";
+    const copy = r.data.code ? { copy: { label: "Copy code", text: r.data.code } } : {};
+    if (r.data.codeState === "usable") {
+      show({ tone: "warning", text: `Rejected. ${staysUsable(code)}`, ...copy });
+    } else if (r.data.codeState === "may_exist") {
+      show({ tone: "warning", text: `Rejected. Whop may have made ${code}: look for it in Whop's promo codes and switch it off if it's there.`, ...copy });
+    } else {
+      show({ tone: "success", text: `Rejected the request from ${studentName(row.student)}.` });
+    }
     await reload();
     return null;
   }
@@ -443,24 +480,13 @@ export function ThirtyView({
   if (stale) notices.push({ id: STALE_ID, tone: "warning", text: STALE_TEXT });
 
   const header = (meta: React.ReactNode, action?: React.ReactNode) => (
-    <ListHeader
-      title="30% off"
-      description={`Requests for the 30% from ${FROM_DAY}, oldest first.`}
-      meta={meta}
-      action={action}
-    />
-  );
-
-  // While the list loads or failed, the header keeps its Refresh and the tabs keep their place, with no counts.
-  const blankTabs = (
-    <TabStrip tabs={TAB_ORDER.map((t) => ({ value: t, label: TAB_LABEL[t], count: null }))} value={pickedTab ?? urlTab ?? "applied"} onChange={() => {}} disabled />
+    <ListHeader title="30% off" description={HEADER_LINE} meta={meta} action={action} />
   );
 
   if (loaded.kind === "loading") {
     return (
       <ListPage>
         {header("Loading", <RefreshButton onPress={() => {}} busy disabled />)}
-        {blankTabs}
         <SkeletonRows rows={4} label="Loading the 30% list" />
       </ListPage>
     );
@@ -470,25 +496,15 @@ export function ThirtyView({
     return (
       <ListPage>
         {header(<FailedMeta />, <RefreshButton onPress={() => void retry()} busy={retrying} />)}
-        {blankTabs}
         <LoadError title="Couldn't load the 30% list." detail={loaded.error} onRetry={retry} busy={retrying} />
       </ListPage>
     );
   }
 
   const data = loaded.data;
-  // The answer is oldest first already; every tab keeps that order.
-  const requests = student ? data.requests.filter((r) => r.student.id === student) : data.requests;
-  const lists = Object.fromEntries(
-    TAB_ORDER.map((t) => [t, requests.filter((r) => r.status === TAB_STATUS[t])] as const),
-  ) as Record<TabKey, ThirtyRequestRow[]>;
-  const count = (t: TabKey) => lists[t].length;
-  // With one student and no tab asked for, open the first tab that has them.
-  const tab: TabKey =
-    pickedTab ?? urlTab ?? (student ? (TAB_ORDER.find((t) => count(t) > 0) ?? "applied") : "applied");
-  const studentShown = requests[0]?.student ?? null;
-  const emptyTitle = student ? "This student has nothing on this tab." : TAB_EMPTY[tab];
-  const note = TAB_NOTE[tab];
+  // The answer is oldest first already.
+  const rows = student ? data.requests.filter((r) => r.student.id === student) : data.requests;
+  const studentShown = rows[0]?.student ?? null;
 
   return (
     <ListPage>
@@ -498,6 +514,12 @@ export function ThirtyView({
       )}
 
       <NoticeStack notices={notices} onClose={closeNotice} />
+
+      {data.paused && (
+        <Warning data-paused="">
+          {PAUSED_LINE}
+        </Warning>
+      )}
 
       {data.requiredCount === null && (
         <Warning>
@@ -518,28 +540,21 @@ export function ThirtyView({
           }}
         >
           <p style={{ ...T.body, flex: "1 1 220px" }}>
-            {studentShown ? `Showing ${studentName(studentShown)} only.` : "Showing one student only. They have no 30% request."}
+            {studentShown ? `Showing ${studentName(studentShown)} only.` : "Showing one student only."}
           </p>
-          <Button variant="raised" size="md" onClick={() => showEveryone(tab)}>
+          <Button variant="raised" size="md" onClick={showEveryone}>
             Show everyone
           </Button>
         </div>
       )}
 
-      <TabStrip
-        tabs={TAB_ORDER.map((t) => ({ value: t, label: TAB_LABEL[t], count: count(t) }))}
-        value={tab}
-        onChange={chooseTab}
-      />
-      {note && <p style={{ ...T.bodyDim, lineHeight: 1.5, marginBottom: 16 }}>{note}</p>}
-
-      {count(tab) === 0 ? (
+      {rows.length === 0 ? (
         <Card>
-          <EmptyState title={emptyTitle} />
+          <EmptyState title={student ? EMPTY_STUDENT : EMPTY} />
         </Card>
       ) : (
         <Card padding={0}>
-          {lists[tab].map((row) =>
+          {rows.map((row) =>
             row.status === "pending" ? (
               <PendingRow
                 key={row.id}
@@ -552,8 +567,18 @@ export function ThirtyView({
                 onReject={reject}
                 onCheck={checkCoupon}
               />
+            ) : row.status === "approved" ? (
+              <ApprovedRow
+                key={row.id}
+                row={row}
+                locked={locked.has(row.id)}
+                stale={stale}
+                canReject={canApproveAnyway}
+                onTryAgain={tryAgain}
+                onReject={reject}
+              />
             ) : (
-              <DecidedRow key={row.id} row={row} locked={locked.has(row.id)} stale={stale} onMarkApplied={markApplied} />
+              <DecidedRow key={row.id} row={row} />
             ),
           )}
         </Card>
@@ -585,6 +610,18 @@ const ERROR_TEXT: React.CSSProperties = {
   ...T.body,
   lineHeight: 1.5,
   overflowWrap: "anywhere",
+};
+
+/** The reason field of a Reject panel: 16px, so a phone's browser does not zoom the page into it. */
+const REASON_INPUT: React.CSSProperties = {
+  width: "100%",
+  height: TAP,
+  padding: "0 12px",
+  fontSize: 16,
+  borderRadius: "var(--radius-control)",
+  border: "1px solid var(--color-border-strong)",
+  background: "var(--color-bg-card)",
+  color: "var(--color-text-primary)",
 };
 
 /**
@@ -621,66 +658,12 @@ function RefreshButton({ onPress, busy, disabled = false }: { onPress: () => voi
   );
 }
 
-/**
- * The four tabs as pills, each 44px tall, its count 12px. Under 400px the
- * pills, their words and the gaps between them narrow (8px of padding, 12px
- * words, 4px apart: measured at 390px wide, the four take 357 of the 358px
- * the page has) so they fit on one line; on a narrower phone the row scrolls
- * sideways instead of wrapping onto a second. While the list loads or
- * failed, the tabs stay with no counts (`count` null) and do nothing.
- */
-function TabStrip({
-  tabs,
-  value,
-  onChange,
-  disabled = false,
-}: {
-  tabs: Array<{ value: TabKey; label: string; count: number | null }>;
-  value: TabKey;
-  onChange: (t: TabKey) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div
-      role="tablist"
-      aria-label="Lists"
-      className="flex flex-wrap gap-2 max-[399px]:flex-nowrap max-[399px]:overflow-x-auto max-[399px]:gap-1 max-[399px]:[--tab-pad:8px] max-[399px]:[--tab-gap:4px] max-[399px]:[--tab-font:12px]"
-      style={{ marginBottom: 12 }}
-    >
-      {tabs.map((t) => {
-        const active = t.value === value;
-        return (
-          <button
-            key={t.value}
-            type="button"
-            role="tab"
-            aria-selected={active}
-            aria-disabled={disabled || undefined}
-            onClick={() => {
-              if (!disabled) onChange(t.value);
-            }}
-            style={{
-              ...pressPill(active),
-              padding: "0 var(--tab-pad, 12px)",
-              gap: "var(--tab-gap, 8px)",
-              fontSize: "var(--tab-font, 13px)",
-              cursor: disabled ? "default" : "pointer",
-            }}
-          >
-            {t.label}
-            {t.count !== null && <span style={{ fontSize: 12, fontWeight: 500, color: "var(--color-text-secondary)" }}>{t.count}</span>}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
 /** A lasting problem with the whole list, above it. A status, not an alert: it stays while the list is open. */
-function Warning({ children }: { children: React.ReactNode }) {
+function Warning({ children, ...data }: { children: React.ReactNode; "data-paused"?: string }) {
   return (
     <div
       role="status"
+      {...data}
       style={{
         display: "flex",
         gap: 10,
@@ -731,6 +714,21 @@ function DotLine({ parts, dim = true }: { parts: string[]; dim?: boolean }) {
   );
 }
 
+/**
+ * A row's Why line (thirty-view.ts whyLine, thirtyWords): what went wrong and
+ * what happens next. Its dot is the warning colour when an attempt failed,
+ * grey while nothing has been tried.
+ */
+function WhyLine({ row }: { row: ThirtyRequestRow }) {
+  if (!row.why) return null;
+  return (
+    <p data-why={row.lastFailure?.reason ?? "none"} style={{ display: "flex", gap: 8, alignItems: "flex-start", minWidth: 0 }}>
+      <Dot color={row.lastFailure ? "var(--color-warning)" : "var(--color-neutral)"} />
+      <span style={{ ...T.body, lineHeight: 1.5, overflowWrap: "anywhere" }}>{row.why}</span>
+    </p>
+  );
+}
+
 /** The verdict's colour: green yes, red when the rule or the coupon says no, grey for no verdict. */
 function verdictColor(v: Verdict): string {
   if (v.ok) return "var(--color-success)";
@@ -770,13 +768,15 @@ function StudentCopies({ student }: { student: StudentBrief }) {
 }
 
 /**
- * An Applied row: the date applied, the verdict line, and the actions on the
- * right (RowSplit): Approve and Reject. A row the coupon refuses has no
- * Approve: Reject is raised, its reason starts filled in (the render
- * review's fix round), and "Check Whop again" stands beside it (its second
- * round). For a founder or an admin, "Approve anyway" stands in Approve's
- * place on every row a check refuses, the coupon's too, and after a refusal
- * the route answered (the owner's review, 2026-10-21).
+ * A pending row: the date applied, the verdict line, the Why line, and the
+ * actions on the right (RowSplit): Approve and Reject. A row the coupon
+ * refuses has no Approve: Reject is raised, its reason starts filled in (the
+ * render review's fix round), and "Check Whop again" stands beside it (its
+ * second round). For a founder or an admin, "Approve anyway" stands in
+ * Approve's place on every row a check refuses, the coupon's too, and after
+ * a refusal the route answered (the owner's review, 2026-10-21). A row whose
+ * code may exist (a claimed name, or a code reopened by hand) has Reject for
+ * a founder or an admin alone, as the reject route allows (T-137).
  */
 function PendingRow({
   row,
@@ -813,6 +813,9 @@ function PendingRow({
   const recheck = coupon || verdict.reason === "unpaid";
   const skip = anywaySkip(verdict, refusal);
   const canOverride = canApproveAnyway && skip !== null;
+  // A code may exist (a claim, or a code reopened by hand): the reject route asks Whop first, and a csm may not (T-137).
+  const codeMayExist = row.promoCode !== null || row.whopPromoId !== null;
+  const canReject = !codeMayExist || canApproveAnyway;
   const [busy, setBusy] = useState<null | "approve" | "override" | "reject" | "check">(null);
   const [confirm, setConfirm] = useState<null | "override" | "reject">(null);
   const [reason, setReason] = useState("");
@@ -881,27 +884,29 @@ function PendingRow({
           Approve
         </Button>
       )}
-      <Button
-        variant={coupon ? "raised" : "ghost"}
-        size="md"
-        disabled={off}
-        expanded={confirm === "reject"}
-        onClick={() => {
-          const opening = confirm !== "reject";
-          setConfirm(opening ? "reject" : null);
-          // The coupon's row: the reason starts as the map's own sentence to the student, who reads it there (the
-          // team can change it). Filled when the panel opens, so a row the coupon refuses only after a reload
-          // (Approve refused by Whop) gets it too.
-          if (opening && coupon && !reason.trim()) setReason(COUPON_REJECT_REASON);
-        }}
-      >
-        Reject
-      </Button>
+      {canReject && (
+        <Button
+          variant={coupon ? "raised" : "ghost"}
+          size="md"
+          disabled={off}
+          expanded={confirm === "reject"}
+          onClick={() => {
+            const opening = confirm !== "reject";
+            setConfirm(opening ? "reject" : null);
+            // The coupon's row: the reason starts as the map's own sentence to the student, who reads it there (the
+            // team can change it). Filled when the panel opens, so a row the coupon refuses only after a reload
+            // (Approve refused by Whop) gets it too.
+            if (opening && coupon && !reason.trim()) setReason(COUPON_REJECT_REASON);
+          }}
+        >
+          Reject
+        </Button>
+      )}
     </>
   );
 
   return (
-    <div className="list-row" style={ROW}>
+    <div className="list-row" style={ROW} data-row-status="pending">
       <RowSplit
         main={
           <>
@@ -924,6 +929,7 @@ function PendingRow({
                 )}
               </span>
             </p>
+            <WhyLine row={row} />
             {/* Only beside the rule's yes: a row refused for another reason has nothing Approve would do. */}
             {row.couponCheck === "not-checked" && verdict.ok && (
               <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="not-checked">
@@ -931,7 +937,8 @@ function PendingRow({
                 <span style={{ ...T.bodyDim, lineHeight: 1.5 }}>Coupon not checked yet. Approve asks Whop first.</span>
               </p>
             )}
-            {/* Copy Discord ID and Copy username, to find the student on Discord (the owner, 2026-10-26). */}
+            {/* Copy Discord ID and Copy username, to find the student on Discord (the owner, 2026-10-26). No Copy
+                code: a pending request's code name is a claim whose code may not exist (as on the student's page). */}
             <span className="flex flex-wrap items-center" style={{ gap: 8 }} data-discord-copies="">
               <StudentCopies student={row.student} />
             </span>
@@ -964,7 +971,7 @@ function PendingRow({
         </div>
       )}
 
-      {confirm === "reject" && (
+      {confirm === "reject" && canReject && (
         <div style={PANEL}>
           <label htmlFor={reasonId} style={{ ...T.body, fontWeight: 600 }}>
             Reason (optional)
@@ -984,17 +991,7 @@ function PendingRow({
                 ? "For example: not every video was watched by the deadline"
                 : "For example: fewer than 80% of the videos were watched by the deadline"
             }
-            style={{
-              width: "100%",
-              height: TAP,
-              padding: "0 12px",
-              // 16px: a phone's browser zooms the page into a smaller field.
-              fontSize: 16,
-              borderRadius: "var(--radius-control)",
-              border: "1px solid var(--color-border-strong)",
-              background: "var(--color-bg-card)",
-              color: "var(--color-text-primary)",
-            }}
+            style={REASON_INPUT}
           />
           <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>
             {rejectionCounts
@@ -1053,27 +1050,8 @@ function CodeWithCopy({ code, student }: { code: string; student: StudentBrief }
   );
 }
 
-/**
- * An Approved, Rejected or Code Applied row: the dates and who decided, the
- * reason or the code, and Mark code applied on the right of an Approved row
- * (RowSplit). The coupon warning is an Approved row's only: a discount on the
- * next renewal that is not the request's own 30% code (couponWarns,
- * thirty-view.ts). The team's ECOM30 code, added in Whop before Mark code
- * applied was pressed, is never warned about (the render review's fix round).
- */
-function DecidedRow({
-  row,
-  locked,
-  stale,
-  onMarkApplied,
-}: {
-  row: ThirtyRequestRow;
-  locked: boolean;
-  stale: boolean;
-  onMarkApplied: (row: ThirtyRequestRow) => RowResult;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+/** "Applied Mon 19 Oct · Approved Tue 20 Oct by Robin" and, for an applied or rejected row, its decision. */
+function datesOf(row: ThirtyRequestRow): string[] {
   const reviewed = row.reviewedAt ? ` ${dayLabel(row.reviewedAt)}` : "";
   const parts = [`Applied ${dayLabel(row.askedAt)}`];
   if (row.status === "rejected") parts.push(`Rejected${reviewed}${byWhom(row.reviewedBy)}`);
@@ -1083,27 +1061,63 @@ function DecidedRow({
       parts.push(`Code applied${row.appliedAt ? ` ${dayLabel(row.appliedAt)}` : ""}${byWhom(row.appliedBy)}`);
     }
   }
+  return parts;
+}
+
+/**
+ * An approved row: the dates and who decided, the code with its copy
+ * buttons, the coupon warning, the Why line, and on the right (RowSplit) Try
+ * again (every role) and Reject (a founder or an admin, confirmed first). The
+ * coupon warning is an approved row's only: a discount on the next renewal
+ * that is not the request's own 30% code (couponWarns, thirty-view.ts). The
+ * team's own ECOM30 code is never warned about (the render review's fix round).
+ */
+function ApprovedRow({
+  row,
+  locked,
+  stale,
+  canReject,
+  onTryAgain,
+  onReject,
+}: {
+  row: ThirtyRequestRow;
+  locked: boolean;
+  stale: boolean;
+  /** A founder or an admin: the reject route allows no one else on a request whose code exists. */
+  canReject: boolean;
+  onTryAgain: (row: ThirtyRequestRow) => RowResult;
+  onReject: (row: ThirtyRequestRow, reason: string | null) => RowResult;
+}) {
+  const [busy, setBusy] = useState<null | "again" | "reject">(null);
+  const [confirm, setConfirm] = useState(false);
+  const [reason, setReason] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const reasonId = useId();
   // A code on the membership that still discounts the next renewal (Whop's answer now, or the stored one when Whop
-  // said nothing): adding the 30% code would replace it, so the team checks Whop first. A request approved before
-  // the coupon rule has no stored row, which is why the page asks Whop about the Approved rows itself.
+  // said nothing): putting the 30% code on would replace it, so the team checks Whop first. A request approved before
+  // the coupon rule has no stored row, which is why the page asks Whop about the approved rows itself.
   const approved = row.status === "approved";
   const coupon = couponWarns(row) ? row.coupon : null;
   const unchecked = approved && !row.coupon && (row.couponCheck === "failed" || row.couponCheck === "no-membership");
-  const canMark = approved && Boolean(row.promoCode);
+  const off = busy !== null || locked;
+  const rejectionCounts = requestCounts({ status: "rejected", created_at: row.askedAt }, null);
+
+  async function run(what: NonNullable<typeof busy>, fn: () => RowResult) {
+    setBusy(what);
+    setError(null);
+    const e = await fn();
+    setBusy(null);
+    if (e) setError(e);
+    else setConfirm(false);
+  }
 
   return (
-    <div className="list-row" style={ROW}>
+    <div className="list-row" style={ROW} data-row-status="approved">
       <RowSplit
         main={
           <>
             <StudentHead student={row.student} />
-            <DotLine parts={parts} />
-
-            {row.status === "rejected" && (
-              <p style={{ ...T.bodyDim, lineHeight: 1.5, overflowWrap: "anywhere" }}>
-                {row.rejectionReason ? `Reason: ${row.rejectionReason}` : "No reason given."}
-              </p>
-            )}
+            <DotLine parts={datesOf(row)} />
 
             {coupon && (
               <p style={{ display: "flex", gap: 8, alignItems: "flex-start" }} data-coupon="discounted">
@@ -1127,44 +1141,100 @@ function DecidedRow({
                 </span>
               </p>
             )}
+            <WhyLine row={row} />
 
-            {row.promoCode && row.status !== "rejected" && <CodeWithCopy code={row.promoCode} student={row.student} />}
-            {/* The tab's note says what to do with a code; a row says it only when there is none. */}
-            {approved && !row.promoCode && (
-              <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>
-                This approved request has no code on file. Check it in Whop before marking anything.
-              </p>
+            {row.promoCode ? (
+              <CodeWithCopy code={row.promoCode} student={row.student} />
+            ) : (
+              <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>This approved request has no code on file. Check it in Whop.</p>
             )}
 
             {locked && stale && <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>{SAVED_STALE}</p>}
           </>
         }
         actions={
-          canMark ? (
-            <Button
-              variant="raised"
-              size="md"
-              busy={busy}
-              disabled={locked}
-              onClick={async () => {
-                setBusy(true);
-                setError(null);
-                const e = await onMarkApplied(row);
-                setBusy(false);
-                if (e) setError(e);
-              }}
-            >
-              Mark code applied
+          <>
+            <Button variant="raised" size="md" busy={busy === "again"} disabled={locked || (busy !== null && busy !== "again")} onClick={() => void run("again", () => onTryAgain(row))}>
+              Try again
             </Button>
-          ) : undefined
+            {canReject && (
+              <Button variant="ghost" size="md" disabled={off} expanded={confirm} onClick={() => setConfirm((c) => !c)}>
+                Reject
+              </Button>
+            )}
+          </>
         }
       />
+
+      {confirm && canReject && (
+        <div style={PANEL}>
+          {/* Asked first (§9.6): a code made stays usable at checkout until someone switches it off in Whop. */}
+          <p data-reject-confirm="" style={{ ...T.body, lineHeight: 1.5 }}>
+            {staysUsable(row.promoCode ?? "the code")}
+          </p>
+          <label htmlFor={reasonId} style={{ ...T.body, fontWeight: 600 }}>
+            Reason (optional)
+          </label>
+          <input
+            id={reasonId}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setConfirm(false);
+            }}
+            maxLength={500}
+            autoFocus
+            placeholder="For example: two accounts on one card"
+            style={REASON_INPUT}
+          />
+          <p style={{ ...T.bodyDim, lineHeight: 1.5 }}>
+            {rejectionCounts ? "The student sees this reason on their map, and cannot ask for the 30% again." : "The student may see this reason."}
+          </p>
+          <div className="flex flex-wrap" style={{ gap: 8 }}>
+            <Button variant="danger" size="md" disabled={locked} busy={busy === "reject"} onClick={() => void run("reject", () => onReject(row, reason.trim() || null))}>
+              Reject the request
+            </Button>
+            <Button variant="ghost" size="md" disabled={busy !== null} onClick={() => setConfirm(false)}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      )}
 
       {error && (
         <p role="alert" style={ERROR_TEXT}>
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+/**
+ * A rejected or applied row, listed because its newest event is a
+ * write_failed from the last 30 days: the dates, the reason it was rejected,
+ * its Why line (Whop made or attached a code the app could not record), and
+ * the code with its copy buttons. Nothing to press: only Whop can change it.
+ */
+function DecidedRow({ row }: { row: ThirtyRequestRow }) {
+  const code = row.lastFailure?.code ?? row.promoCode;
+  return (
+    <div className="list-row" style={ROW} data-row-status={row.status}>
+      <RowSplit
+        main={
+          <>
+            <StudentHead student={row.student} />
+            <DotLine parts={datesOf(row)} />
+            {row.status === "rejected" && (
+              <p style={{ ...T.bodyDim, lineHeight: 1.5, overflowWrap: "anywhere" }}>
+                {row.rejectionReason ? `Reason: ${row.rejectionReason}` : "No reason given."}
+              </p>
+            )}
+            <WhyLine row={row} />
+            {code && <CodeWithCopy code={code} student={row.student} />}
+          </>
+        }
+      />
     </div>
   );
 }

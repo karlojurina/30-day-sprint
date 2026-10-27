@@ -2,9 +2,13 @@
 // admin's 30% page (admin rebuild PRD, work item 2; admin rebuild 2, D4 and
 // D5: _admin/prds/admin-rebuild-2/admin_rebuild_2_prd.md in the workspace).
 //
-// loadThirtyData (src/lib/admin/thirty-data.ts) reads every request made from
-// 1 October, the students holding them, their 30% facts in pages and in
-// batches of 100 ids, and the coupons stored for them, and hands each student
+// loadThirtyData (src/lib/admin/thirty-data.ts) reads the requests that need a
+// hand (since the 30% that applies itself, T-137, R4: from 1 October, pending
+// or approved 30 minutes after the student applied, or with a write_failed as
+// their newest event in the last 30 days; every request from 1 October until
+// then), the students holding them, their 30% facts in pages and in batches
+// of 100 ids, the coupons stored for them and each listed request's newest
+// failed attempt, and hands each student
 // the DiscountReads object loadDiscountReads would have made for them;
 // buildThirtyView (thirty-view.ts) runs the student app's own rule over them,
 // the stored coupon first. Every fixture here runs both ways on the same
@@ -30,9 +34,9 @@
 import fs from 'node:fs'
 import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
-import { loadThirtyData } from './_gen/thirty-data.ts'
+import { loadThirtyData, readNeedsHand } from './_gen/thirty-data.ts'
 import {
-  VERDICT_TEXT, anywaySkip, buildThirtyView, couponOf, judgeRequest, studentAppView, videoLine, whopPulled,
+  VERDICT_TEXT, anywaySkip, buildThirtyView, couponOf, judgeRequest, studentAppView, videoLine, whopPulled, whyLine,
 } from './_gen/thirty-view.ts'
 import { approvalVerdict, couponApprovalRefusal, explainOldCourseRequest, factsFromReads, loadDiscountReads, videoDoneIds } from './_gen/discount-server.ts'
 import { DISCOUNT_ELIGIBLE_FROM, DISCOUNT_SHARED_DEADLINE, closedBeforeEighty, discountState, requiredLessons } from './_gen/discount.ts'
@@ -81,7 +85,7 @@ const QUESTIONS = [
 
 /** A set of made-up students and everything they did, each row with its moment. */
 function fixtures() {
-  const f = { people: [], done: [], asked: [], answers: [], tasks: [], synced: [], coupons: [] }
+  const f = { people: [], done: [], asked: [], answers: [], tasks: [], synced: [], coupons: [], events: [] }
   f.person = (id, name, paid, more = {}) => {
     f.people.push({
       id, name, email: `${id}@example.com`, whop_user_id: `user_${id}`, whop_plan_id: MONTHLY, whop_membership_id: `mem_dev${id.replace(/[^a-z0-9]/g, '')}`,
@@ -120,6 +124,8 @@ function world(f, at, { shuffle = 7, videos } = {}) {
     student_whop_sync: f.synced.filter((s) => by(s.last_sync_at)),
     tasks: f.tasks.filter((x) => by(x.completed_at ?? x.created_at)),
     student_membership_discounts: f.coupons,
+    // v116's history (T-137): the events that had happened by then.
+    discount_request_events: f.events.filter((e) => by(e.created_at)),
   })
   db.shuffle = shuffle
   return db
@@ -269,7 +275,8 @@ const views = []
 async function bothWays(db, nowIso, { load = loadThirtyData, skip = new Set(), reads = true } = {}) {
   const now = new Date(nowIso)
   const before = db.log.length
-  const loaded = await load(fakeClient(db))
+  // The list's 30 minutes and 30 days are counted from this same moment (readNeedsHand).
+  const loaded = await load(fakeClient(db), now.getTime())
   const bulkCalls = db.log.length - before
   if (!loaded.ok) return { differences: [`the load failed: ${loaded.failed.join('; ')}`] }
   const data = loaded.data
@@ -363,14 +370,14 @@ ok(W.bulkCalls < 60, `the bulk path made ${W.bulkCalls} reads, where one student
 const wv = W.view
 ok(wv.requiredCount === 61 && wv.sharedDeadline === DISCOUNT_SHARED_DEADLINE && wv.generatedAt === WED && wv.listedFrom === DISCOUNT_ELIGIBLE_FROM && wv.couponsUnread === false,
    'the course asks for 61 videos, the shared deadline, listed from 1 October, the coupons read, the moment it was built', show({ n: wv.requiredCount, from: wv.listedFrom }))
-ok(Object.keys(wv).sort().join() === 'couponsUnread,generatedAt,listedFrom,requests,requiredCount,sharedDeadline',
-   'no Can still earn, no survey questions, nothing unchecked in the answer (D4)', Object.keys(wv).sort().join())
+ok(Object.keys(wv).sort().join() === 'couponsUnread,generatedAt,listedFrom,paused,requests,requiredCount,sharedDeadline' && wv.paused === false,
+   'no Can still earn, no survey questions, nothing unchecked in the answer (D4); `paused`, false when nothing pauses it (T-137, R7)', Object.keys(wv).sort().join())
 const own = wv.requests.filter((r) => !r.id.startsWith('r-j-')).map((r) => r.id).join()
-ok(own === 'r-h2,r-h1,r-t,r-u,r-p1,r-n,r-a,r-g,r-r,r-e2,r-p2',
-   'listed: every request made from 1 October, whatever its status, oldest first; r-w (29 September), r-v (August) and r-x (pending since 28 September) are not', own)
-ok(wv.requests.every((r, i) => i === 0 || Date.parse(wv.requests[i - 1].askedAt) <= Date.parse(r.askedAt)) && wv.requests.length === 261,
-   'all 261 rows (the 250 J requests included) run oldest first')
-ok(!W.data.students.some((s) => ['s-e', 's-v', 's-w', 's-x', 's-b', 's-m'].includes(s.id)) && W.data.students.some((s) => s.id === 's-e2') && W.data.students.some((s) => s.id === 's-n'),
+ok(own === 'r-t,r-n,r-a,r-g,r-r,r-e2,r-p2',
+   'listed: the requests that need a hand, oldest first (T-137, R4): pending or approved from 1 October; r-h1, r-h2 and r-p1 (rejected) and r-u (applied), with no write_failed, are not, nor r-w (29 September), r-v (August) or r-x (pending since 28 September)', own)
+ok(wv.requests.every((r, i) => i === 0 || Date.parse(wv.requests[i - 1].askedAt) <= Date.parse(r.askedAt)) && wv.requests.length === 257,
+   'all 257 rows (the 250 J requests included) run oldest first')
+ok(!W.data.students.some((s) => ['s-e', 's-v', 's-w', 's-x', 's-b', 's-m', 's-h1', 's-h2', 's-u'].includes(s.id)) && W.data.students.some((s) => s.id === 's-e2') && W.data.students.some((s) => s.id === 's-n'),
    'read: only the students holding a listed request (one with a first payment before 1 October or none included), nobody else')
 
 {
@@ -411,14 +418,8 @@ ok(app(W.per.get('s-e'), new Date(WED)).reason === 'before-launch', 'E: first pa
 }
 ok(request(wv, 'r-g').verdict.ok && approve(W.per.get('s-g'), new Date(WED), request(wv, 'r-g')).said.ok && request(wv, 'r-g').student.status === 'canceled',
    'G: a canceled member\'s request after every video: yes both ways, the row saying the membership is canceled')
-{
-  const h1 = request(wv, 'r-h1')
-  ok(h1.status === 'rejected' && h1.verdict === null && h1.facts === null && show(h1.reviewedBy) === show({ id: 'tm-1', name: 'Robin Test' })
-       && h1.rejectionReason === 'Ads not handed in' && app(W.per.get('s-h1'), new Date(WED)).kind === 'rejected',
-     'H1: rejected after the launch: on the Rejected list with who decided it and the reason; a decided row carries no verdict and no facts')
-}
-ok(request(wv, 'r-h2')?.status === 'rejected' && request(wv, 'r-h2').askedAt === '2026-10-06T10:00:00.000Z',
-   'H2: a request of 6 October, rejected: listed (it is from 1 October)')
+ok(!request(wv, 'r-h1') && !request(wv, 'r-h2') && app(W.per.get('s-h1'), new Date(WED)).kind === 'rejected',
+   'H1 and H2: rejected, with no write_failed: on no list since the 30% applies itself (they were on the Rejected tab), and the student app still shows H1 rejected')
 ok(app(W.per.get('s-m'), new Date(WED)).kind === 'locked' && !W.data.students.some((s) => s.id === 's-m'), 'M: no request, not read')
 ok(request(wv, 'r-n').verdict.reason === 'no-payment' && request(wv, 'r-n').verdict.text === VERDICT_TEXT.noPayment, 'no first payment on file: the verdict says so')
 ok(request(wv, 'r-p2').verdict.reason === 'another-request' && request(wv, 'r-p2').facts.videosDone === 61,
@@ -427,10 +428,9 @@ ok(request(wv, 'r-r').verdict.ok && request(wv, 'r-r').verdict.reason === null &
    'R: every video done, the ads never ticked: the verdict is yes, as the rule says (it waited for the ads tick until 2026-10-20)', show(request(wv, 'r-r').verdict))
 {
   const t = request(wv, 'r-t')
-  const u = request(wv, 'r-u')
-  ok(t.status === 'approved' && t.promoCode === 'ECOM30-TEST01' && u.status === 'applied' && u.appliedAt === '2026-10-20T08:00:00.000Z'
-       && show(u.appliedBy) === show({ id: 'tm-1', name: 'Robin Test' }) && t.verdict === null,
-     'approved with its code; code applied in Whop with who marked it')
+  ok(t.status === 'approved' && t.promoCode === 'ECOM30-TEST01' && t.verdict === null && show(t.reviewedBy) === show({ id: 'tm-1', name: 'Robin Test' })
+       && t.lastFailure === null && t.why === 'The app hasn\'t tried yet.' && !request(wv, 'r-u'),
+     'approved with its code, who approved it, and its Why line; the applied one (r-u) is on no list')
 }
 ok(app(W.per.get('s-w'), new Date(WED)).kind === 'approved' && !request(wv, 'r-w'),
    'W: an approved request from 29 September still decides where the student stands, and is not listed (the page lists from 1 October)')
@@ -538,7 +538,7 @@ console.log('\n=== L: a failed batch of completions ===')
     covered = ids
     return { message: 'canceling statement due to statement timeout' }
   }
-  const loaded = await loadThirtyData(fakeClient(db))
+  const loaded = await loadThirtyData(fakeClient(db), Date.parse(WED))
   const others = loaded.data.students.map((s) => s.id).filter((id) => !covered.includes(id))
   ok(covered.length > 1
        && covered.every((id) => loaded.data.reads.get(id).completions.data === null && /statement timeout/.test(loaded.data.reads.get(id).completions.error.message))
@@ -567,36 +567,36 @@ console.log('\n=== L: a failed batch of completions ===')
   const db = world(main, WED)
   db.failWhen = (q) => q.table === 'discount_requests' && q.filters.some((f) => f.startsWith('student_id in (') && f.split(',').includes('s-a'))
     ? { message: 'connection reset' } : null
-  const loaded = await loadThirtyData(fakeClient(db))
+  const loaded = await loadThirtyData(fakeClient(db), Date.parse(WED))
   const view = buildThirtyView(loaded.data, new Date(WED), RESET)
   ok(loaded.data.reads.get('s-a').requests.data === null && request(view, 'r-a').verdict.reason === 'read-failed'
        && request(view, 'r-j-001').verdict.ok === true,
      'a failed batch of every request a student has: their verdict is read-failed (never judged without their other requests); another batch is judged')
 }
-for (const table of ['students', 'discount_requests', 'team_members', 'student_whop_sync']) {
+for (const table of ['students', 'discount_requests', 'discount_request_events', 'team_members', 'student_whop_sync']) {
   const db = world(main, WED)
   db.fail[`${table}.select`] = { message: 'permission denied' }
-  const loaded = await loadThirtyData(fakeClient(db))
+  const loaded = await loadThirtyData(fakeClient(db), Date.parse(WED))
   ok(loaded.ok === false && loaded.failed.some((f) => f.startsWith(table) && f.includes('permission denied')),
      `${table} cannot be read: the load fails and names it, so the page shows an error, never a list with people missing`, show(loaded.failed))
 }
 for (const table of ['discount_feedback_questions', 'discount_feedback_responses', 'tasks']) {
   const db = world(main, WED)
   db.fail[`${table}.select`] = { message: 'permission denied' }
-  const loaded = await loadThirtyData(fakeClient(db))
+  const loaded = await loadThirtyData(fakeClient(db), Date.parse(WED))
   ok(loaded.ok && db.calls(table).length === 0, `${table} is not read any more (the survey and Can still earn went with D4), so it cannot fail the page`)
 }
 {
   const db = world(main, WED)
   db.fail['student_membership_discounts.select'] = { message: 'relation "student_membership_discounts" does not exist' }
-  const loaded = await loadThirtyData(fakeClient(db))
+  const loaded = await loadThirtyData(fakeClient(db), Date.parse(WED))
   const view = loaded.ok ? buildThirtyView(loaded.data, new Date(WED), RESET) : null
   ok(loaded.ok && view.couponsUnread === true && view.requests.every((r) => r.coupon === null) && request(view, 'r-a').verdict.ok,
      'the stored coupons cannot be read (a database without v111): the list still comes, it says so, no row shows a coupon, the rule still judges')
 }
 
 // ── One snapshot per student ───────────────────────────────────────────────
-console.log('\n=== One snapshot per student: each read of completions is a single query, and a request decided between reads is listed once ===')
+console.log('\n=== One snapshot per student: each read of completions is a single query, and a request approved between reads is listed once ===')
 /** The completions reads of a load, by their students: how many queries each list of students took. */
 function completionQueries(db, from = 0) {
   const counts = new Map()
@@ -609,7 +609,7 @@ function completionQueries(db, from = 0) {
 }
 {
   const db = world(main, WED)
-  await loadThirtyData(fakeClient(db))
+  await loadThirtyData(fakeClient(db), Date.parse(WED))
   const counts = completionQueries(db)
   const perRead = Math.max(...[...counts.keys()].map((f) => f.split(',').length))
   const lessonFilter = db.calls('student_lesson_completions', 'select').map((q) => q.filters.find((f) => f.startsWith('lesson_id in ('))).find(Boolean)
@@ -620,20 +620,112 @@ function completionQueries(db, from = 0) {
      `${perRead} students a read, at one row per student and each of the ${lessons} lessons read, fit in one page (${perRead * lessons} rows at most)`)
 }
 {
-  // A request decided between the read of the pending ones and the read of the decided ones.
+  // A request approved between the read of the pending ones and the read of the approved ones (T-137: the second read
+  // took every decided request until the 30% applied itself).
   const db = world(main, WED)
   db.failWhen = (q) => {
-    if (q.table === 'discount_requests' && q.op === 'select' && q.filters.includes('status!=pending')) {
+    if (q.table === 'discount_requests' && q.op === 'select' && q.filters.includes('status=approved')) {
       const r = db.rows('discount_requests').find((x) => x.id === 'r-a')
-      if (r.status === 'pending') Object.assign(r, { status: 'approved', promo_code: 'ECOM30-TEST05', reviewed_at: WED, reviewed_by: 'tm-1' })
+      if (r.status === 'pending') Object.assign(r, { status: 'approved', promo_code: 'ECOM30-TEST05', whop_promo_id: 'promo_devtest05', reviewed_at: WED, reviewed_by: 'tm-1' })
     }
     return null
   }
-  const loaded = await loadThirtyData(fakeClient(db))
+  const loaded = await loadThirtyData(fakeClient(db), Date.parse(WED))
   const view = buildThirtyView(loaded.data, new Date(WED), RESET)
   const rows = view.requests.filter((r) => r.id === 'r-a')
-  ok(rows.length === 1 && rows[0].status === 'approved' && rows[0].promoCode === 'ECOM30-TEST05',
-     'r-a, decided after the pending read and before the decided one: one row, as decided (never on Applied and Approved at once)', show(rows.map((r) => r.status)))
+  ok(rows.length === 1 && rows[0].status === 'approved' && rows[0].promoCode === 'ECOM30-TEST05' && rows[0].whopPromoId === 'promo_devtest05',
+     'r-a, approved after the pending read and before the approved one: one row, as approved (never listed twice, never on neither)', show(rows.map((r) => r.status)))
+}
+
+// ── The one list (the 30% that applies itself, T-137, R4) ───────────────────
+console.log('\n=== The one list: what needs a hand, each row\'s newest failure and its Why line ===')
+{
+  const NOW = '2026-10-23T09:00:00.000Z'
+  const NOW_MS = Date.parse(NOW)
+  const ago = (minutes) => new Date(NOW_MS - minutes * 60_000).toISOString()
+  const f = fixtures()
+  const ev = (request_id, event, created_at, reason = null, detail = {}) =>
+    f.events.push({ request_id, student_id: `s-${request_id.slice(2)}`, event, actor: 'job', reason, created_at, detail })
+  /** A student of the shared window, every video done (the verdict yes), and one request. */
+  const one = (key, status, created_at, more = {}) => {
+    f.person(`s-${key}`, `${key} Example`, '2026-10-02T10:00:00.000Z')
+    f.watched(`s-${key}`, REQUIRED, FROM_WHOP)
+    f.request(`s-${key}`, `r-${key}`, created_at, status, more)
+  }
+  one('p31', 'pending', ago(31)) // pending 31 minutes: listed, never tried yet
+  one('p29', 'pending', ago(29)) // 29 minutes: the app's own tries still come first
+  one('pold', 'pending', ago(60 * 49)) // 49 hours, never tried: the team's now
+  one('fail', 'pending', ago(120)) // three failures, the newest one counts
+  one('claim', 'pending', ago(60 * 60), { promo_code: 'ECOM30-CLA1MD' }) // a claim 60 hours old whose create Whop never answered
+  one('reopen', 'pending', ago(300), { promo_code: 'ECOM30-RE0PEN', whop_promo_id: 'promo_devreopen' }) // reopened by hand
+  one('appr', 'approved', ago(60 * 24 * 9), { promo_code: 'ECOM30-APPR0V', whop_promo_id: 'promo_devapprov', reviewed_at: ago(60 * 24 * 9 - 5) })
+  one('else', 'approved', ago(300), { promo_code: 'ECOM30-ELS3WH', whop_promo_id: 'promo_develsewh', reviewed_at: ago(299) })
+  one('wf', 'rejected', ago(600), { promo_code: 'ECOM30-WR1TEF', whop_promo_id: 'promo_devwritef', reviewed_at: ago(500), reviewed_by: 'tm-1' })
+  one('wfold', 'rejected', ago(60 * 24 * 32), { reviewed_at: ago(60 * 24 * 32) })
+  one('wfthen', 'applied', ago(600), { promo_code: 'ECOM30-TH3NAP', whop_promo_id: 'promo_devthenap', applied_at: ago(490) })
+  one('app', 'applied', ago(600), { promo_code: 'ECOM30-AP9L1D', whop_promo_id: 'promo_devap9l1d', applied_at: ago(590) })
+  one('sept', 'pending', '2026-09-30T21:00:00.000Z') // before 1 October: never listed
+  ev('r-fail', 'attempt_failed', ago(100), 'whop_no_answer', { step: 'coupon_stored' })
+  ev('r-fail', 'attempt_failed', ago(30), 'membership_not_active', { step: 'membership', membership_status: 'past_due', code: null })
+  ev('r-fail', 'attempt_failed', ago(60), 'no_membership', { step: 'membership' })
+  ev('r-claim', 'attempt_failed', ago(60 * 59), 'whop_no_answer', { step: 'create', http: null, message: null, code: 'ECOM30-CLA1MD' })
+  ev('r-reopen', 'attempt_failed', ago(250), 'check_refused', { step: null, message: 'Reopened by hand with ECOM30-RE0PEN. Approve attaches that code, or reject it.' })
+  ev('r-else', 'attempt_failed', ago(200), 'landed_elsewhere', { step: 'other_product', code: 'ECOM30-ELS3WH', product: 'Agency Starter Kit' })
+  ev('r-wf', 'rejected', ago(500))
+  ev('r-wf', 'attempt_failed', ago(499), 'write_failed', { step: 'attach_after_reject', code: 'ECOM30-WR1TEF', confirmed: true })
+  ev('r-wfold', 'attempt_failed', ago(60 * 24 * 31), 'write_failed', { step: 'decided_meanwhile', code: 'ECOM30-0LDW7F' })
+  ev('r-wfthen', 'attempt_failed', ago(500), 'write_failed', { step: 'approved_write_error', code: 'ECOM30-TH3NAP' })
+  ev('r-wfthen', 'applied', ago(490))
+  // An attempt_failed with a reason outside v116's list (none can be written; a hand insert could): no failure words.
+  ev('r-p31', 'attempt_failed', ago(1), 'not_a_reason', { step: 'made_up' })
+
+  const db = world(f, NOW)
+  const loaded = await loadThirtyData(fakeClient(db), NOW_MS)
+  const view = loaded.ok ? buildThirtyView(loaded.data, new Date(NOW), RESET) : null
+  const ids = view ? view.requests.map((r) => r.id) : null
+  // r-else and r-reopen were made at the same moment: the id breaks the tie, as buildThirtyView sorts.
+  ok(show(ids) === show(['r-appr', 'r-claim', 'r-pold', 'r-wf', 'r-else', 'r-reopen', 'r-fail', 'r-p31']),
+     'listed, oldest first: pending and approved 30 minutes after applying, from 1 October, whatever else (a claim, a hand reopen, a code elsewhere), and the rejected request whose newest event is a write_failed; not one waiting 29 minutes, one from September, an applied one, a write_failed 31 days old, or one followed by its applied event',
+     show(ids))
+  const row = (id) => view.requests.find((r) => r.id === id)
+  const fail = row('r-fail')
+  ok(show(fail.lastFailure) === show({ reason: 'membership_not_active', step: 'membership', at: ago(30), message: null, membershipStatus: 'past_due', code: null, product: null, confirmed: null })
+       && fail.why === 'Their membership is past_due on Whop, so the code can\'t go on yet. The app tries again.' && Math.abs(fail.ageHours - 2) < 1e-9,
+     'its newest failure of three (by time, whatever order they were written in), from its detail; its Why line; its age in hours', show(fail))
+  ok(row('r-p31').lastFailure === null && row('r-p31').why === 'The app hasn\'t tried yet.' && row('r-pold').why === 'The app only tries requests from the last 2 days. Approve or reject it.',
+     'never tried: "The app hasn\'t tried yet." under 48 hours, the 2-day line from 48 hours; a reason outside v116\'s list counts as none', show([row('r-p31').why, row('r-pold').why]))
+  ok(row('r-claim').promoCode === 'ECOM30-CLA1MD' && row('r-claim').whopPromoId === null && row('r-claim').why === 'Whop didn\'t answer. The app tries again.',
+     'a claim 60 hours old: the job keeps settling claims whatever their age, so "The app tries again." (claimed, from the row itself)', row('r-claim').why)
+  ok(row('r-reopen').why === 'Reopened by hand with ECOM30-RE0PEN. Approve attaches that code, or reject it.' && row('r-reopen').whopPromoId === 'promo_devreopen',
+     'a hand reopen: the check\'s own sentence, nothing added')
+  ok(row('r-else').why === 'Whop shows ECOM30-ELS3WH on their Agency Starter Kit membership, not the course. Fix it in Whop, then tell the owner so the app records it.',
+     'a code on another product\'s membership: the product named, the fix the team\'s', row('r-else').why)
+  ok(row('r-appr').why === 'The app hasn\'t tried yet.' && row('r-appr').status === 'approved' && row('r-appr').ageHours > 48,
+     'an approved request 9 days old, never tried: the job still works it, so no 2-day line')
+  const wf = row('r-wf')
+  ok(wf.status === 'rejected' && wf.verdict === null && wf.facts === null && show(wf.reviewedBy) === show({ id: 'tm-1', name: 'Robin Test' })
+       && wf.why === 'Whop attached ECOM30-WR1TEF after the request was rejected. It can only come off in Whop.' && wf.lastFailure.confirmed === true,
+     'the rejected row with a write_failed: its words, and nothing about what happens next (a decided row has no next step); no verdict', show(wf))
+  ok(view.requests.every((r) => r.why === whyLine(r, false)), 'every Why line is whyLine, thirtyWords over the row and its newest failure')
+
+  const paused = buildThirtyView(loaded.data, new Date(NOW), RESET, undefined, true)
+  const by = (id) => paused.requests.find((r) => r.id === id).why
+  ok(paused.paused === true && by('r-p31') === 'The app is paused. Approve or reject it.' && by('r-appr') === 'The app is paused. Press Try again or reject it.'
+       && by('r-fail') === 'Their membership is past_due on Whop, so the code can\'t go on yet. The app is paused. Approve or reject it.'
+       && by('r-reopen') === row('r-reopen').why && by('r-wf') === wf.why,
+     'paused (THIRTY_AUTO_APPLY off): every pending and approved Why line names the team; a hold and a decided row keep their words', show(paused.requests.map((r) => r.why)))
+
+  const counted = await readNeedsHand(fakeClient(world(f, NOW)), NOW_MS)
+  ok(counted.ok && show(counted.requests.map((r) => r.id).sort()) === show([...ids].sort()), 'readNeedsHand (the Dashboard\'s count) lists the same requests', show(counted.ok && counted.requests.map((r) => r.id)))
+  const events = db.calls('discount_request_events', 'select')
+  ok(events.some((q) => q.filters.includes('event=attempt_failed') && q.filters.includes('reason=write_failed') && q.filters.some((x) => x.startsWith('created_at>=')))
+       && events.some((q) => q.filters.includes('event=attempt_failed') && q.columns === 'request_id, reason, detail, created_at, id'),
+     'the events are read for the write_failed of the last 30 days and for each listed request\'s attempt_failed', show(events.map((q) => [q.columns, q.filters])))
+  const noEvents = world(f, NOW)
+  noEvents.failWhen = (q) => (q.table === 'discount_request_events' && q.columns === 'request_id, reason, detail, created_at, id' ? { message: 'timeout' } : null)
+  const half = await loadThirtyData(fakeClient(noEvents), NOW_MS)
+  ok(!half.ok && half.failed.some((x) => x.startsWith('discount_request_events (attempt_failed)') && x.includes('timeout')),
+     'the failures unread: the load fails and names it (a Why line saying "The app hasn\'t tried yet." of a request it tried would be a wrong one)', show(half.failed))
 }
 
 // ── The controls ───────────────────────────────────────────────────────────
@@ -720,8 +812,8 @@ console.log('\n=== The 30% page: no ads tick since 2026-10-20 (Lovro), C4\'s wor
   const flipped = world(main, WED)
   for (const s of flipped.rows('students')) s.ad_submissions_verified = s.ad_submissions_verified !== true
   const ticks = (db) => db.rows('students').map((s) => s.ad_submissions_verified === true)
-  const a = await loadThirtyData(fakeClient(kept))
-  const b = await loadThirtyData(fakeClient(flipped))
+  const a = await loadThirtyData(fakeClient(kept), Date.parse(WED))
+  const b = await loadThirtyData(fakeClient(flipped), Date.parse(WED))
   const va = buildThirtyView(a.data, new Date(WED), RESET)
   const vb = buildThirtyView(b.data, new Date(WED), RESET)
   const pending = va.requests.filter((r) => r.status === 'pending')
@@ -810,6 +902,67 @@ console.log('\n=== The coupon decides first: a discount already on the next rene
   ok(couponOf(undefined, { whop_membership_id: 'mem_x' }) === null && couponOf(stored('s'), { whop_membership_id: 'mem_devOther' }) === null
        && couponOf(stored('s'), { whop_membership_id: null })?.discounted === true && couponOf(stored('s'), { whop_membership_id: 'pay_devX' })?.code === 'evolve10',
      'couponOf: no row, or a row from another membership: no coupon; with no membership id on file (none, or a payment\'s), the student\'s row counts (T-122: the cron wrote it through the Whop user or a payment)')
+}
+
+// ── The page's calls (admin-transport.ts, T-137) ───────────────────────────
+console.log('\n=== The page\'s calls: Approve\'s and Reject\'s answers, as the page gets them ===')
+{
+  const { adminTransport } = await import('./_gen/admin-transport.ts')
+  const { setBrowser } = await import('./_gen/a2-browser-stub.ts')
+  setBrowser({ db: new FakeDb({}), token: 'tok-team' })
+  const realFetch = globalThis.fetch
+  const sent = []
+  let answer = null
+  globalThis.fetch = async (url, init = {}) => {
+    sent.push({ url: String(url), method: init.method, auth: init.headers?.Authorization ?? null, body: init.body ? JSON.parse(init.body) : null })
+    return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { 'content-type': 'application/json' } })
+  }
+  const blank = { promoCode: null, status: null, reason: null, step: null, membershipStatus: null, message: null }
+  try {
+    // The approve route's 200 bodies (PRD §9.4; admin-discounts.test.mjs runs the route itself).
+    answer = { status: 200, body: { success: true, status: 'applied', promoCode: 'ECOM30-K7Q2MX', whopPromoId: 'promo_devk7q2mx', reason: null, step: null, membershipStatus: null, message: null } }
+    const applied = await adminTransport.approve('r-1', false, false)
+    ok(applied.ok && show(applied.data) === show({ ...blank, promoCode: 'ECOM30-K7Q2MX', status: 'applied' })
+         && sent[0].url === '/api/discounts/approve' && sent[0].method === 'POST' && sent[0].auth === 'Bearer tok-team'
+         && show(sent[0].body) === show({ requestId: 'r-1', override: false, overrideCoupon: false, reviewerId: 'browser-user' }),
+       'Approve applied: the code and "applied", from POST /api/discounts/approve with the session\'s token', show([applied, sent[0]]))
+    answer = { status: 200, body: { success: true, status: 'approved', promoCode: 'ECOM30-K7Q2MX', whopPromoId: 'promo_devk7q2mx', reason: 'membership_has_code', step: 'attach', membershipStatus: 'active', message: null } }
+    const made = await adminTransport.approve('r-1', true, true)
+    ok(made.ok && show(made.data) === show({ ...blank, promoCode: 'ECOM30-K7Q2MX', status: 'approved', reason: 'membership_has_code', step: 'attach', membershipStatus: 'active' })
+         && sent[1].body.override === true && sent[1].body.overrideCoupon === true,
+       'made but not on the membership: why, the step and the membership\'s status; Approve anyway sends both overrides', show(made))
+    answer = { status: 200, body: { success: false, status: 'pending', promoCode: 'ECOM30-K7Q2MX', whopPromoId: null, reason: 'whop_no_answer', step: 'create', membershipStatus: null, message: 'timeout' } }
+    const silent = await adminTransport.approve('r-1', false, false)
+    ok(silent.ok && show(silent.data) === show({ ...blank, promoCode: 'ECOM30-K7Q2MX', status: 'pending', reason: 'whop_no_answer', step: 'create', message: 'timeout' }),
+       'a 200 with success false (Whop silent while making the code) is still an answer the page reads, not a refusal', show(silent))
+    answer = { status: 200, body: { success: true, status: 'sideways', promoCode: '', reason: 'not_a_reason', step: 5 } }
+    const odd = await adminTransport.approve('r-1', false, false)
+    ok(odd.ok && show(odd.data) === show(blank), 'a status or a reason the page does not know, and fields of the wrong kind, are none', show(odd))
+    answer = { status: 502, body: { error: 'Couldn\'t create the promo code on Whop. The request is still pending. Details: Plan not found.' } }
+    const refused = await adminTransport.approve('r-1', false, false)
+    ok(!refused.ok && refused.status === 502 && refused.error === answer.body.error, 'a refusal: its status and the route\'s own sentence', show(refused))
+    // The reject route's 200 bodies (PRD §9.4).
+    answer = { status: 200, body: { success: true, code: 'ECOM30-K7Q2MX', codeState: 'usable' } }
+    const usable = await adminTransport.reject('r-1', 'Two accounts on one card.')
+    ok(usable.ok && show(usable.data) === show({ code: 'ECOM30-K7Q2MX', codeState: 'usable' }) && sent.at(-1).url === '/api/discounts/reject'
+         && show(sent.at(-1).body) === show({ requestId: 'r-1', reason: 'Two accounts on one card.' }),
+       'Reject: the code left usable at checkout, from POST /api/discounts/reject', show(usable))
+    answer = { status: 200, body: { success: true, code: 'ECOM30-K7Q2MX', codeState: 'may_exist' } }
+    const may = await adminTransport.reject('r-1', null)
+    answer = { status: 200, body: { success: true, code: null, codeState: null } }
+    const none = await adminTransport.reject('r-1', null)
+    answer = { status: 200, body: { success: true, code: '', codeState: 'gone' } }
+    const odder = await adminTransport.reject('r-1', null)
+    ok(may.ok && may.data.codeState === 'may_exist' && none.ok && show(none.data) === show({ code: null, codeState: null }) && odder.ok && show(odder.data) === show({ code: null, codeState: null }),
+       'a code that may exist; no code made; a state the page does not know is none', show([may, none, odder]))
+    answer = { status: 503, body: { error: 'Couldn\'t ask Whop. Try again.' } }
+    const asked = await adminTransport.reject('r-1', null)
+    ok(!asked.ok && asked.status === 503 && asked.error === 'Couldn\'t ask Whop. Try again.', 'Reject\'s 503: the route\'s own sentence, for the row', show(asked))
+  } finally {
+    globalThis.fetch = realFetch
+  }
+  ok(!('markApplied' in adminTransport) && !fs.readFileSync(here('../src/lib/admin/admin-transport.ts'), 'utf8').includes('mark-applied'),
+     'Mark code applied\'s call is gone with its route: Try again is an Approve')
 }
 
 // ── Words ──────────────────────────────────────────────────────────────────

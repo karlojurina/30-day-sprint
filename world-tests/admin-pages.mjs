@@ -19,8 +19,9 @@
  *           sentence a route answered there is held to the words below
  *   frame   /dev/admin/frame for a founder, a csm and an admin, over a light
  *           page and the Dashboard in the dark look: the bar reads Dashboard
- *           · 30% off · Tasks · Students · Feedback · Templates · Insights ·
- *           Team for each role's flags, with no "More", Dashboard marked on
+ *           · Tasks · Students · Feedback · Templates · Insights · Team for
+ *           each role's flags ("30% off" left it with the 30% that applies
+ *           itself, T-137, R4), with no "More", Dashboard marked on
  *           /admin, no plan or subscription in it, and the lockup to /admin;
  *           under 1100px the Menu with every entry; above it each dropdown,
  *           and Escape closing them; at 1100px wide a founder's bar fits
@@ -31,12 +32,18 @@
  *           Supabase settings, its form with a made-up invite and its own
  *           check of the two passwords, and a sign-in with Supabase's yes
  *           given here that opens /admin (NOT COVERED otherwise, with why)
- *   thirty  /dev/admin/discounts (admin rebuild 2, D4 and D5): the tabs
- *           Applied, Approved, Rejected and Code Applied, each full and
- *           empty, with their counts, every tab oldest first and the old tab
- *           names still opening theirs; partial, novideos, nocoupons, loading
- *           and error; a row is the name (to the student page), @username,
- *           Active or not, the date applied, the verdict line with its count
+ *   thirty  /dev/admin/discounts (admin rebuild 2, D4 and D5; since the 30%
+ *           that applies itself, T-137, R4, one list of the requests the app
+ *           could not finish, the tabs gone): full, empty, paused (the line
+ *           under the header, every Why line naming the team), reasons
+ *           (every reason and step's Why line, and each answer of the
+ *           PRD's approve and reject tables pressed: its notice or its line
+ *           on the row), partial, novideos, nocoupons, loading and error; the
+ *           list oldest first, what is on no list (applied, rejected with no
+ *           write_failed, made 20 minutes ago, from September), old ?tab=
+ *           links opening the list, ?student= with nothing of theirs; a row
+ *           is the name (to the student page), @username, Active or not, the
+ *           dates, the verdict line with its count
  *           and what the 80% needs (the owner's 80% rule of 2026-10-26, 49
  *           of 61: Jonah at 49 says yes, Priya at 48 not yet), Copy Discord
  *           ID then Copy username (each greyed with its tip when the student
@@ -46,24 +53,30 @@
  *           the same day), the coupon and the actions, with no plan, Open in
  *           Discord, survey, Can still earn, last contact or Mark messaged;
  *           Copy code, Copy Discord ID and Copy username on every row with a
- *           code, none on a rejected one; ?state=unpaid, Whop showing no
+ *           code, and the Why line; an approved row with Try again and, for
+ *           a founder or an admin, Reject confirmed first; a rejected row
+ *           with a write_failed, its words and its code, nothing to press;
+ *           ?state=unpaid, Whop showing no
  *           paid course plan and payment that went through (the owner's rule
  *           of 2026-10-26; ?state=nopayment, no real payment, until then:
  *           the verdict in the page's own words, no Approve, a plain Approve
  *           refused and the row turning, Check Whop again, Approve anyway, a
  *           csm's row); then its
- *           paths by clicks: Approve on the rule's yes, Approve refused for a
+ *           paths by clicks: Approve on the rule's yes (the 30% on, the row
+ *           gone), Approve refused for a
  *           coupon Whop names only then (its row turns to the coupon, no
  *           Approve anyway after it), the Approve anyway link and its confirm,
- *           Reject, a 409 on approve and on reject, a failed reload, Mark
- *           code applied, the coupon warning on Approved, ?student=; every
+ *           Reject, a 409 on approve and on reject, a failed reload, Try
+ *           again, the coupon warning on an approved row, ?student=; every
  *           tap 44px, the link too. Since the render review's second round:
  *           a coupon row's Reject starting with the map's sentence, changed
  *           by the team before sending, and Check Whop again with each of
  *           its answers (the code still there; gone, and Approve back,
  *           ?state=stalecoupon; Whop down, ?whop=down)
  *   dash    /dev/admin/dashboard (admin rebuild 2, WI-2): full, renewed,
- *           empty, partial, error and loading; Month 2 waiting with no
+ *           empty, partial, error and loading; "30% needs a hand" and "30%
+ *           off applied" (T-137, R5) with their counts, at 0 and failed, the
+ *           new card last in the program's row from 1024px; Month 2 waiting with no
  *           rate before the first renewals, then its rate; Avg progress's
  *           line from the switch only, its 2 readings 2 dots and a short
  *           line (the render review's second round); every failed tile
@@ -102,8 +115,8 @@
  *   review  admin rebuild 2's review fix round (WI-11), across the pages:
  *           every header keeps its 44px title line, its place and its
  *           action from loading to loaded and on a failed read; the 30%
- *           page's tabs on one line at 390px, scrolling sideways rather
- *           than wrapping at 375 and 360. The round's other checks sit in
+ *           page's one list at 390, 375 and 360px (its tabs, which had to
+ *           stay on one line there, went with T-137). The round's other checks sit in
  *           the parts of the pages they changed (each says "the review's
  *           fix round")
  *   render  admin rebuild 2's render review fix round, across the pages: a
@@ -388,12 +401,13 @@ const smallTaps = () => page.evaluate(() => [...document.querySelectorAll('main 
 // ════════════════════════════════════════════════════════════════════════════
 if (wanted('frame')) {
   const from = consoleErrors.length
-  // Admin rebuild 2, D1: Dashboard · 30% off · Tasks · Students ▾ · Feedback ▾ · Templates · Insights · Team, no "More".
-  // Feedback's two pages are hidden from the csm role, and Team is a founder's only, as before.
+  // Admin rebuild 2, D1: Dashboard · Tasks · Students ▾ · Feedback ▾ · Templates · Insights · Team, no "More"; "30% off"
+  // left the bar with the 30% that applies itself (T-137, R4: the Dashboard's "30% needs a hand" and a student's page
+  // link to the page). Feedback's two pages are hidden from the csm role, and Team is a founder's only, as before.
   const BAR = {
-    founder: ['Dashboard', '30% off', 'Tasks', 'Students', 'Feedback', 'Templates', 'Insights', 'Team'],
-    csm: ['Dashboard', '30% off', 'Tasks', 'Students', 'Templates', 'Insights'],
-    admin: ['Dashboard', '30% off', 'Tasks', 'Students', 'Feedback', 'Templates', 'Insights'],
+    founder: ['Dashboard', 'Tasks', 'Students', 'Feedback', 'Templates', 'Insights', 'Team'],
+    csm: ['Dashboard', 'Tasks', 'Students', 'Templates', 'Insights'],
+    admin: ['Dashboard', 'Tasks', 'Students', 'Feedback', 'Templates', 'Insights'],
   }
   const GROUPS = { Students: ['All students', 'Student journey'], Feedback: ['Lesson feedback', 'Survey'] }
   /** Every entry a role may open, as the phone's Menu lists them: each group's pages in its place. */
@@ -479,7 +493,7 @@ if (wanted('frame')) {
       }
     }
   }
-  // 1100px is where the entries move into the bar. A founder's 8 fit there
+  // 1100px is where the entries move into the bar. A founder's 7 fit there
   // beside the profile with the lockup at full size (216px); with a name
   // longer than the profile's 180px the lockup shrinks first, and nothing
   // overlaps or overflows.
@@ -663,17 +677,15 @@ if (wanted('signin')) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// thirty: /dev/admin/discounts (admin rebuild 2, D4 and D5)
+// thirty: /dev/admin/discounts (admin rebuild 2, D4 and D5; the 30% that applies itself, T-137, R4)
 // ════════════════════════════════════════════════════════════════════════════
 if (wanted('thirty')) {
   const from = consoleErrors.length
-  const TABS = ['applied', 'approved', 'rejected', 'code-applied']
-  const EMPTY = {
-    applied: 'No request is waiting for a decision.',
-    approved: 'No code is waiting to be applied in Whop.',
-    rejected: 'No request has been rejected.',
-    'code-applied': 'No code has been applied in Whop yet.',
-  }
+  // The page's words (ThirtyView.tsx, PRD §9.6).
+  const HEADER = "The 30% goes on automatically. These are the requests the app couldn't finish, oldest first."
+  const PAUSED = 'The automatic 30% is paused (THIRTY_AUTO_APPLY is off). Requests wait here for the team.'
+  const EMPTY = 'Nothing needs a hand.'
+  const EMPTY_STUDENT = 'Nothing of theirs needs a hand.'
   const COUPON_LINE = 'This student already has a discount on their membership (evolve10).'
   // The verdict sentences (thirty-view.ts VERDICT_TEXT) since the 80% rule of 2026-10-26.
   const YES = 'At least 80% of the videos up to the checkpoint were watched in time.'
@@ -693,91 +705,146 @@ if (wanted('thirty')) {
   const NO_PAYMENT = 'The 30% needs a paid course plan and a payment that went through, and Whop doesn\'t show both for this student.'
   /** The map's sentence for a discount already on the account: since the render review's second round, the reason a coupon row's Reject starts with. */
   const MAP_LINE = "You can't apply for this discount because you already have a discount applied to your account."
+  // Each row's Why line in ?state=full (thirtyWords over its newest failure), oldest first: the order of the list.
+  const TWO_DAYS = 'The app only tries requests from the last 2 days. Approve or reject it.'
+  const AGAIN = 'The app tries again.'
+  const WHY = {
+    'Leo Hartmann': TWO_DAYS,
+    'Sofia Marin': `Whop's coupon check didn't answer. ${TWO_DAYS}`,
+    'Ethan Cole': `Their membership already has another code on Whop. ${AGAIN}`,
+    'Tara Quinn': COUPON_LINE,
+    'Hugo Lindahl': `Whop's coupon check didn't answer. ${AGAIN}`,
+    'Iris Novak': 'Whop attached ECOM30-Q8M3TZ after the request was rejected. It can only come off in Whop.',
+    'Maya Lindqvist': "The app hasn't tried yet.",
+    'Nora Brandt': `Whop didn't answer. ${AGAIN}`,
+    'Jonah Pereira': `Whop shows no paid course membership to put the code on. ${AGAIN}`,
+    'Maximilian Featherstonehaugh-Smythe': `Their membership is past_due on Whop, so the code can't go on yet. ${AGAIN}`,
+    'Priya Raman': 'Student has not watched 80% of the videos up to the discount checkpoint inside the 14 days: 48 of 61 watched, 49 needed.',
+  }
+  const LISTED = Object.keys(WHY)
+  // THIRTY_AUTO_APPLY off (?state=paused): the next step is the team's, on every pending and approved row; a hold and a
+  // decided row keep their words.
+  const P_PENDING = 'The app is paused. Approve or reject it.'
+  const P_APPROVED = 'The app is paused. Press Try again or reject it.'
+  const WHY_PAUSED = {
+    ...WHY,
+    'Leo Hartmann': P_PENDING,
+    'Sofia Marin': `Whop's coupon check didn't answer. ${P_PENDING}`,
+    'Ethan Cole': `Their membership already has another code on Whop. ${P_APPROVED}`,
+    'Hugo Lindahl': `Whop's coupon check didn't answer. ${P_PENDING}`,
+    'Maya Lindqvist': P_PENDING,
+    'Nora Brandt': `Whop didn't answer. ${P_APPROVED}`,
+    'Jonah Pereira': `Whop shows no paid course membership to put the code on. ${P_PENDING}`,
+    'Maximilian Featherstonehaugh-Smythe': `Their membership is past_due on Whop, so the code can't go on yet. ${P_PENDING}`,
+  }
+  /** Requests on no list: applied, rejected with no write_failed, made 20 minutes ago, from September, applied after a write_failed. */
+  const UNLISTED = ['Omar Haddad', 'Lena Vogel', 'Ruby Okafor', 'Felix Moreau', 'Zoe Hartley', 'Vera Holm', 'Kai Lindgren']
   const open = (query, size) => go(`/dev/admin/discounts${query}`, size)
-  const waitReady = () => page.waitForSelector('[role="tablist"]', { timeout: 30000 })
+  const waitReady = () => page.waitForFunction(() => /Updated \d\d:\d\d/.test(document.body.innerText), { timeout: 30000 })
   const row = (name) => page.evaluateHandle((n) => [...document.querySelectorAll('.list-row')].find((r) => r.querySelector('a')?.textContent === n) ?? null, name)
-  const tabCounts = () => page.$$eval('[role="tab"]', (ts) => ts.map((t) => `${t.childNodes[0].textContent.trim()} ${t.querySelector('span')?.textContent.trim() ?? ''}`.trim()))
   const names = () => page.$$eval('.list-row', (rs) => rs.map((r) => r.querySelector('a')?.textContent))
   const rowText = (h) => h.evaluate((r) => r.innerText)
   const linkIn = (h) => buttonIn(h, 'Approve anyway')
+  /** Every row's Why line, by name. */
+  const whys = () => page.$$eval('.list-row', (rs) => Object.fromEntries(rs.map((r) => [r.querySelector('a')?.textContent, r.querySelector('[data-why]')?.textContent ?? null])))
+  /** A row's buttons that decide something (the copy buttons are every role's, left out). */
+  const actionsOf = (h) => h.evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)))
+  /** The notices at the bottom of the window: their words, whether they stay (an alert) and whether they offer Copy code. */
+  const notices = () => page.evaluate(() => [...document.querySelectorAll('[role="status"], [role="alert"]')]
+    .filter((n) => [...n.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Dismiss'))
+    .map((n) => ({ text: n.querySelector('p')?.textContent ?? '', role: n.getAttribute('role'), copy: [...n.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Copy code') })))
+  const shown = (text) => page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, text)
+  const rowAlert = (h) => h.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
 
   for (const size of SIZES) {
     const [w, h] = size
-    for (const tab of TABS) {
-      const label = `30% off, full, ${tab}, ${w}x${h}`
+    {
+      const label = `30% off, full, ${w}x${h}`
       console.log(`\n${label}`)
-      await open(`?tab=${tab}`, size)
+      await open('', size)
       await waitReady()
-      await check(label, `thirty-full-${tab}-${w}`)
-    }
-    for (const tab of TABS) {
-      const label = `30% off, empty, ${tab}, ${w}x${h}`
-      console.log(`\n${label}`)
-      await open(`?state=empty&tab=${tab}`, size)
-      await waitReady()
-      expect((await bodyText()).includes(EMPTY[tab]), `${label}: "${EMPTY[tab]}"`)
-      await check(label, `thirty-empty-${tab}-${w}`)
+      const text = await bodyText()
+      expect(text.includes(HEADER) && (await page.$('[role="tablist"]')) === null && (await page.$('[data-paused]')) === null,
+        `${label}: the header's line, one list with no tabs, not paused`)
+      const order = await names()
+      expect(JSON.stringify(order) === JSON.stringify(LISTED),
+        `${label}: the requests that need a hand, oldest first: pending ones 30 minutes after applying, approved ones, and Iris's rejected one with a write_failed`, order.join(', '))
+      expect(UNLISTED.every((n) => !order.includes(n)),
+        `${label}: on no list: applied (Omar, Lena), rejected with no write_failed (Ruby, Felix), made 20 minutes ago (Zoe), from September (Vera), and Kai's write_failed followed by its applied event`)
+      const small = await smallTaps()
+      expect(small.length === 0, `${label}: every button and link styled as one is 44px tall or more, the small links too`, JSON.stringify(small.slice(0, 4)))
+      await check(label, `thirty-full-${w}`)
     }
     {
-      const label = `30% off, one student unreadable, Applied, ${w}x${h}`
+      const label = `30% off, empty, ${w}x${h}`
       console.log(`\n${label}`)
-      await open('?state=partial&tab=applied', size)
+      await open('?state=empty', size)
+      await waitReady()
+      expect((await bodyText()).includes(EMPTY) && (await page.$$('.list-row')).length === 0, `${label}: "${EMPTY}"`)
+      await check(label, `thirty-empty-${w}`)
+    }
+    {
+      const label = `30% off, paused, ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?state=paused', size)
+      await waitReady()
+      const line = await page.$eval('[data-paused]', (e) => ({ text: e.textContent.trim(), role: e.getAttribute('role'), top: Math.round(e.getBoundingClientRect().top) })).catch(() => null)
+      const head = await page.$eval('main header', (e) => Math.round(e.getBoundingClientRect().bottom))
+      expect(line && line.text === PAUSED && line.role === 'status' && line.top >= head - 1, `${label}: under the header, "${PAUSED}"`, JSON.stringify(line))
+      const got = await whys()
+      const wrong = Object.entries(WHY_PAUSED).filter(([n, t]) => got[n] !== t)
+      expect(wrong.length === 0, `${label}: every pending and approved row's Why line names the team; Tara's hold, Priya's refusal and Iris's decided row keep their words`, JSON.stringify(wrong.map(([n]) => [n, got[n]])))
+      await check(label, `thirty-paused-${w}`)
+    }
+    {
+      const label = `30% off, one student unreadable, ${w}x${h}`
+      console.log(`\n${label}`)
+      await open('?state=partial', size)
       await waitReady()
       const nina = await row('Nina Petrova')
       expect(await nina.evaluate((r) => r.textContent.includes("Couldn't read this student's progress, so there is no verdict.") && !/\d+ of 61 videos/.test(r.textContent)),
         `${label}: the row says there is no verdict, in words, and shows no count`)
       expect((await isNull(await buttonIn(nina, 'Approve'))) && !(await isNull(await linkIn(nina))), `${label}: the Approve anyway link in Approve's place (no Approve that does nothing)`)
-      await check(label, `thirty-partial-applied-${w}`)
+      await check(label, `thirty-partial-${w}`)
     }
     {
-      const label = `30% off, the videos unreadable, Applied, ${w}x${h}`
+      const label = `30% off, the videos unreadable, ${w}x${h}`
       console.log(`\n${label}`)
-      await open('?state=novideos&tab=applied', size)
+      await open('?state=novideos', size)
       await waitReady()
       expect((await bodyText()).includes("Couldn't read the course's videos, so no request has a verdict. Press Refresh to try again."), `${label}: the warning above the list`)
-      const verdicts = await page.$$eval('.list-row', (rs) => rs.map((r) => ({ name: r.querySelector('a')?.textContent, none: r.textContent.includes("Couldn't read this student's progress, so there is no verdict. Press Refresh to try again."), coupon: r.textContent.includes('already has a discount on their membership') })))
+      const verdicts = await page.$$eval('.list-row[data-row-status="pending"]', (rs) => rs.map((r) => ({ name: r.querySelector('a')?.textContent, none: r.textContent.includes("Couldn't read this student's progress, so there is no verdict. Press Refresh to try again."), coupon: r.textContent.includes('already has a discount on their membership') })))
       expect(verdicts.length === 8 && verdicts.every((v) => (v.name === 'Tara Quinn' ? v.coupon && !v.none : v.none && !v.coupon)),
         `${label}: every pending row says there is no verdict, but Tara's, whose coupon decides without the videos`, JSON.stringify(verdicts))
-      await check(label, `thirty-novideos-applied-${w}`)
+      await check(label, `thirty-novideos-${w}`)
     }
     {
-      const label = `30% off, the coupons unreadable, Applied, ${w}x${h}`
+      const label = `30% off, the coupons unreadable, ${w}x${h}`
       console.log(`\n${label}`)
-      await open('?state=nocoupons&tab=applied', size)
+      await open('?state=nocoupons', size)
       await waitReady()
       // The owner's review (2026-10-21): no sentence above the list; the rows simply show no coupon.
       expect(!(await bodyText()).includes("Couldn't read the membership coupons") && !(await bodyText()).includes('Approve still asks Whop'),
         `${label}: no sentence above the list about the coupons (the owner's review)`)
       const tara = await row('Tara Quinn')
-      expect(!(await rowText(tara)).includes('already has a discount') && !(await rowText(tara)).includes('Coupon not checked') && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled)),
+      // Her Why line still holds the job's coupon refusal (her newest attempt_failed); the verdict is the rule's.
+      expect((await tara.evaluate((r) => r.querySelector('[data-verdict]')?.dataset.verdict)) === 'yes' && !(await rowText(tara)).includes('Coupon not checked') && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled)),
         `${label}: Tara's row shows the rule's yes and no coupon, Approve on (the approve route asks Whop itself)`)
-      await check(label, `thirty-nocoupons-applied-${w}`)
+      await check(label, `thirty-nocoupons-${w}`)
     }
     {
-      const label = `30% off, the tabs and taps, ${w}x${h}`
+      const label = `30% off, every other reason, ${w}x${h}`
       console.log(`\n${label}`)
-      await open('', size)
+      await open('?state=reasons', size)
       await waitReady()
-      const tabs = await page.$$eval('[role="tab"]', (ts) => ts.map((t) => { const r = t.getBoundingClientRect(); return { label: t.childNodes[0].textContent.trim(), left: r.left, right: r.right, h: r.height, width: innerWidth, on: t.getAttribute('aria-selected') } }))
-      expect(tabs.map((t) => t.label).join() === 'Applied,Approved,Rejected,Code Applied' && tabs[0].on === 'true',
-        `${label}: the tabs are Applied, Approved, Rejected, Code Applied, Applied open first`, tabs.map((t) => t.label).join())
-      const rows = new Set(await page.$$eval('[role="tab"]', (ts) => ts.map((t) => Math.round(t.getBoundingClientRect().top))))
-      expect(tabs.length === 4 && tabs.every((t) => t.left >= 0 && t.right <= t.width && t.h >= 44) && rows.size === 1,
-        `${label}: all four tabs whole in the window, 44px tall, on one line (the review's fix round: on a phone they narrowed instead of wrapping)`, JSON.stringify({ rights: tabs.map((t) => Math.round(t.right)), rows: [...rows] }))
-      expect(JSON.stringify(await tabCounts()) === JSON.stringify(['Applied 8', 'Approved 2', 'Rejected 3', 'Code Applied 2']),
-        `${label}: each with its count; the September request is on none`, (await tabCounts()).join(' | '))
-      const small = await smallTaps()
-      expect(small.length === 0, `${label}: every button, tab and link styled as one is 44px tall or more, the Approve anyway link too`, JSON.stringify(small.slice(0, 4)))
-      const order = await names()
-      expect(JSON.stringify(order) === JSON.stringify(['Leo Hartmann', 'Sofia Marin', 'Tara Quinn', 'Hugo Lindahl', 'Maya Lindqvist', 'Jonah Pereira', 'Maximilian Featherstonehaugh-Smythe', 'Priya Raman']),
-        `${label}: Applied, the oldest first`, order.join(', '))
+      await check(label, `thirty-reasons-${w}`)
     }
     {
       const label = `30% off, loading, ${w}x${h}`
       console.log(`\n${label}`)
       await open('?state=loading', size)
       await page.waitForSelector('.animate-pulse')
-      expect((await page.$('.animate-spin')) === null, `${label}: skeleton rows, no spinner`)
+      expect((await page.$('.animate-spin')) === null && (await page.$('[role="tablist"]')) === null, `${label}: skeleton rows, no spinner, no tabs`)
       await check(label, `thirty-loading-${w}`)
     }
     {
@@ -791,35 +858,22 @@ if (wanted('thirty')) {
     }
   }
 
-  console.log('\n30% off: every tab oldest first, and the old tab names still open theirs')
-  {
-    for (const [tab, want] of [
-      ['approved', ['Ethan Cole', 'Nora Brandt']],
-      ['rejected', ['Ruby Okafor', 'Felix Moreau', 'Maximilian Featherstonehaugh-Smythe']],
-      ['code-applied', ['Omar Haddad', 'Lena Vogel']],
-    ]) {
-      await open(`?tab=${tab}`)
-      await waitReady()
-      const got = await names()
-      expect(JSON.stringify(got) === JSON.stringify(want), `${tab}: ${want.join(', ')}, the oldest first`, got.join(', '))
-    }
-    for (const [old, now] of [['decide', 'Applied'], ['code-added', 'Code Applied']]) {
-      await open(`?tab=${old}`)
-      await waitReady()
-      const on = await page.$eval('[role="tab"][aria-selected="true"]', (t) => t.childNodes[0].textContent.trim())
-      expect(on === now, `?tab=${old}, a link from before admin rebuild 2, opens ${now}`, on)
-    }
-  }
-
-  console.log('\n30% off: a row is the student, the date applied, the verdict, the coupon and the actions, and nothing else (D4)')
+  console.log('\n30% off: a row is the student, the dates, the verdict, the Why line, the coupon and the actions, and nothing else (D4, T-137)')
   {
     await open('')
     await waitReady()
     const text = await bodyText()
     expect(!/\b(Monthly|Yearly|Other plan)\b/.test(text) && !/subscription/i.test(text), 'no plan pill and no "subscription" anywhere on the page')
-    // Copy Discord ID and Copy username came back on 2026-10-26 (the owner); Open in Discord and the rest stay gone.
-    expect(!/Open in Discord|No Discord linked|Survey answers|Can still earn|Mark messaged|No message yet|Messaged |Deadline |Paid |Whop progress not pulled yet/.test(text),
-      'no Open in Discord, survey answers, Can still earn, last contact, Mark messaged, deadline or payment facts, and no "not pulled" pill')
+    // Copy Discord ID and Copy username came back on 2026-10-26 (the owner); Open in Discord and the rest stay gone, and Mark code applied went with T-137.
+    expect(!/Open in Discord|No Discord linked|Survey answers|Can still earn|Mark messaged|No message yet|Messaged |Deadline |Paid |Whop progress not pulled yet|Mark code applied/.test(text),
+      'no Open in Discord, survey answers, Can still earn, last contact, Mark messaged, deadline or payment facts, "not pulled" pill or Mark code applied')
+    const got = await whys()
+    const wrong = Object.entries(WHY).filter(([n, t]) => got[n] !== t)
+    expect(wrong.length === 0, 'every row\'s Why line, thirtyWords over its newest failure: never tried, the 2-day line, a hold, a retry, a code Whop attached after a reject', JSON.stringify(wrong.map(([n]) => [n, got[n]])))
+    const dots = await page.$$eval('[data-why]', (ps) => ps.map((p) => ({ why: p.dataset.why, dot: getComputedStyle(p.querySelector('span')).backgroundColor })))
+    expect(dots.length === 11 && new Set(dots.filter((d) => d.why === 'none').map((d) => d.dot)).size === 1 && dots.filter((d) => d.why !== 'none').every((d) => d.dot === dots.find((x) => x.why !== 'none').dot)
+        && dots.find((d) => d.why === 'none').dot !== dots.find((d) => d.why !== 'none').dot,
+      'a Why line\'s dot: the warning colour once an attempt failed, grey while nothing has been tried', JSON.stringify(dots.slice(0, 3)))
     const maya = await row('Maya Lindqvist')
     // The row's words are RowSplit's first column (the render review's fix round): its first line is the student.
     const head = await maya.evaluate((r) => {
@@ -831,8 +885,7 @@ if (wanted('thirty')) {
     expect((await rowText(maya)).includes('Applied Mon 19 Oct') && (await rowText(maya)).includes(YES_EVERY) && (await rowText(maya)).includes(EVERY_LINE),
       'then the date applied and the verdict line with the count and what the window needs: every video, her shared deadline being before 26 October (the owner\'s B)', await rowText(maya))
     const jonah = await rowText(await row('Jonah Pereira'))
-    expect(jonah.includes(YES) && jonah.includes('49 of 61 videos · 49 needed for 80%'),
-      'Jonah, 49 of the 61, the least the 80% takes: the yes', jonah)
+    expect(jonah.includes(YES) && jonah.includes('49 of 61 videos · 49 needed for 80%'), 'Jonah, 49 of the 61, the least the 80% takes: the yes', jonah)
     const priyaHead = await (await row('Priya Raman')).evaluate((r) => [...r.querySelector('[data-row-split]').firstElementChild.firstElementChild.children].map((c) => c.textContent.trim()))
     expect(JSON.stringify(priyaHead) === JSON.stringify(['Priya Raman', 'Payment failed']), 'a member whose payment failed, with no @username: name and "Payment failed"', JSON.stringify(priyaHead))
     const priya = await rowText(await row('Priya Raman'))
@@ -841,10 +894,10 @@ if (wanted('thirty')) {
     expect((await rowText(await row('Sofia Marin'))).includes('Asked on the old course, before the switch.'), 'Sofia: asked on the old course, and the verdict says so')
     expect((await rowText(await row('Leo Hartmann'))).includes('The first payment was before Thu 1 Oct, so this student cannot earn the 30%.') && (await rowText(await row('Leo Hartmann'))).includes('Canceled'),
       'Leo: a first payment before 1 October, a canceled membership')
-    const approvable = await page.$$eval('.list-row', (rs) => rs.map((r) => {
+    const approvable = await page.$$eval('.list-row[data-row-status="pending"]', (rs) => rs.map((r) => {
       const b = [...r.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Approve')
       const link = [...r.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Approve anyway')
-      return { name: r.querySelector('a')?.textContent, yes: r.textContent.includes('At least 80% of the videos up to the checkpoint were watched in time.'), open: !!b && !b.disabled, link: !!link }
+      return { name: r.querySelector('a')?.textContent, open: !!b && !b.disabled, link: !!link }
     }))
     // The render review's fix round: the coupon's row (Tara) has no Approve at all. Since the owner's review
     // (2026-10-21) an admin (the dev page's default role) gets Approve anyway on it too.
@@ -856,15 +909,14 @@ if (wanted('thirty')) {
     const notChecked = await page.$$eval('.list-row', (rs) => rs.filter((r) => r.textContent.includes('Coupon not checked yet. Approve asks Whop first.')).map((r) => r.querySelector('a')?.textContent))
     expect(notChecked.join() === 'Hugo Lindahl',
       '"Coupon not checked yet" only beside the rule\'s yes: Hugo; never Leo, refused for his first payment (the render review\'s fix round)', notChecked.join())
-    const buttons = await (await row('Jonah Pereira')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => ({ t: b.textContent.trim(), bg: getComputedStyle(b).backgroundColor, border: getComputedStyle(b).borderTopColor })))
+    const buttons = await (await row('Jonah Pereira')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => ({ t: b.textContent.trim(), bg: getComputedStyle(b).backgroundColor })))
     const reject = buttons.find((b) => b.t === 'Reject')
     const approve = buttons.find((b) => b.t === 'Approve')
     expect(reject && approve && reject.bg === 'rgba(0, 0, 0, 0)' && approve.bg !== 'rgba(0, 0, 0, 0)',
       'Reject is the ghost button, the row\'s "no" as Dismiss is on Tasks; Approve is raised', JSON.stringify(buttons))
     const tara = await row('Tara Quinn')
     const taraReject = await (await buttonIn(tara, 'Reject')).evaluate((b) => getComputedStyle(b).backgroundColor)
-    expect((await rowText(tara)).includes(COUPON_LINE) && !(await rowText(tara)).includes('Approve asks Whop again') && (await isNull(await buttonIn(tara, 'Approve')))
-        && !(await isNull(await linkIn(tara))) && !(await rowText(tara)).includes('videos') && taraReject !== 'rgba(0, 0, 0, 0)',
+    expect((await rowText(tara)).includes(COUPON_LINE) && (await isNull(await buttonIn(tara, 'Approve'))) && !(await isNull(await linkIn(tara))) && !(await rowText(tara)).includes('videos') && taraReject !== 'rgba(0, 0, 0, 0)',
       'Tara, every video done and evolve10 stored for her membership: the coupon\'s line, no Approve, Approve anyway for an admin (the owner\'s review), Reject raised; no count', await rowText(tara))
     const link = await (await linkIn(await row('Priya Raman'))).evaluate((b) => {
       const cs = getComputedStyle(b)
@@ -873,14 +925,29 @@ if (wanted('thirty')) {
     })
     expect(link.bg === 'rgba(0, 0, 0, 0)' && link.border === 'none' && link.underline === 'underline' && link.size === '13px' && link.h >= 44,
       'Approve anyway is a small link: no fill, no border, underlined 13px words, a 44px target', JSON.stringify(link))
+    // The approved rows (T-137, R4): the dates, the code with its copy buttons, the coupon warning, the Why line; Try again and Reject.
+    const ethan = await row('Ethan Cole')
+    const e = await rowText(ethan)
+    expect(e.includes('ECOM30-3F9A21') && e.includes('Applied Sat 17 Oct · Approved Sun 18 Oct by Robin') && e.includes(`${COUPON_LINE} Check Whop before you add the 30% code.`) && !e.includes('Whop gave no answer now'),
+      'Ethan, approved: the code, the dates and who, and the coupon Whop names now (approved before the coupon rule, nothing stored)', e)
+    expect(JSON.stringify(await actionsOf(ethan)) === JSON.stringify(['Try again', 'Reject']) && (await ethan.evaluate((r) => r.dataset.rowStatus)) === 'approved',
+      'an approved row\'s actions: Try again, and Reject for an admin (Mark code applied went: Try again marks it applied once Whop shows it)', JSON.stringify(await actionsOf(ethan)))
+    const nora = await rowText(await row('Nora Brandt'))
+    expect(nora.includes(`${COUPON_LINE} Check Whop before you add the 30% code. Whop gave no answer now; this is its answer of Mon 19 Oct.`) && nora.includes('Approved Tue 20 Oct by Jamie'),
+      'Nora, evolve10 stored, Whop giving no answer now: the stored row stands in, with its date', nora)
+    const iris = await row('Iris Novak')
+    const i = await rowText(iris)
+    expect(i.includes('Applied Mon 19 Oct · Rejected Tue 20 Oct by Jamie') && i.includes('Reason: Two accounts on one card.') && i.includes('ECOM30-Q8M3TZ')
+        && (await actionsOf(iris)).length === 0 && (await iris.evaluate((r) => r.dataset.rowStatus)) === 'rejected',
+      'Iris, rejected while Whop attached her code: listed for its write_failed, with its words and the code, and nothing to press', i)
     await viewport([1440, 900])
-    await check('30% off, Applied, the verdicts and the coupon, 1440x900', 'thirty-applied-rows-1440')
+    await check('30% off, the rows, 1440x900', 'thirty-rows-1440')
   }
 
   // The owner, 2026-10-26: "We have 'Copy the code,' which is very good, and then 'Copy Discord username' or 'their ID'
   // or whatever. I think ID might be best". The review of the same day: the username can be the Whop one, so its button
   // never says Discord, and Copy Discord ID comes first.
-  console.log('\n30% off: Copy Discord ID and Copy username on every Applied row and beside Copy code, greyed with a tip when there is nothing to copy, a line with neither')
+  console.log('\n30% off: Copy Discord ID and Copy username on every pending row and beside Copy code, greyed with a tip when there is nothing to copy, a line with neither')
   {
     /** The copy buttons on a row: on or greyed, their tip, their height; and the line in their place, if any. */
     const copies = (h) => h.evaluate((r) => [...r.querySelectorAll('button')].filter((b) => /^Copy (Discord ID|username|code)$/.test(b.textContent.trim())).map((b) => ({
@@ -910,7 +977,7 @@ if (wanted('thirty')) {
           || (idOff ? id.tip !== NO_ID : id.tip !== null) || (userOff ? user.tip !== NO_USERNAME : user.tip !== USERNAME_TIP) || id.h < 44 || user.h < 44
       })
       expect(wrong.length === 0,
-        `${size.join('x')}: every Applied row has Copy Discord ID then Copy username, 44px tall; greyed with its tip where there is none on file (Hugo the id, Leo the username), still in the keyboard's path; the username's tip says it can be the Whop one`, JSON.stringify(wrong.map(([n]) => [n, got[n]])))
+        `${size.join('x')}: every pending row has Copy Discord ID then Copy username (no Copy code: a pending code may not exist), 44px tall; greyed with its tip where there is none on file (Hugo the id, Leo the username), still in the keyboard's path; the username's tip says it can be the Whop one`, JSON.stringify(wrong.map(([n]) => [n, got[n]])))
       const notes = {}
       for (const name of Object.keys(want)) notes[name] = await (await row(name)).evaluate((r) => r.querySelector('[data-username-note]')?.textContent ?? null)
       expect(Object.entries(notes).every(([n, t]) => (n === 'Hugo Lindahl' ? t === USERNAME_NOTE : t === null)),
@@ -918,8 +985,13 @@ if (wanted('thirty')) {
       const priya = await row('Priya Raman')
       expect((await copies(priya)).length === 0 && (await noLine(priya)) === NO_LINE && (await rowText(priya)).includes(NO_LINE),
         `${size.join('x')}: Priya, neither on file: no copy button, the line "${NO_LINE}" in their place (a phone shows no tip)`, JSON.stringify({ buttons: await copies(priya), line: await noLine(priya) }))
-      if (size[0] === 1440) await check('30% off, Applied, Copy Discord ID and Copy username, 1440x900', 'thirty-copies-applied-1440')
-      else await check('30% off, Applied, Copy Discord ID and Copy username, 390x844', 'thirty-copies-applied-390')
+      const ethan = await copies(await row('Ethan Cole'))
+      const iris = await copies(await row('Iris Novak'))
+      expect(JSON.stringify(ethan.map((b) => [b.label, b.off])) === JSON.stringify([['Copy code', false], ['Copy Discord ID', false], ['Copy username', false]])
+          && JSON.stringify(iris.map((b) => [b.label, b.off, b.tip])) === JSON.stringify([['Copy code', false, null], ['Copy Discord ID', true, NO_ID], ['Copy username', false, USERNAME_TIP]])
+          && (await (await row('Iris Novak')).evaluate((r) => r.querySelector('[data-username-note]')?.textContent ?? null)) === USERNAME_NOTE,
+        `${size.join('x')}: beside Copy code, an approved row (Ethan) and Iris's rejected one: Copy Discord ID and Copy username, Iris's id greyed with its tip and the note beside them`, JSON.stringify({ ethan, iris }))
+      await check(`30% off, Copy Discord ID and Copy username, ${size.join('x')}`, `thirty-copies-${size[0]}`)
     }
     await viewport([1280, 720])
     await holdClipboard()
@@ -934,35 +1006,13 @@ if (wanted('thirty')) {
     const hugoSaid = await (await row('Hugo Lindahl')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => /^Copy|^Copied|^Couldn't/.test(t)))
     expect(JSON.stringify(await copied()) === JSON.stringify(['100000000000000101', '@maya.lq']) && JSON.stringify(hugoSaid) === JSON.stringify(['Copy Discord ID', 'Copy username']),
       'Hugo, no Discord id: a press on the greyed Copy Discord ID copies nothing and says nothing', JSON.stringify(hugoSaid))
-    expect((await calls()).every((c) => c.name === 'loadThirty'), 'copying calls no route')
-
-    // Beside Copy code: Approved and Code Applied rows.
-    await open('?tab=approved')
-    await waitReady()
-    const ethan = await copies(await row('Ethan Cole'))
-    expect(JSON.stringify(ethan.map((b) => [b.label, b.off])) === JSON.stringify([['Copy code', false], ['Copy Discord ID', false], ['Copy username', false]]),
-      'Approved, Ethan: Copy code, then Copy Discord ID and Copy username beside it ("Copy" until 2026-10-26)', JSON.stringify(ethan))
-    await open('?tab=code-applied')
-    await waitReady()
-    const omar = await copies(await row('Omar Haddad'))
-    const lena = await copies(await row('Lena Vogel'))
-    expect(JSON.stringify(omar.map((b) => [b.label, b.off, b.tip])) === JSON.stringify([['Copy code', false, null], ['Copy Discord ID', false, null], ['Copy username', true, NO_USERNAME]])
-        && JSON.stringify(lena.map((b) => [b.label, b.off])) === JSON.stringify([['Copy code', false], ['Copy Discord ID', false], ['Copy username', false]]),
-      'Code Applied: Omar with no username, Copy username greyed with its tip; Lena with all three', JSON.stringify({ omar, lena }))
     await holdClipboard()
-    await press(await buttonIn(await row('Lena Vogel'), 'Copy username'))
-    await press(await buttonIn(await row('Lena Vogel'), 'Copy code'))
+    await press(await buttonIn(await row('Iris Novak'), 'Copy username'))
+    await press(await buttonIn(await row('Iris Novak'), 'Copy code'))
     await sleep(200)
-    expect(JSON.stringify(await copied()) === JSON.stringify(['@lena.v', 'ECOM30-C55E10']),
-      'Lena, her username stored as "@lena.v": Copy username copies "@lena.v", never "@@lena.v"; Copy code the code', JSON.stringify(await copied()))
-    for (const size of [[1440, 900], [390, 844]]) {
-      await viewport(size)
-      await check(`30% off, Code Applied, Copy code, Copy Discord ID and Copy username, ${size.join('x')}`, `thirty-copies-code-applied-${size[0]}`)
-    }
-    await open('?tab=rejected')
-    await waitReady()
-    const rejected = await page.$$eval('.list-row', (rs) => rs.map((r) => [...r.querySelectorAll('button')].filter((b) => /^Copy/.test(b.textContent.trim())).length))
-    expect(rejected.length === 3 && rejected.every((n) => n === 0), 'Rejected: no code, so no copy button on any row', JSON.stringify(rejected))
+    expect(JSON.stringify(await copied()) === JSON.stringify(['@iris.n', 'ECOM30-Q8M3TZ']),
+      'Iris, her username stored as "@iris.n": Copy username copies "@iris.n", never "@@iris.n"; Copy code the code Whop attached', JSON.stringify(await copied()))
+    expect((await calls()).every((c) => c.name === 'loadThirty'), 'copying calls no route')
   }
 
   // The review of 2026-10-26, the owner's applicant: "he never had a membership. I see one payment, but it has failed
@@ -986,7 +1036,7 @@ if (wanted('thirty')) {
     // Check Whop again on the unpaid row too (the review of 2026-10-26): Whop still shows the student so, so it stays.
     expect(!(await isNull(await buttonIn(await row('Jonah Pereira'), 'Check Whop again'))), 'Jonah\'s row has Check Whop again, as the coupon\'s row does')
     await press(await buttonIn(await row('Jonah Pereira'), 'Check Whop again'))
-    await page.waitForFunction(() => document.body.innerText.includes("Whop still doesn't show both a paid course plan and a payment that went through for Jonah Pereira."), { timeout: 10000 })
+    await shown("Whop still doesn't show both a paid course plan and a payment that went through for Jonah Pereira.")
     await settled()
     expect((await rowText(await row('Jonah Pereira'))).includes(NO_PAYMENT) && (await calls()).some((c) => c.name === 'checkCoupon' && c.args[0] === 'r-jonah'),
       'Check Whop again: the notice says Whop still does not show both, and the row read again says the same', await rowText(await row('Jonah Pereira')))
@@ -995,7 +1045,7 @@ if (wanted('thirty')) {
     // not always true. The rule decides her row again.
     expect((await rowText(await row('Sofia Marin'))).includes(NO_PAYMENT), 'Sofia: her stored row says the student is unpaid, so her verdict does')
     await press(await buttonIn(await row('Sofia Marin'), 'Check Whop again'))
-    await page.waitForFunction(() => document.body.innerText.includes('Whop shows a payment that went through for Sofia Marin now. The 30% rule decides this request again.'), { timeout: 10000 })
+    await shown('Whop shows a payment that went through for Sofia Marin now. The 30% rule decides this request again.')
     await settled()
     const sofiaNow = await rowText(await row('Sofia Marin'))
     expect(!sofiaNow.includes(NO_PAYMENT) && (await calls()).some((c) => c.name === 'checkCoupon' && c.args[0] === 'r-sofia')
@@ -1006,15 +1056,15 @@ if (wanted('thirty')) {
     expect((await rowText(await row('Maya Lindqvist'))).includes(YES_EVERY), 'Maya: her stored row is a clean one, so the verdict is the rule\'s yes')
     await press(await buttonIn(await row('Maya Lindqvist'), 'Approve'))
     const REFUSED = 'Not approved: the 30% rule says no for this request now. Its row shows why.'
-    await page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, REFUSED)
+    await shown(REFUSED)
     await settled()
     const maya = await row('Maya Lindqvist')
     const m = await rowText(maya)
-    const alert = await maya.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
+    const alert = await rowAlert(maya)
     expect(alert === REFUSED && m.includes(NO_PAYMENT) && (await isNull(await buttonIn(maya, 'Approve'))) && !(await isNull(await linkIn(maya)))
         && (await calls()).filter((c) => c.name === 'loadThirty').length === loads + 1 && JSON.stringify((await calls()).filter((c) => c.name === 'approve').map((c) => c.args)) === JSON.stringify([['r-maya', false, false]]),
       'Maya\'s Approve: refused with code "rule", the page\'s own sentence on her row, the list read again, and her verdict now says the paid plan and the payment; Approve anyway in Approve\'s place', JSON.stringify({ alert, m }))
-    expect(JSON.stringify(await tabCounts()) === JSON.stringify(['Applied 8', 'Approved 2', 'Rejected 3', 'Code Applied 2']), 'nothing approved', (await tabCounts()).join(' | '))
+    expect((await row('Maya Lindqvist').then((h) => h.evaluate((r) => r.dataset.rowStatus))) === 'pending', 'nothing approved: Maya is still on the list, pending')
     await press(await linkIn(await row('Jonah Pereira')))
     await page.waitForSelector('[data-approve-anyway-confirm]')
     const confirmText = await page.evaluate(() => document.querySelector('[data-approve-anyway-confirm]')?.textContent ?? null)
@@ -1022,33 +1072,34 @@ if (wanted('thirty')) {
       'Jonah\'s Approve anyway asks once, naming why the rule says no', confirmText)
     await check('30% off, Approve anyway past an unpaid student, 1280x720', 'thirty-unpaid-anyway-1280')
     await press(await buttonIn(await row('Jonah Pereira'), 'Yes, create the code'))
-    await page.waitForFunction(() => document.body.innerText.includes('Approved Jonah Pereira.'), { timeout: 10000 })
+    await shown('Approved Jonah Pereira. The code ECOM30-')
     await settled()
     const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
-    expect(JSON.stringify(sent.at(-1)) === JSON.stringify(['r-jonah', true, false]) && (await tabCounts())[1] === 'Approved 3',
-      'Approve anyway: one approve call with override, the code made past it, Jonah on Approved', JSON.stringify(sent))
+    expect(JSON.stringify(sent.at(-1)) === JSON.stringify(['r-jonah', true, false]) && (await isNull(await row('Jonah Pereira'))),
+      'Approve anyway: one approve call with override, the code made and on the membership, so Jonah leaves the list', JSON.stringify(sent))
     // A csm: no Approve anyway, so Jonah's row has Check Whop again and Reject.
     await open('?state=unpaid&role=csm')
     await waitReady()
-    const csm = await (await row('Jonah Pereira')).evaluate((r) => [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)))
+    const csm = await actionsOf(await row('Jonah Pereira'))
     expect(JSON.stringify(csm) === JSON.stringify(['Check Whop again', 'Reject']), 'a csm: Jonah\'s row has Check Whop again and Reject (Reject alone until the review of 2026-10-26)', JSON.stringify(csm))
   }
 
-  console.log('\n30% off: Approve on the rule\'s yes, and on Hugo, whose coupon Whop names only now (D5)')
+  console.log('\n30% off: Approve on the rule\'s yes puts the 30% on, and Hugo, whose coupon Whop names only now (D5)')
   {
     await open('')
     await waitReady()
     await press(await buttonIn(await row('Jonah Pereira'), 'Approve'))
-    await page.waitForFunction(() => document.body.innerText.includes('Approved Jonah Pereira.'), { timeout: 10000 })
+    await shown('Approved Jonah Pereira.')
     await settled()
     const made = await calls()
     expect(made.filter((c) => c.name === 'approve').map((c) => JSON.stringify(c.args)).join() === '["r-jonah",false,false]',
       'Approve on Jonah: one approve call, without override', JSON.stringify(made.map((c) => c.name)))
-    let counts = await tabCounts()
-    expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'Jonah moves from Applied to Approved', counts.join(' | '))
+    const n = (await notices()).find((x) => x.text.startsWith('Approved Jonah Pereira.'))
+    expect(n && /^Approved Jonah Pereira\. The code ECOM30-[A-Z0-9]{6} is on their membership\.$/.test(n.text) && n.role === 'status' && n.copy && (await isNull(await row('Jonah Pereira'))),
+      'the approve table\'s "applied": "Approved Jonah Pereira. The code ECOM30-... is on their membership.", with Copy code, and Jonah leaves the list (applied)', JSON.stringify(n))
 
     await press(await buttonIn(await row('Hugo Lindahl'), 'Approve'))
-    await page.waitForFunction(() => document.body.innerText.includes('Hugo Lindahl: This student already has a discount on their membership'), { timeout: 10000 })
+    await shown('Hugo Lindahl: This student already has a discount on their membership')
     await settled()
     const notice = await page.$eval('[role="alert"]', (e) => ({ text: e.textContent, copy: [...e.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Copy code') }))
     expect(notice.text.startsWith(`Hugo Lindahl: ${COUPON_LINE}`) && !notice.copy,
@@ -1061,8 +1112,7 @@ if (wanted('thirty')) {
     const prefilled = await page.$eval('input[placeholder^="For example"]', (i) => i.value)
     expect(prefilled === MAP_LINE, 'his Reject opens with the reason filled in: the map\'s own sentence to the student, who reads it there (the render review\'s second round)', prefilled)
     await press(await buttonIn(await row('Hugo Lindahl'), 'Cancel'))
-    counts = await tabCounts()
-    expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'and he stays on Applied, nothing approved', counts.join(' | '))
+    expect((await row('Hugo Lindahl').then((h) => h.evaluate((r) => r.dataset.rowStatus))) === 'pending', 'and he stays on the list, pending, nothing approved')
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, Approve refused for the coupon, ${size.join('x')}`, `thirty-coupon-refused-${size[0]}`)
@@ -1088,7 +1138,7 @@ if (wanted('thirty')) {
       'Tara\'s coupon row: "Check Whop again" in Approve\'s place, a small link as Approve anyway is (no fill, underlined 13px words, a 44px target)', JSON.stringify(look))
     const before = (await calls()).length
     await press(await buttonIn(tara, CHECK))
-    await page.waitForFunction(() => document.body.innerText.includes("Whop still shows a discount on Tara Quinn's membership (evolve10)."), { timeout: 10000 })
+    await shown("Whop still shows a discount on Tara Quinn's membership (evolve10).")
     await settled()
     const made = (await calls()).slice(before).map((c) => (c.args.length ? `${c.name}:${c.args.join(',')}` : c.name))
     expect(JSON.stringify(made) === JSON.stringify(['checkCoupon:r-tara', 'loadThirty']), 'one check for her request, then the list read again', JSON.stringify(made))
@@ -1108,10 +1158,11 @@ if (wanted('thirty')) {
     await page.keyboard.press('Backspace')
     await page.keyboard.type('You already have a discount on your membership.')
     await press(await buttonIn(await row('Tara Quinn'), 'Reject the request'))
-    await page.waitForFunction(() => document.body.innerText.includes('Rejected the request from Tara Quinn.'), { timeout: 10000 })
+    await shown('Rejected the request from Tara Quinn.')
     await settled()
     const sent = (await calls()).filter((x) => x.name === 'reject').map((x) => x.args)
-    expect(JSON.stringify(sent) === JSON.stringify([['r-tara', 'You already have a discount on your membership.']]), 'the team changed it: the rejection carries their words', JSON.stringify(sent))
+    expect(JSON.stringify(sent) === JSON.stringify([['r-tara', 'You already have a discount on your membership.']]) && (await isNull(await row('Tara Quinn'))),
+      'the team changed it: the rejection carries their words, and Tara leaves the list (the reject table\'s "no code": "Rejected the request from Tara Quinn.")', JSON.stringify(sent))
 
     // stalecoupon: evolve10 came off Tara's membership in Whop since the cron stored it.
     await open('?state=stalecoupon')
@@ -1119,32 +1170,32 @@ if (wanted('thirty')) {
     tara = await row('Tara Quinn')
     expect((await rowText(tara)).includes(COUPON_LINE) && (await isNull(await buttonIn(tara, 'Approve'))), 'the stored answer still says evolve10: no Approve on her row yet')
     await press(await buttonIn(tara, CHECK))
-    await page.waitForFunction(() => document.body.innerText.includes("Whop shows no discount on Tara Quinn's membership now."), { timeout: 10000 })
+    await shown("Whop shows no discount on Tara Quinn's membership now.")
     await settled()
     tara = await row('Tara Quinn')
     const t = await rowText(tara)
     const approveOn = !(await isNull(await buttonIn(tara, 'Approve'))) && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled))
-    expect(t.includes(YES_EVERY) && t.includes('61 of 61 videos') && !t.includes(COUPON_LINE) && approveOn && (await isNull(await buttonIn(tara, CHECK))),
-      'the coupon is gone: the row is the rule\'s again, its yes and its count, with Approve on and no Check Whop again', t)
+    const verdictNow = await tara.evaluate((r) => r.querySelector('[data-verdict]')?.dataset.verdict)
+    expect(verdictNow === 'yes' && t.includes(YES_EVERY) && t.includes('61 of 61 videos') && approveOn && (await isNull(await buttonIn(tara, CHECK))),
+      'the coupon is gone: the row is the rule\'s again, its yes and its count, with Approve on and no Check Whop again (its Why line keeps the job\'s last refusal until the app tries again)', t)
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, Check Whop again, the coupon gone, ${size.join('x')}`, `thirty-check-gone-${size[0]}`)
     }
     await viewport([1280, 720])
     await press(await buttonIn(await row('Tara Quinn'), 'Approve'))
-    await page.waitForFunction(() => document.body.innerText.includes('Approved Tara Quinn.'), { timeout: 10000 })
+    await shown('Approved Tara Quinn.')
     await settled()
-    const counts = await tabCounts()
-    expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'and Approve goes through: Tara moves to Approved', counts.join(' | '))
+    expect(await isNull(await row('Tara Quinn')), 'and Approve goes through: the code on, Tara leaves the list')
 
     // whop=down: Whop gives no answer. The row says so, and nothing changes.
     await open('?whop=down')
     await waitReady()
     const loads = (await calls()).filter((c) => c.name === 'loadThirty').length
     await press(await buttonIn(await row('Tara Quinn'), CHECK))
-    await page.waitForFunction((d) => document.body.innerText.includes(d), { timeout: 10000 }, DOWN)
+    await shown(DOWN)
     tara = await row('Tara Quinn')
-    const alert = await tara.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
+    const alert = await rowAlert(tara)
     expect(alert === DOWN && (await rowText(tara)).includes(COUPON_LINE) && (await calls()).filter((c) => c.name === 'loadThirty').length === loads && !(await isNull(await buttonIn(tara, CHECK))),
       'Whop down: the route\'s sentence on the row, the row as it was, the list not read again, Check Whop again there to try again', alert ?? '')
     await check('30% off, Check Whop again, Whop down, 1280x720', 'thirty-check-down-1280')
@@ -1169,12 +1220,11 @@ if (wanted('thirty')) {
     }
     await viewport([1280, 720])
     await press(await buttonIn(await row('Priya Raman'), 'Yes, create the code'))
-    await page.waitForFunction(() => document.body.innerText.includes('Approved Priya Raman.'), { timeout: 10000 })
+    await shown('Approved Priya Raman.')
     await settled()
     const after = await calls()
     expect(after.some((c) => c.name === 'approve' && c.args[0] === 'r-priya' && c.args[1] === true && c.args[2] === false), 'the second click sends approve with override, the coupon still checked', JSON.stringify(after.filter((c) => c.name === 'approve')))
-    const counts = await tabCounts()
-    expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'Priya moves from Applied to Approved', counts.join(' | '))
+    expect(await isNull(await row('Priya Raman')), 'the code made and on: Priya leaves the list')
   }
 
   // The owner's review (2026-10-21): a founder or an admin approves past any check, the coupon's row too.
@@ -1193,12 +1243,11 @@ if (wanted('thirty')) {
     }
     await viewport([1280, 720])
     await press(await buttonIn(await row('Tara Quinn'), 'Yes, create the code'))
-    await page.waitForFunction(() => document.body.innerText.includes('Approved Tara Quinn.'), { timeout: 10000 })
+    await shown('Approved Tara Quinn.')
     await settled()
     const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
-    expect(JSON.stringify(sent) === JSON.stringify([['r-tara', true, true]]), 'one approve call, with override and overrideCoupon', JSON.stringify(sent))
-    const counts = await tabCounts()
-    expect(counts[0] === 'Applied 7' && counts[1] === 'Approved 3', 'Tara moves to Approved, the code made past evolve10', counts.join(' | '))
+    expect(JSON.stringify(sent) === JSON.stringify([['r-tara', true, true]]) && (await isNull(await row('Tara Quinn'))),
+      'one approve call, with override and overrideCoupon; the code made past evolve10, and Tara leaves the list', JSON.stringify(sent))
   }
 
   console.log('\n30% off: the approve route\'s 409 "The course changed", then Approve anyway in Approve\'s place')
@@ -1208,10 +1257,10 @@ if (wanted('thirty')) {
     await waitReady()
     const loads = (await calls()).filter((c) => c.name === 'loadThirty').length
     await press(await buttonIn(await row('Jonah Pereira'), 'Approve'))
-    await page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, COURSE)
+    await shown(COURSE)
     await settled()
     let jonah = await row('Jonah Pereira')
-    const alert = await jonah.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
+    const alert = await rowAlert(jonah)
     expect(alert === COURSE && (await isNull(await buttonIn(jonah, 'Approve'))) && !(await isNull(await linkIn(jonah)))
         && (await rowText(jonah)).includes(YES),
       'the 409 stays on Jonah\'s row in the route\'s words, and Approve anyway takes Approve\'s place though the verdict says yes (Approve used to come back, to be refused again)', alert ?? '')
@@ -1232,15 +1281,15 @@ if (wanted('thirty')) {
     }
     await viewport([1280, 720])
     await press(await buttonIn(await row('Jonah Pereira'), 'Yes, create the code'))
-    await page.waitForFunction(() => document.body.innerText.includes('Approved Jonah Pereira.'), { timeout: 10000 })
+    await shown('Approved Jonah Pereira.')
     await settled()
     const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
     expect(JSON.stringify(sent) === JSON.stringify([['r-jonah', false, false], ['r-jonah', true, false]]), 'Approve, then Approve anyway with override: the code made', JSON.stringify(sent))
     jonah = await row('Jonah Pereira')
-    expect(await isNull(jonah), 'Jonah is off Applied')
+    expect(await isNull(jonah), 'Jonah is off the list, the 30% on')
   }
 
-  console.log('\n30% off: a csm has no Approve anyway')
+  console.log('\n30% off: a csm has no Approve anyway, and no Reject where the code may exist')
   for (const size of SIZES) {
     await open('?role=csm', size)
     await waitReady()
@@ -1251,9 +1300,19 @@ if (wanted('thirty')) {
     })))
     const by = Object.fromEntries(rows.map((r) => [r.name, r.buttons.join(',')]))
     expect(rows.every((r) => !r.buttons.includes('Approve anyway')) && by['Tara Quinn'] === 'Check Whop again,Reject' && by['Priya Raman'] === 'Reject'
-        && by['Maya Lindqvist'] === 'Approve,Reject' && by['Hugo Lindahl'] === 'Approve,Reject',
-      `${size.join('x')}: no Approve anyway on any row; Tara has Check Whop again and Reject, Priya Reject alone, Approve where the verdict says yes`, JSON.stringify(by))
+        && by['Maya Lindqvist'] === 'Approve,Reject' && by['Hugo Lindahl'] === 'Approve,Reject'
+        && by['Ethan Cole'] === 'Try again' && by['Nora Brandt'] === 'Try again' && by['Iris Novak'] === '',
+      `${size.join('x')}: no Approve anyway on any row; Tara has Check Whop again and Reject, Priya Reject alone, Approve where the verdict says yes; an approved row Try again alone (Reject is a founder's or an admin's), Iris's nothing`, JSON.stringify(by))
     await check(`30% off, a csm, ${size.join('x')}`, `thirty-csm-${size[0]}`)
+  }
+  {
+    // A founder, as an admin: Approve anyway where a check refuses, Try again and Reject on an approved row.
+    await open('?role=founder')
+    await waitReady()
+    const by = Object.fromEntries((await page.$$eval('.list-row', (rs) => rs.map((r) => [r.querySelector('a')?.textContent,
+      [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)).join(',')]))))
+    expect(by['Ethan Cole'] === 'Try again,Reject' && by['Nora Brandt'] === 'Try again,Reject' && by['Priya Raman'] === 'Approve anyway,Reject' && by['Iris Novak'] === '',
+      'a founder: Try again and Reject on an approved row, Approve anyway where a check refuses, nothing on Iris\'s decided row', JSON.stringify(by))
   }
 
   console.log('\n30% off: Reject, its reason, and what the student sees')
@@ -1280,11 +1339,10 @@ if (wanted('thirty')) {
     await viewport([1280, 720])
     await page.type('input[placeholder^="For example"]', 'Two accounts on one card.')
     await press(await buttonIn(await row('Jonah Pereira'), 'Reject the request'))
-    await page.waitForFunction(() => document.body.innerText.includes('Rejected the request from Jonah Pereira.'), { timeout: 10000 })
+    await shown('Rejected the request from Jonah Pereira.')
     await settled()
     expect((await calls()).some((x) => x.name === 'reject' && x.args[0] === 'r-jonah' && x.args[1] === 'Two accounts on one card.'), 'reject is sent with the reason')
-    const counts = await tabCounts()
-    expect(counts[0] === 'Applied 7' && counts[2] === 'Rejected 4', 'Jonah moves to Rejected', counts.join(' | '))
+    expect(await isNull(await row('Jonah Pereira')), 'Jonah leaves the list: rejected, and no code was made')
   }
 
   console.log('\n30% off: a 409 on approve and on reject')
@@ -1292,10 +1350,10 @@ if (wanted('thirty')) {
     await open('?conflict=1')
     await waitReady()
     await press(await buttonIn(await row('Maya Lindqvist'), 'Approve'))
-    await page.waitForFunction(() => document.body.innerText.includes('this request had already been decided, so the code must be deleted in Whop.'), { timeout: 10000 })
+    await shown('this request had already been decided, so the code must be deleted in Whop.')
     await settled()
     expect((await calls()).filter((x) => x.name === 'loadThirty').length === 2, 'approve answered 409: its sentence is shown and the list is read again')
-    expect(await isNull(await row('Maya Lindqvist')), 'Maya is off Applied: another member decided it')
+    expect(await isNull(await row('Maya Lindqvist')), 'Maya is off the list: another member rejected it')
     const notice = await page.$eval('[role="alert"]', (e) => ({ text: e.textContent, copy: [...e.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Copy code') }))
     expect(notice.text.startsWith('Maya Lindqvist: The Whop code ECOM30-') && notice.copy, 'the notice names the student and the code to delete, with Copy code', JSON.stringify(notice))
     await sleep(500)
@@ -1308,9 +1366,11 @@ if (wanted('thirty')) {
     await press(await buttonIn(await row('Jonah Pereira'), 'Reject'))
     await page.waitForSelector('input[placeholder^="For example"]')
     await press(await buttonIn(await row('Jonah Pereira'), 'Reject the request'))
-    await page.waitForFunction(() => document.body.innerText.includes('Jonah Pereira: This request was already decided.'), { timeout: 10000 })
+    await shown('Jonah Pereira: This request was already decided.')
     await settled()
-    expect(await isNull(await row('Jonah Pereira')), 'reject answered 409: its sentence is shown, the list read again, Jonah off Applied')
+    const jonah = await row('Jonah Pereira')
+    expect(!(await isNull(jonah)) && (await jonah.evaluate((r) => r.dataset.rowStatus)) === 'approved' && JSON.stringify(await actionsOf(jonah)) === JSON.stringify(['Try again', 'Reject']),
+      'reject answered 409: its sentence is shown and the list read again, Jonah now an approved row (another member approved it), with Try again')
   }
 
   console.log('\n30% off: a decision goes through, then the list cannot be read again')
@@ -1319,13 +1379,13 @@ if (wanted('thirty')) {
     await open('?reload=fail')
     await waitReady()
     await press(await buttonIn(await row('Maya Lindqvist'), 'Approve'))
-    await page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, STALE)
+    await shown(STALE)
     await settled()
     const said = await page.evaluate(() => ({
       status: [...document.querySelectorAll('[role="status"]')].map((e) => e.textContent),
       alert: [...document.querySelectorAll('[role="alert"]')].map((e) => e.textContent),
     }))
-    expect(said.status.some((t) => t.startsWith('Approved Maya Lindqvist. The code ECOM30-')) && said.alert.some((t) => t.startsWith(STALE)),
+    expect(said.status.some((t) => /^Approved Maya Lindqvist\. The code ECOM30-[A-Z0-9]{6} is on their membership\./.test(t)) && said.alert.some((t) => t.startsWith(STALE)),
       'the approval and its code in a notice of their own, the list being out of date on a line of its own', JSON.stringify(said))
     const maya = await row('Maya Lindqvist')
     expect((await (await buttonIn(maya, 'Approve')).evaluate((b) => b.disabled)) && (await (await buttonIn(maya, 'Reject')).evaluate((b) => b.disabled))
@@ -1337,64 +1397,193 @@ if (wanted('thirty')) {
     }
   }
 
-  console.log('\n30% off: Approved, the code, a coupon to check first, and Mark code applied')
+  console.log('\n30% off: an approved row: Try again, and Reject confirmed first')
   {
-    await open('?tab=approved')
+    await open('')
     await waitReady()
-    const ethan = await row('Ethan Cole')
-    const e = await rowText(ethan)
-    expect(e.includes('ECOM30-3F9A21') && e.includes('Applied Sat 17 Oct') && e.includes('Approved Sun 18 Oct by Robin'),
-      'Ethan: the code, the date applied, who approved it and when', e)
-    expect(e.includes(`${COUPON_LINE} Check Whop before you add the 30% code.`) && !e.includes('Whop gave no answer now'),
-      'Ethan, approved before the coupon rule with nothing stored: Whop asked now names evolve10, so the line to check Whop shows (it never could before)', e)
-    expect(!(await isNull(await buttonIn(ethan, 'Copy code'))) && !(await isNull(await buttonIn(ethan, 'Mark code applied'))), 'with Copy code and Mark code applied')
-    const nora = await rowText(await row('Nora Brandt'))
-    expect(nora.includes(`${COUPON_LINE} Check Whop before you add the 30% code. Whop gave no answer now; this is its answer of Mon 19 Oct.`),
-      'Nora, evolve10 stored, Whop giving no answer now: the stored row stands in, with its date', nora)
     for (const size of SIZES) {
       await viewport(size)
-      await check(`30% off, Approved, ${size.join('x')}`, `thirty-approved-${size[0]}`)
+      await check(`30% off, the approved rows, ${size.join('x')}`, `thirty-approved-${size[0]}`)
     }
     await viewport([1280, 720])
-    await press(await buttonIn(ethan, 'Mark code applied'))
-    await page.waitForFunction(() => document.body.innerText.includes('Marked the code as applied in Whop for Ethan Cole.'), { timeout: 10000 })
+    await press(await buttonIn(await row('Nora Brandt'), 'Try again'))
+    await shown('Nora Brandt: the code ECOM30-7B20C4 is on their membership.')
     await settled()
-    const counts = await tabCounts()
-    expect(counts[1] === 'Approved 1' && counts[3] === 'Code Applied 3', 'Ethan moves to Code Applied', counts.join(' | '))
-    await open('?tab=code-applied')
-    await waitReady()
-    const omar = await rowText(await row('Omar Haddad'))
-    expect(omar.includes('Applied Tue 13 Oct · Approved Wed 14 Oct by Robin · Code applied Thu 15 Oct by Jamie') && omar.includes('ECOM30-A1D9E0') && !omar.includes('Mark code applied'),
-      'Code Applied: the three dates and who, the code to copy, nothing to press', omar)
-    await open('?tab=rejected')
-    await waitReady()
-    const ruby = await rowText(await row('Ruby Okafor'))
-    const felix = await rowText(await row('Felix Moreau'))
-    expect(ruby.includes('Applied Wed 14 Oct · Rejected Thu 15 Oct by Robin') && ruby.includes('Reason: The ads were not handed in.') && felix.includes('No reason given.'),
-      'Rejected: the dates, who, and the reason or "No reason given."', `${ruby} | ${felix}`)
+    const tried = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
+    const n = (await notices()).find((x) => x.text.startsWith('Nora Brandt:'))
+    expect(JSON.stringify(tried) === JSON.stringify([['r-nora', false, false]]) && n?.role === 'status' && n.copy && (await isNull(await row('Nora Brandt'))),
+      'Try again: one approve call on the approved request, no override; "Nora Brandt: the code ECOM30-7B20C4 is on their membership.", and she leaves the list (applied)', JSON.stringify({ tried, n }))
+    await press(await buttonIn(await row('Ethan Cole'), 'Reject'))
+    await page.waitForSelector('[data-reject-confirm]')
+    const confirm = await page.$eval('[data-reject-confirm]', (e) => e.textContent)
+    expect(confirm === 'The code ECOM30-3F9A21 stays usable at checkout until someone switches it off in Whop.' && !(await calls()).some((c) => c.name === 'reject'),
+      'Reject on an approved row asks first: the code stays usable at checkout until someone switches it off in Whop (§9.6); nothing is sent yet', confirm)
+    await check('30% off, Reject on an approved row, 1280x720', 'thirty-approved-reject-1280')
+    await press(await buttonIn(await row('Ethan Cole'), 'Reject the request'))
+    await shown('Rejected. The code ECOM30-3F9A21 stays usable at checkout until someone switches it off in Whop.')
+    await settled()
+    const r = (await notices()).find((x) => x.text.startsWith('Rejected.'))
+    expect(r?.role === 'alert' && r.copy && (await isNull(await row('Ethan Cole'))) && (await calls()).some((c) => c.name === 'reject' && c.args[0] === 'r-ethan'),
+      'the reject table\'s "usable": the notice stays until dismissed (there is something to do in Whop), with Copy code; Ethan leaves the list', JSON.stringify(r))
+    await sleep(500)
+    expect((await notices()).some((x) => x.text.startsWith('Rejected.')), 'and it is still there a moment later')
   }
 
-  console.log('\n30% off: ?student= keeps every tab to one student')
+  console.log('\n30% off: ?student= keeps the list to one student; an old ?tab= opens the list')
   {
     await open('?student=p-ethan')
     await waitReady()
-    expect(JSON.stringify(await tabCounts()) === JSON.stringify(['Applied 0', 'Approved 1', 'Rejected 0', 'Code Applied 0']),
-      'Ethan: every tab counts him alone', (await tabCounts()).join(' | '))
-    expect((await page.$eval('[role="tab"][aria-selected="true"]', (t) => t.textContent)).startsWith('Approved'), 'the first tab that has him opens')
-    expect((await bodyText()).includes('Showing Ethan Cole only.'), 'the banner names him')
+    expect(JSON.stringify(await names()) === JSON.stringify(['Ethan Cole']) && (await bodyText()).includes('Showing Ethan Cole only.'), 'Ethan alone, the banner naming him')
     for (const size of SIZES) {
       await viewport(size)
       await check(`30% off, one student, ${size.join('x')}`, `thirty-student-${size[0]}`)
     }
     await viewport([1280, 720])
-    await page.$$eval('[role="tab"]', (ts) => ts.find((t) => t.textContent.startsWith('Applied')).click())
-    await sleep(200)
-    expect((await bodyText()).includes('This student has nothing on this tab.'), 'Applied, filtered: nothing for him')
-    expect(page.url().includes('student=p-ethan') && page.url().includes('tab=applied'), 'the address keeps the student and the tab', page.url())
+    await open('?student=p-omar')
+    await waitReady()
+    expect((await bodyText()).includes(EMPTY_STUDENT) && (await bodyText()).includes('Showing one student only.') && (await page.$$('.list-row')).length === 0,
+      `Omar, whose request is applied: "${EMPTY_STUDENT}"`)
     await press(await button('Show everyone'))
     await sleep(300)
-    const all = await tabCounts()
-    expect(all[0] === 'Applied 8' && !page.url().includes('student='), 'Show everyone: the filter goes, the tab stays', `${all.join(' | ')} ${page.url()}`)
+    expect(JSON.stringify(await names()) === JSON.stringify(LISTED) && !page.url().includes('student='), 'Show everyone: the filter goes, the whole list', `${(await names()).length} ${page.url()}`)
+    for (const tab of ['applied', 'approved', 'code-applied', 'decide']) {
+      await open(`?tab=${tab}`)
+      await waitReady()
+      expect(JSON.stringify(await names()) === JSON.stringify(LISTED) && (await page.$('[role="tablist"]')) === null, `?tab=${tab}, a link from before the one list: the list, whole, no tabs`)
+    }
+  }
+
+  // ?state=reasons: every other reason a request can wait for (the newest attempt_failed of each), and the rows whose
+  // Approve, Try again or Reject answers each line of the PRD's tables (§9.4).
+  console.log('\n30% off: every other reason, its Why line')
+  {
+    const FIX = 'Fix it in Whop, then tell the owner so the app records it.'
+    const REASONS = {
+      'Old Claim': `Whop didn't answer. ${AGAIN}`,
+      'Code Refused Late': `Whop wouldn't make the code: A promo code needs a plan on this company. ${TWO_DAYS}`,
+      'Trial Holder': 'Their membership is a trial on Whop. The app leaves trials to the team: Approve or Try again puts the code on.',
+      'Other Code': `Their membership already has another code on Whop. ${AGAIN}`,
+      'Key Refused': `Whop refused the app's key. It needs member:manage. ${AGAIN}`,
+      'Membership Unread': `Whop didn't answer. ${AGAIN}`,
+      'Code Refused': `Whop wouldn't make the code: A promo code needs a plan on this company. ${AGAIN}`,
+      'Create Silent': `Whop didn't answer. ${AGAIN}`,
+      'Create No Id': `Whop didn't answer. ${AGAIN}`,
+      'Lookup Failed': `Whop didn't answer. ${AGAIN}`,
+      'Save Failed': `Whop made ECOM30-S4VE9P, but saving it failed. ${AGAIN}`,
+      'Out Of Time': `Whop didn't answer. ${AGAIN}`,
+      'Reopened Hand': 'Reopened by hand with ECOM30-R3OP2N. Approve attaches that code, or reject it.',
+      'Approved Untried': "The app hasn't tried yet.",
+      'Apply Refused': `Whop wouldn't take the code: This membership cannot take a promo code. ${AGAIN}`,
+      'Attach Key Refused': `Whop refused the app's key. It needs member:manage. ${AGAIN}`,
+      'Someone Else': `Whop shows ECOM30-0THRPR on someone else's membership. ${FIX}`,
+      'Other Product': `Whop shows ECOM30-PR0DCT on their Agency Starter Kit membership, not the course. ${FIX}`,
+      'Other Product Unnamed': `Whop shows ECOM30-PR0D2X on their membership of another product. ${FIX}`,
+      'Free Membership': `Whop shows ECOM30-FR33MB on their free membership. ${FIX}`,
+      'Filter Ignored': "The app can't tell whose membership ECOM30-F1LTR9 is on. Check it in Whop.",
+      'No Ids': "The app can't tell whose membership ECOM30-N01DS4 is on. Check it in Whop.",
+      'Old Name': 'This code was made before the app attached codes itself. Press Try again to attach it, or attach it in Whop.',
+      'No Whop Id': 'This request has a code with no Whop id, so the app can\'t check it. Check ECOM30-UNKN0W in Whop, then tell the owner so the app records it.',
+      'Approved Trial': 'Their membership is a trial on Whop. The app leaves trials to the team: Approve or Try again puts the code on.',
+      'Approved Canceled': `Their membership is canceled on Whop, so the code can't go on yet. ${AGAIN}`,
+      'Decided Meanwhile': 'Whop made ECOM30-D3C1DD, but the request had changed. Delete ECOM30-D3C1DD in Whop.',
+      'Maybe Attached': 'Whop may have attached ECOM30-MAYB3A after the request was rejected. Check their membership in Whop.',
+      'Applied Meanwhile': 'Whop made ECOM30-EXTR4C, but the request had changed. Delete ECOM30-EXTR4C in Whop.',
+    }
+    for (const size of [[1440, 900], [390, 844]]) {
+      await open('?state=reasons', size)
+      await waitReady()
+      const got = await whys()
+      const wrong = Object.entries(REASONS).filter(([n, t]) => got[n] !== t)
+      expect(wrong.length === 0, `${size.join('x')}: each of the ${Object.keys(REASONS).length} rows' Why lines, thirtyWords for its reason and step: pending, claimed, a hand reopen, approved, and rejected or applied with a write_failed`,
+        JSON.stringify(wrong.map(([n]) => [n, got[n]])))
+      const presses = Object.entries(got).filter(([n]) => /^(Approve|Try Again|Reject) /.test(n))
+      expect(presses.length === 20 && presses.every(([, t]) => t === "The app hasn't tried yet."), `${size.join('x')}: the ${presses.length} rows of the presses, never tried yet`, JSON.stringify(presses.slice(0, 2)))
+      const decided = await page.$$eval('.list-row[data-row-status="rejected"], .list-row[data-row-status="applied"]', (rs) => rs.map((r) => ({
+        name: r.querySelector('a')?.textContent, code: r.querySelector('code')?.textContent ?? null,
+        buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)),
+      })))
+      expect(JSON.stringify(decided.map((d) => [d.name, d.code, d.buttons.length])) === JSON.stringify([['Decided Meanwhile', 'ECOM30-D3C1DD', 0], ['Maybe Attached', 'ECOM30-MAYB3A', 0], ['Applied Meanwhile', 'ECOM30-EXTR4C', 0]]),
+        `${size.join('x')}: the rejected and applied rows: their words, the code Whop made or attached (the one to see to in Whop), the copy buttons only`, JSON.stringify(decided))
+      await check(`30% off, every other reason, the Why lines, ${size.join('x')}`, `thirty-reasons-why-${size[0]}`)
+    }
+    // A csm on the same rows: a pending row whose code may exist (a claim, a hand reopen) has no Reject; an approved one Try again alone.
+    await open('?state=reasons&role=csm')
+    await waitReady()
+    const by = Object.fromEntries((await page.$$eval('.list-row', (rs) => rs.map((r) => [r.querySelector('a')?.textContent,
+      [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)).join(',')]))))
+    expect(by['Create Silent'] === 'Approve' && by['Reopened Hand'] === 'Approve' && by['Out Of Time'] === 'Approve,Reject' && by['Apply Refused'] === 'Try again' && by['No Whop Id'] === 'Try again',
+      'a csm: Reject only where no code may exist (Out Of Time), none on a claim (Create Silent) or a hand reopen; an approved row Try again alone', JSON.stringify(by))
+  }
+
+  console.log('\n30% off: Approve, Try again and Reject, each answer of the PRD\'s tables (§9.4)')
+  {
+    await open('?state=reasons', [1280, 720])
+    await waitReady()
+    const ID = 'ECOM30-[A-Z0-9]{6}'
+    /** [row, button, what it says (a regular expression over the whole sentence), where: the notices or the row, its tone] */
+    const PRESSES = [
+      ['Approve Made Not On', 'Approve', `^Approve Made Not On: the code ${ID} is made but not on their membership yet\\. Their membership already has another code on Whop\\. The app tries again\\.$`, 'notice', 'alert'],
+      ['Approve Create Silent', 'Approve', '^Approve Create Silent: Whop didn\'t answer while making ECOM30-CR8SLN\\. Press Approve again in 5 minutes to look for it on Whop now; otherwise the app looks within the hour\\.$', 'notice', 'alert'],
+      ['Approve No Code Yet', 'Approve', '^Approve No Code Yet: no code was made yet\\. Whop didn\'t answer\\. The app tries again\\.$', 'notice', 'alert'],
+      ['Approve Whop Refused', 'Approve', '^Couldn\'t create the promo code on Whop\\. The request is still pending\\. Details: A promo code needs a plan on this company\\.$', 'row'],
+      ['Approve In Progress', 'Approve', '^Approve In Progress: The app is making this code right now\\. Refresh in a few minutes\\.$', 'notice', 'alert'],
+      ['Approve After Reject', 'Approve', '^Approve After Reject: Whop attached ECOM30-ATR3J7 after the request was rejected\\. It can only come off in Whop\\.$', 'notice', 'alert'],
+      ['Approve Maybe After Reject', 'Approve', '^Approve Maybe After Reject: Whop may have attached ECOM30-MATR3J after the request was rejected\\. Check their membership in Whop\\.$', 'notice', 'alert'],
+      ['Approve Save Failed', 'Approve', '^Whop made ECOM30-SVF41L, but saving it failed\\. The app picks it up on its next try; leave it in Whop\\.$', 'row'],
+      ['Approve Not Ready', 'Approve', '^The 30% update isn\'t finished on the database \\(v116\\)\\. Nothing was made\\.$', 'row'],
+      ['Approve Already Decided', 'Approve', '^Approve Already Decided: This request was already decided\\.$', 'notice', 'alert'],
+      ['Approved Untried', 'Try again', '^Approved Untried: the code ECOM30-UNTR1D is on their membership\\.$', 'notice', 'status'],
+      ['Try Again Not On', 'Try again', `^Try Again Not On: the code ${ID} is made but not on their membership yet\\. Whop didn't answer\\. The app tries again\\.$`, 'notice', 'alert'],
+      // The old per-student name: ECOM30- and the first 6 characters of the (made-up, short) student id.
+      ['Old Name', 'Try again', '^Old Name: the code ECOM30-P-X23 is on their membership\\.$', 'notice', 'status'],
+      ['No Whop Id', 'Try again', '^No Whop Id: the code ECOM30-UNKN0W is made but not on their membership yet\\. This request has a code with no Whop id, so the app can\'t check it\\. Check ECOM30-UNKN0W in Whop, then tell the owner so the app records it\\.$', 'notice', 'alert'],
+      ['Out Of Time', 'Reject', '^Rejected the request from Out Of Time\\.$', 'notice', 'status'],
+      ['Reject Usable', 'Reject', `^Rejected\\. The code ${ID} stays usable at checkout until someone switches it off in Whop\\.$`, 'notice', 'alert'],
+      ['No Whop Id', 'Reject', '^Rejected\\. Whop may have made ECOM30-UNKN0W: look for it in Whop\'s promo codes and switch it off if it\'s there\\.$', 'notice', 'alert'],
+      ['Reject In Progress', 'Reject', '^Reject In Progress: The app is making this code right now\\. Try again in a few minutes\\.$', 'notice', 'alert'],
+      ['Reject On Theirs', 'Reject', '^Reject On Theirs: The code is already on their membership, so the 30% is theirs\\. Press Try again to mark it applied\\.$', 'notice', 'alert'],
+      ['Reject Claim On Theirs', 'Reject', '^Reject Claim On Theirs: The code is already on their membership, so the 30% is theirs\\. The app marks it applied within the hour\\.$', 'notice', 'alert'],
+      ['Reject Elsewhere', 'Reject', '^Reject Elsewhere: Whop shows ECOM30-ELS3WH on someone else\'s membership\\. Fix it in Whop, then tell the owner so the app records it\\.$', 'notice', 'alert'],
+      ['Reject Cannot Tell', 'Reject', '^Reject Cannot Tell: The app can\'t tell whose membership ECOM30-CNTT3L is on\\. Check it in Whop\\.$', 'notice', 'alert'],
+      ['Reject Changed', 'Reject', '^Reject Changed: This request changed meanwhile\\. Refresh the list\\.$', 'notice', 'alert'],
+      ['Reject Whop Silent', 'Reject', '^Couldn\'t ask Whop\\. Try again\\.$', 'row'],
+      ['Reject Lookup Silent', 'Reject', '^Couldn\'t ask Whop about this code\\. Try again\\.$', 'row'],
+    ]
+    const wrong = []
+    for (const [name, label, pattern, where, tone] of PRESSES) {
+      const re = new RegExp(pattern)
+      const target = await row(name)
+      if (await isNull(target)) { wrong.push(`${name}: not on the list`); continue }
+      const before = JSON.stringify(await notices())
+      await press(await buttonIn(target, label))
+      if (label === 'Reject') {
+        // The reason panel first; on an approved row its confirm too.
+        await page.waitForFunction((n) => [...document.querySelectorAll('.list-row')].find((r) => r.querySelector('a')?.textContent === n)?.querySelector('input[placeholder^="For example"]'), { timeout: 5000 }, name)
+        await press(await buttonIn(await row(name), 'Reject the request'))
+      }
+      let said = null
+      try {
+        if (where === 'row') {
+          await page.waitForFunction((n) => [...document.querySelectorAll('.list-row')].find((r) => r.querySelector('a')?.textContent === n)?.querySelector('[role="alert"]'), { timeout: 10000 }, name)
+          said = { text: await rowAlert(await row(name)), role: 'row' }
+        } else {
+          await page.waitForFunction((b) => {
+            const now = [...document.querySelectorAll('[role="status"], [role="alert"]')].filter((n) => [...n.querySelectorAll('button')].some((x) => x.textContent.trim() === 'Dismiss')).map((n) => n.querySelector('p')?.textContent ?? '')
+            return JSON.stringify(now) !== b && now.length > 0
+          }, { timeout: 10000 }, JSON.stringify(JSON.parse(before).map((x) => x.text)))
+          const n = (await notices()).find((x) => re.test(x.text)) ?? (await notices())[0]
+          said = n ? { text: n.text, role: n.role } : null
+        }
+      } catch (e) {
+        said = { text: `nothing shown (${e.message.slice(0, 60)})`, role: null }
+      }
+      await settled()
+      if (!said || !re.test(said.text ?? '') || (where === 'notice' && said.role !== tone)) wrong.push(`${name} ${label}: ${JSON.stringify(said)}`)
+    }
+    expect(wrong.length === 0, `every answer of the approve and reject tables, in its words, where the page puts it (a notice that stays, a success that hides itself, or the row): ${PRESSES.length} presses`, wrong.slice(0, 4).join(' | '))
+    await check('30% off, after every press, 1280x720', 'thirty-presses-1280')
+    const sent = (await calls()).filter((c) => c.name !== 'loadThirty').map((c) => `${c.name}:${c.args[0]}`)
+    expect(sent.length === PRESSES.length && sent.every((s) => /^(approve|reject):r-x\d\d$/.test(s)), `each press one call (${sent.length}), to the route its button names`, JSON.stringify(sent.slice(0, 4)))
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, '30% off: no error in the browser console', errs.slice(0, 3).join(' || '))
@@ -1405,7 +1594,8 @@ if (wanted('thirty')) {
 // ════════════════════════════════════════════════════════════════════════════
 if (wanted('dash')) {
   const from = consoleErrors.length
-  const TILES = ['month2', 'bounty', 'open-tasks', 'to-decide', 'active', 'canceling', 'churned', 'avg-progress']
+  // "30% to decide" became "30% needs a hand", and "30% off applied" joined the program (T-137, R5).
+  const TILES = ['month2', 'bounty', 'open-tasks', 'needs-hand', 'thirty-applied', 'active', 'canceling', 'churned', 'avg-progress']
   const open = (query, size) => go(`/dev/admin/dashboard${query}`, size)
   const ready = () => page.waitForFunction(() => /Updated \d\d:\d\d/.test(document.body.innerText), { timeout: 30000 })
   /** Every read failed: the header says "Couldn't load" (the render review's second round), so there is no "Updated" to wait for. */
@@ -1437,11 +1627,16 @@ if (wanted('dash')) {
       await ready()
       await check(label, `dash-full-${w}`)
       const t = await tiles()
-      expect(TILES.every((k) => t[k] && !t[k].failed), `${label}: all 8 tiles, none failed`, JSON.stringify(Object.keys(t)))
+      expect(TILES.every((k) => t[k] && !t[k].failed), `${label}: all 9 tiles, none failed`, JSON.stringify(Object.keys(t)))
       expect(t.month2.text.includes('First renewals from Mon 9 Nov') && t.month2.text.includes('paid since Fri 9 Oct') && t.month2.text.includes('Sun 15 Nov')
         && !/\d%/.test(t.month2.text), `${label}: Month 2 waits for the first renewals, with the dates, and shows no rate (no 0%, no old 61%)`, t.month2.text.slice(0, 160))
-      expect(t['open-tasks'].numbers[0] === '95' && t['open-tasks'].href === '/admin/tasks' && t['to-decide'].numbers[0] === '3' && t['to-decide'].href === '/admin/discounts',
-        `${label}: Open tasks 95, links to Tasks; 30% to decide 3, links to the 30% page`, JSON.stringify([t['open-tasks'].numbers, t['to-decide'].numbers]))
+      expect(t['open-tasks'].numbers[0] === '95' && t['open-tasks'].href === '/admin/tasks' && t['needs-hand'].numbers[0] === '3' && t['needs-hand'].href === '/admin/discounts'
+          // The title is an eyebrow, drawn in capitals (innerText reads it so).
+          && t['needs-hand'].text === '30% NEEDS A HAND 3 Go to 30% off Requests still waiting 30 minutes after the student applied',
+        `${label}: Open tasks 95, links to Tasks; "30% needs a hand" 3, "Go to 30% off", its source line, links to the 30% page`, JSON.stringify([t['open-tasks'].numbers, t['needs-hand']]))
+      expect(t['thirty-applied'].numbers[0] === '27' && t['thirty-applied'].href === '/admin/insights/progress'
+          && t['thirty-applied'].text === "30% OFF APPLIED 27 See it on Insights Codes on students' Whop memberships, requests from 1 Oct",
+        `${label}: "30% off applied" 27, "See it on Insights", its source line, links to Insights`, JSON.stringify(t['thirty-applied']))
       const avgRows = await tableOf('avg-progress')
       expect(t['avg-progress'].numbers[0] === '2.7%' && avgRows.length === 14 && JSON.stringify(avgRows.slice(12)) === JSON.stringify(['Mon 19 Oct 2.66%', 'Tue 20 Oct 2.71%'])
           && avgRows.slice(0, 12).every((r) => r.endsWith('Before the switch')) && t['avg-progress'].text.includes('From Mon 19 Oct'),
@@ -1474,9 +1669,13 @@ if (wanted('dash')) {
       })
       expect(m2.biggest <= 24 && (w < 768 || (m2.side && m2.m2Width < m2.bountyWidth)),
         `${label}: until its first rate Month 2 is a compact tile (no headline over 24px) beside the Bounty Program's chart`, JSON.stringify(m2))
-      const slots = await page.evaluate(() => [...document.querySelectorAll('[data-program-slot]')].map((x) => { const r = x.getBoundingClientRect(); return { slot: x.dataset.programSlot, left: Math.round(r.left), top: Math.round(r.top), h: Math.round(r.height), card: Math.round(x.firstElementChild.getBoundingClientRect().height) } }))
-      expect(slots.length === 2 && slots[0].slot === 'bounty' && (w < 768 ? slots[0].top < slots[1].top : slots[0].left < slots[1].left && slots[0].h === slots[1].h && slots[0].card === slots[1].card),
-        `${label}: the Bounty Program first (left from 768px), Month 2 beside it, the two cards as tall as each other (the render review's fix round)`, JSON.stringify(slots))
+      const slots = await page.evaluate(() => [...document.querySelectorAll('[data-program-slot]')].map((x) => { const r = x.getBoundingClientRect(); return { slot: x.dataset.programSlot, left: Math.round(r.left), top: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), card: Math.round(x.firstElementChild.getBoundingClientRect().height) } }))
+      // "30% off applied" is the section's last card (T-137, R5): from 1024px the row has a column more for it.
+      expect(slots.length === 3 && slots.map((x) => x.slot).join() === 'bounty,month2,thirty'
+          && (w < 768 ? slots[0].top < slots[1].top && slots[1].top < slots[2].top
+            : slots[0].left < slots[1].left && slots[1].left < slots[2].left && slots.every((x) => x.top === slots[0].top && x.h === slots[0].h && x.card === slots[0].card)
+              && slots[0].w > slots[1].w && Math.abs(slots[1].w - slots[2].w) <= 1),
+        `${label}: the Bounty Program first (left from 768px), Month 2 beside it, then "30% off applied" (in the row from 1024px), the cards as tall as each other (the render review's fix round)`, JSON.stringify(slots))
       const small = await smallTaps()
       expect(small.length === 0, `${label}: every button is 44px tall or more`, JSON.stringify(small.slice(0, 4)))
       // The owner's review (2026-10-21): no source or explanation line under a tile; the room goes to the charts.
@@ -1523,8 +1722,11 @@ if (wanted('dash')) {
         `${label}: its line: no rate before anyone resolved, and the last day is the big number`, JSON.stringify([m2[0], m2[13]]))
       expect(t['open-tasks'].text.includes('Created since the reset, Wed 21 Oct'), `${label}: Open tasks count from the tasks reset`, t['open-tasks'].text)
       const slots = await page.evaluate(() => [...document.querySelectorAll('[data-program-slot]')].map((x) => { const r = x.getBoundingClientRect(); return { slot: x.dataset.programSlot, left: Math.round(r.left), top: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) } }))
-      expect(slots.length === 2 && slots[0].slot === 'bounty' && (w < 768 ? slots[0].top < slots[1].top : slots[0].left < slots[1].left && slots[0].h === slots[1].h && Math.abs(slots[0].w - slots[1].w) <= 1),
-        `${label}: with its rate, Month 2 still on the right, the two halves of the row as tall as each other (it took the left before the render review's fix round)`, JSON.stringify(slots))
+      expect(slots.length === 3 && slots.map((x) => x.slot).join() === 'bounty,month2,thirty'
+          && (w < 768 ? slots[0].top < slots[1].top && slots[1].top < slots[2].top
+            : slots[0].left < slots[1].left && slots[1].left < slots[2].left && slots.every((x) => x.top === slots[0].top && x.h === slots[0].h) && slots.every((x) => Math.abs(x.w - slots[0].w) <= 1)),
+        `${label}: with its rate, Month 2 still beside the Bounty Program, then "30% off applied": three equal thirds from 1024px, as tall as each other (Month 2 took the left before the render review's fix round)`, JSON.stringify(slots))
+      expect(t['needs-hand'].numbers[0] === '5' && t['thirty-applied'].numbers[0] === '212', `${label}: 5 need a hand, 212 codes on memberships`, JSON.stringify([t['needs-hand'].numbers, t['thirty-applied'].numbers]))
     }
     {
       const label = `Dashboard, empty, ${w}x${h}`
@@ -1533,7 +1735,8 @@ if (wanted('dash')) {
       await ready()
       await check(label, `dash-empty-${w}`)
       const t = await tiles()
-      expect(t['open-tasks'].text.includes('All caught up') && t['to-decide'].text.includes('Nothing to decide') && t.month2.text.includes('No first payment since Fri 9 Oct yet')
+      expect(t['open-tasks'].text.includes('All caught up') && t['needs-hand'].text.includes('Nothing waiting') && t['needs-hand'].numbers[0] === '0'
+        && t['thirty-applied'].text.includes('None yet') && t['thirty-applied'].numbers[0] === '0' && t.month2.text.includes('No first payment since Fri 9 Oct yet')
         && t['avg-progress'].text.includes('No snapshot since the switch') && t.churned.text.includes('No snapshot in these 14 days') && !t.churned.numbers.length,
         `${label}: each tile says what nothing means, and Churned shows no 0 without a snapshot`)
     }
@@ -1547,7 +1750,7 @@ if (wanted('dash')) {
       const down = ['open-tasks', 'churned', 'avg-progress']
       expect(down.every((k) => t[k].failed && t[k].numbers.length === 0 && t[k].text.includes("Couldn't load")),
         `${label}: Open tasks, Churned and Avg progress say "Couldn't load" and show no number`, JSON.stringify(down.map((k) => t[k].numbers)))
-      expect(t['to-decide'].numbers[0] === '3' && !t.active.failed && t.active.numbers.length === 1 && t.active.text.includes("Couldn't load the line"),
+      expect(t['needs-hand'].numbers[0] === '3' && t['thirty-applied'].numbers[0] === '27' && !t.active.failed && t.active.numbers.length === 1 && t.active.text.includes("Couldn't load the line"),
         `${label}: the rest stands; Active keeps its number and says its line could not load`)
       const alert = await page.$eval('[role="alert"]', (e) => e.innerText)
       expect(alert.includes('Some numbers couldn\'t load.') && alert.includes("This account can't read the tasks.") && alert.includes('The database took too long to answer.') && alert.includes('Retry')
@@ -1571,7 +1774,7 @@ if (wanted('dash')) {
       await readyFailed()
       await check(label, `dash-error-${w}`)
       const t = await tiles()
-      expect(TILES.every((k) => t[k].failed && t[k].numbers.length === 0), `${label}: all 8 tiles "Couldn't load", not one number`, JSON.stringify(TILES.map((k) => t[k].numbers)))
+      expect(TILES.every((k) => t[k].failed && t[k].numbers.length === 0), `${label}: all 9 tiles "Couldn't load", not one number (the two 30% tiles among them)`, JSON.stringify(TILES.map((k) => t[k].numbers)))
       expect((await page.$eval('[role="alert"]', (e) => e.innerText)).includes("Couldn't load the dashboard."), `${label}: the line at the top says nothing could load`)
       const m = await headerMeta()
       expect(m && m.failed && m.text.includes("Couldn't load") && !/Updated \d\d:\d\d/.test(m.text),
@@ -2005,6 +2208,14 @@ if (wanted('people')) {
       if (name === 'synced') expect(text.includes('Synced since the switch'), `${label}: "Synced since the switch"`)
       if (name === 'stale') expect(text.includes('Not synced since the switch') && text.includes('These numbers are from before the course switch.'), `${label}: "Not synced since the switch", and why the numbers are old`)
       if (name === 'never') expect(text.includes('Never synced'), `${label}: "Never synced"`)
+      // The 30% request's code is offered to copy only once Whop made it (its Whop id on the request, T-137): Maya's pending
+      // request holds a claimed name with no id, Jonah's approved one a code Whop made.
+      if (name === 'synced' || name === 'stale') {
+        const copies = await page.$$eval('button', (bs) => bs.map((b) => b.textContent.trim()).filter((t) => t.startsWith('Copy ECOM30')))
+        expect(name === 'synced' ? copies.length === 0 && text.includes('See on the 30% page') : JSON.stringify(copies) === JSON.stringify(['Copy ECOM30-7B20C4']),
+          name === 'synced' ? `${label}: her 30% request, a claim with no Whop id: no "Copy ECOM30-K7Q2MX" (that code may not exist)` : `${label}: his approved request, its code made on Whop: "Copy ECOM30-7B20C4"`,
+          JSON.stringify(copies))
+      }
       if (name === 'canceling') {
         // The render review's fix round: the note is folded under "Sync details", with the counts.
         const fold = await page.evaluate(() => { const d = document.querySelector('details[data-sync-details]'); return d ? { open: d.open, text: d.textContent } : null })
@@ -2726,6 +2937,23 @@ if (LANE_PARTS.some(wanted)) {
   }
 
   if (wanted('insights')) {
+    /** The "30% off applied" card: its note, its number, its change line, whether a chart is drawn, its bars, its empty line. Null when it is not there. */
+    const thirtyCard = () => page.evaluate(() => {
+      const h = [...document.querySelectorAll('h2')].find((x) => x.textContent === '30% off applied')
+      if (!h) return null
+      const card = h.parentElement.parentElement
+      const row = card.children[1]
+      const spans = row ? [...row.children] : []
+      return {
+        note: h.nextElementSibling?.textContent ?? null,
+        number: spans[0]?.textContent ?? null,
+        change: spans[1] ? spans[1].textContent.replace(/\s+/g, ' ').trim() : null,
+        chart: !!card.querySelector('[aria-roledescription="chart"]'),
+        // The chart's days, from its table for screen readers (beside the chart, as on the Dashboard's tiles).
+        bars: card.querySelectorAll('tbody tr').length,
+        empty: [...card.querySelectorAll('p')].map((p) => p.textContent).find((t) => t.startsWith('No 30%')) ?? null,
+      }
+    })
     for (const size of SIZES) {
       const label = `insights, full, ${size.join('x')}`
       console.log(`\n${label}`)
@@ -2759,6 +2987,11 @@ if (LANE_PARTS.some(wanted)) {
       expect(labels.length >= 6 && labels.every((l) => /^\w{3} \d{1,2} \w{3}$/.test(l)), `${label}: the axes' days read like "Wed 7 Oct"`, JSON.stringify(labels.slice(0, 4)))
       expect(/Updated \d\d:\d\d/.test(await bodyText()), `${label}: the header says when it was updated`)
       expect((await bodyText()).includes('Activity right now') && !(await bodyText()).includes('—'), `${label}: the activity card, no em dash`)
+      // "30% off applied" (T-137, R5), drawn as the Bounty Program's card: the fixture's 51 codes over 25 days, 26 in the
+      // 14 days shown against 25 in the 14 before, and bars per day.
+      const thirty = await thirtyCard()
+      expect(thirty && thirty.note === '51 in all time' && thirty.number === '26' && thirty.change === '↑1 more (+4%) than the period before' && thirty.chart && thirty.bars >= 10,
+        `${label}: "30% off applied", drawn as the Bounty Program's card: its count in the range, the change against the 14 days before, the bars per day`, JSON.stringify(thirty))
       await check(label, `insights-full-${size[0]}`)
       await tapsOk(label)
     }
@@ -2792,6 +3025,13 @@ if (LANE_PARTS.some(wanted)) {
           `${label}: the two failed reads say so, with no 0 in their place`)
         expect(text.includes('The database took too long to answer.') && !text.includes('canceling statement'), `${label}: in plain words, the database's own behind Details`)
       }
+      // The 30% card in each state (T-137, R5): a failed read is ReadFailed with its plain words, never 0.
+      const thirty = await thirtyCard()
+      const thirtyFailed = (await bodyText()).includes("30% off applied: couldn't load.")
+      if (state === 'partial' || state === 'error') expect(thirtyFailed && thirty === null, `${label}: "30% off applied: couldn't load.", with Retry, and no count`, JSON.stringify(thirty))
+      if (state === 'empty') expect(!thirtyFailed && thirty?.note === '0 in all time' && thirty.number === '0' && thirty.empty === 'No 30% code went on in this range.', `${label}: the 30% card at 0, "No 30% code went on in this range."`, JSON.stringify(thirty))
+      if (state === 'loading') expect(!thirtyFailed && thirty?.note === 'Loading' && thirty.number === '…', `${label}: the 30% card loading: "…", never a 0`, JSON.stringify(thirty))
+      if (state === 'noreset') expect(thirty?.note === '51 in all time', `${label}: the 30% card stands`, JSON.stringify(thirty))
       if (state === 'noreset') {
         const text = await bodyText()
         expect(text.includes('The database took too long to answer.') && (await page.$('[data-metric="avg_progress"]')) === null && (await page.$('[data-metric="churned_count"]')) !== null,
@@ -2846,27 +3086,22 @@ if (wanted('review')) {
     }
   }
   {
-    // The 30% page and Tasks keep their tabs, with no counts, while the list loads.
+    // Tasks keeps its tabs, with no counts, while the list loads. The 30% page is one list since the 30% applies itself
+    // (T-137, R4): no tabs to keep.
     await go('/dev/admin/discounts?state=loading', [390, 844])
-    const tabs = await page.$$eval('[role="tab"]', (ts) => ts.map((t) => t.textContent.trim()))
-    expect(JSON.stringify(tabs) === JSON.stringify(['Applied', 'Approved', 'Rejected', 'Code Applied']), 'the 30% page, loading: its four tabs, no counts', JSON.stringify(tabs))
+    expect((await page.$$('[role="tab"]')).length === 0 && (await page.$('.animate-pulse')) !== null, 'the 30% page, loading: its skeleton rows, and no tabs (one list)')
     await go('/dev/admin/tasks?state=loading', [390, 844])
     const taskTabs = await page.$$eval('[role="tab"]', (ts) => ts.map((t) => t.textContent.trim()))
     expect(JSON.stringify(taskTabs) === JSON.stringify(['To do', 'Sent', 'Dismissed']), 'Tasks, loading: its tabs, no counts', JSON.stringify(taskTabs))
   }
-  console.log('\nreview: the 30% page\'s tabs on a phone')
+  console.log('\nreview: the 30% page\'s one list on a phone')
   for (const width of [390, 375, 360]) {
     await go('/dev/admin/discounts', [width, 844])
-    await page.waitForSelector('[role="tablist"]')
+    await page.waitForFunction(() => /Updated \d\d:\d\d/.test(document.body.innerText), { timeout: 30000 })
     await sleep(300)
-    const m = await page.evaluate(() => {
-      const t = document.querySelector('[role="tablist"][aria-label="Lists"]')
-      const tabs = [...t.querySelectorAll('[role="tab"]')]
-      return { client: t.clientWidth, scroll: t.scrollWidth, rows: new Set(tabs.map((x) => Math.round(x.getBoundingClientRect().top))).size, h: Math.min(...tabs.map((x) => x.getBoundingClientRect().height)), overflowX: getComputedStyle(t).overflowX }
-    })
-    expect(m.rows === 1 && m.h >= 44 && (width >= 390 ? m.scroll <= m.client : m.overflowX === 'auto'),
-      `${width}px wide: the four tabs on one line, 44px tall, ${width >= 390 ? 'all in view' : 'the row scrolling sideways rather than wrapping'}`, JSON.stringify(m))
-    if (width === 390) await check('review, the 30% tabs at 390x844', 'review-thirty-tabs-390')
+    // The tabs went with the 30% that applies itself (T-137, R4); the one list must still fit the narrowest phone.
+    expect((await page.$$('[role="tab"]')).length === 0, `${width}px wide: one list, no tabs`)
+    await check(`review, the 30% list at ${width}x844`, width === 390 ? 'review-thirty-list-390' : null)
   }
   const errs = newConsoleErrors(from)
   expect(errs.length === 0, 'review: no error in the browser console', errs.slice(0, 3).join(' || '))
@@ -2988,13 +3223,14 @@ if (wanted('render')) {
     expect(gaps.a === gaps.b && gaps.titles.every((h) => h === gaps.titles[0]), `${size.join('x')}: the three sections the same distance apart (${gaps.a}px and ${gaps.b}px), every title row as tall`, JSON.stringify(gaps))
     const meter = await page.evaluate(() => { const m = document.querySelector('[data-tile="month2"] [role="meter"]'); return { kids: m.children.length, h: Math.round(m.getBoundingClientRect().height) } })
     expect(meter.kids === 1 && meter.h === 6, `${size.join('x')}: Month 2's countdown is a plain bar, no knob`, JSON.stringify(meter))
-    const today = await page.evaluate(() => [...document.querySelectorAll('[data-tile="open-tasks"], [data-tile="to-decide"]')].map((t) => t.innerText.replace(/\s+/g, ' ')))
+    const today = await page.evaluate(() => [...document.querySelectorAll('[data-tile="open-tasks"], [data-tile="needs-hand"]')].map((t) => t.innerText.replace(/\s+/g, ' ')))
     expect(today.every((t) => (t.match(/\bopen\b/gi) ?? []).length <= 1) && today[0].includes('Go to Tasks') && today[1].includes('Go to 30% off'),
       `${size.join('x')}: Today's tiles say "open" once at most, their links named after their pages`, JSON.stringify(today))
   }
 
   console.log('\nrender: the rows\' actions on the right, under the words on a phone')
-  for (const [path, label] of [['/dev/admin/discounts', '30% off, Applied'], ['/dev/admin/discounts?tab=approved', '30% off, Approved'], ['/dev/admin/tasks', 'Tasks, To do']]) {
+  // The 30% page's one list (T-137, R4) holds pending and approved rows with actions, and a decided row with none.
+  for (const [path, label] of [['/dev/admin/discounts', '30% off'], ['/dev/admin/discounts?state=reasons', '30% off, every reason'], ['/dev/admin/tasks', 'Tasks, To do']]) {
     for (const size of [[1440, 900], [390, 844]]) {
       await go(path, size)
       await settle()
@@ -3017,12 +3253,12 @@ if (wanted('render')) {
 
   console.log('\nrender: the team\'s own 30% code is never warned about')
   for (const size of [[1440, 900], [390, 844]]) {
-    await go('/dev/admin/discounts?tab=approved&state=owncode', size)
+    await go('/dev/admin/discounts?state=owncode', size)
     await settle()
-    const rows = await page.$$eval('.list-row', (rs) => rs.map((r) => ({ name: r.querySelector('a')?.textContent, coupon: [...r.querySelectorAll('[data-coupon]')].map((x) => x.dataset.coupon), mark: [...r.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Mark code applied') })))
-    expect(rows.length === 2 && rows.every((r) => r.coupon.length === 0 && r.mark),
-      `${size.join('x')}: Approved, the team's own code already on both memberships in Whop (one by its name, one by the request's own promo id): no coupon line, Mark code applied there`, JSON.stringify(rows))
-    await check(`render, 30% off, Approved, the team's own codes, ${size.join('x')}`, `render-thirty-owncode-${size[0]}`)
+    const rows = await page.$$eval('.list-row[data-row-status="approved"]', (rs) => rs.map((r) => ({ name: r.querySelector('a')?.textContent, coupon: [...r.querySelectorAll('[data-coupon]')].map((x) => x.dataset.coupon), again: [...r.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Try again') })))
+    expect(rows.length === 2 && rows.every((r) => r.coupon.length === 0 && r.again),
+      `${size.join('x')}: approved, the team's own code already on both memberships in Whop (one by its name, one by the request's own promo id): no coupon line, Try again there (Mark code applied until T-137)`, JSON.stringify(rows))
+    await check(`render, 30% off, approved, the team's own codes, ${size.join('x')}`, `render-thirty-owncode-${size[0]}`)
   }
 
   console.log('\nrender: every pill row on one line on a phone')

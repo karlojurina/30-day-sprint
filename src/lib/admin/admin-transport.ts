@@ -2,6 +2,8 @@
 
 import { createClient, getSharedSession } from "@/lib/supabase-browser";
 import type { ThirtyView } from "@/lib/admin/thirty-view";
+import { THIRTY_REASONS } from "@/lib/thirty-words";
+import type { ThirtyReason } from "@/lib/thirty-words";
 
 /**
  * The rebuilt admin pages' calls to the server, behind one interface (admin
@@ -13,12 +15,15 @@ import type { ThirtyView } from "@/lib/admin/thirty-view";
  * (src/app/dev/admin/fixtures.ts), and every state of a page can be looked
  * at with no login and no database.
  *
- * The 30% page's calls (work item 3): its read and the three discount
- * routes, and since the render review's second round of admin rebuild 2
- * "Check Whop again" (POST /api/admin/thirty/check-coupon). The ads tick's
- * call went with the tick (2026-10-20). Today's calls, and the 30% page's
- * "Mark messaged" and its Undo through Today's mark route, went with Today
- * (admin rebuild 2, D2).
+ * The 30% page's calls (work item 3): its read, Approve (and Try again, the
+ * same route on an approved request) and Reject, and since the render
+ * review's second round of admin rebuild 2 "Check Whop again" (POST
+ * /api/admin/thirty/check-coupon). Mark code applied's call went with its
+ * route in the 30% that applies itself (T-137): Try again marks a request
+ * applied once Whop shows its code on the student's membership. The ads
+ * tick's call went with the tick (2026-10-20). Today's calls, and the 30%
+ * page's "Mark messaged" and its Undo through Today's mark route, went with
+ * Today (admin rebuild 2, D2).
  *
  * No call throws. Every answer is `{ ok: true, data }` or `{ ok: false,
  * error }`, where `error` is a sentence the page can show: the route's own
@@ -31,21 +36,46 @@ export type Answer<T> =
   | { ok: true; status: number; data: T }
   | { ok: false; status: number; error: string; code?: string };
 
+/**
+ * Approve's and Try again's answer when the route answered 2xx (PRD §9.4):
+ * where the request ended, its code, and why the code is not on the
+ * membership yet when it is not (an attempt_failed event's reason, the step
+ * that said so, the membership's status and Whop's words).
+ */
+export interface ApproveAnswer {
+  promoCode: string | null;
+  status: "pending" | "approved" | "applied" | "rejected" | null;
+  reason: ThirtyReason | null;
+  step: string | null;
+  membershipStatus: string | null;
+  message: string | null;
+}
+
+/**
+ * Reject's answer (PRD §9.4): the request's code when one was made, and its
+ * state: "usable" (made, on nobody's membership: it works at checkout until
+ * someone switches it off in Whop), "may_exist" (a code the app could not ask
+ * Whop about) or null (no code made).
+ */
+export interface RejectAnswer {
+  code: string | null;
+  codeState: "usable" | "may_exist" | null;
+}
+
 /** What the 30% page (src/components/admin/thirty/ThirtyView.tsx) calls. */
 export interface ThirtyTransport {
   /** GET /api/admin/thirty. */
   loadThirty(): Promise<Answer<ThirtyView>>;
   /**
-   * POST /api/discounts/approve. "Approve anyway" (a founder's or an admin's,
-   * the owner's review of 2026-10-21): `override` skips the 30% rule, and
+   * POST /api/discounts/approve: Approve on a pending request, Try again on an
+   * approved one. "Approve anyway" (a founder's or an admin's, the owner's
+   * review of 2026-10-21): `override` skips the 30% rule, and
    * `overrideCoupon` the coupon check too, on a row the coupon refuses. The
    * route refuses either from a csm.
    */
-  approve(requestId: string, override: boolean, overrideCoupon: boolean): Promise<Answer<{ promoCode: string | null }>>;
+  approve(requestId: string, override: boolean, overrideCoupon: boolean): Promise<Answer<ApproveAnswer>>;
   /** POST /api/discounts/reject. The student sees the reason. */
-  reject(requestId: string, reason: string | null): Promise<Answer<null>>;
-  /** POST /api/discounts/mark-applied: the code is on the student's membership in Whop. */
-  markApplied(requestId: string): Promise<Answer<null>>;
+  reject(requestId: string, reason: string | null): Promise<Answer<RejectAnswer>>;
   /**
    * POST /api/admin/thirty/check-coupon ("Check Whop again" on a pending
    * row the stored coupon refuses, or the stored row says the student is
@@ -119,26 +149,40 @@ export const adminTransport: ThirtyTransport = {
   loadThirty: () => send<ThirtyView>("GET", "/api/admin/thirty"),
 
   async approve(requestId, override, overrideCoupon) {
-    const r = await send<{ promoCode?: string }>("POST", "/api/discounts/approve", (me) => ({
+    const r = await send<Record<string, unknown> | null>("POST", "/api/discounts/approve", (me) => ({
       requestId,
       override,
       overrideCoupon,
       reviewerId: me,
     }));
-    return r.ok ? { ...r, data: { promoCode: r.data?.promoCode ?? null } } : r;
+    if (!r.ok) return r;
+    const d = r.data ?? {};
+    const text = (v: unknown) => (typeof v === "string" && v !== "" ? v : null);
+    const status = ["pending", "approved", "applied", "rejected"].includes(String(d.status)) ? (d.status as ApproveAnswer["status"]) : null;
+    return {
+      ...r,
+      data: {
+        promoCode: text(d.promoCode),
+        status,
+        reason: (THIRTY_REASONS as readonly string[]).includes(String(d.reason)) ? (d.reason as ThirtyReason) : null,
+        step: text(d.step),
+        membershipStatus: text(d.membershipStatus),
+        message: text(d.message),
+      },
+    };
   },
 
   async reject(requestId, reason) {
-    const r = await send<unknown>("POST", "/api/discounts/reject", () => ({ requestId, reason }));
-    return r.ok ? { ...r, data: null } : r;
-  },
-
-  async markApplied(requestId) {
-    const r = await send<unknown>("POST", "/api/discounts/mark-applied", (me) => ({
-      requestId,
-      appliedBy: me,
-    }));
-    return r.ok ? { ...r, data: null } : r;
+    const r = await send<{ code?: unknown; codeState?: unknown } | null>("POST", "/api/discounts/reject", () => ({ requestId, reason }));
+    if (!r.ok) return r;
+    const state = r.data?.codeState;
+    return {
+      ...r,
+      data: {
+        code: typeof r.data?.code === "string" && r.data.code !== "" ? r.data.code : null,
+        codeState: state === "usable" || state === "may_exist" ? state : null,
+      },
+    };
   },
 
   async checkCoupon(requestId) {

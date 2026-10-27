@@ -2,7 +2,8 @@
 // (WI-1; _admin/prds/admin-rebuild-2/admin_rebuild_2_prd.md in the
 // workspace, D1, D2, D11 and D12 for the frame).
 //
-//   D1   the top bar's entries for each role, in order, with no "More"; the
+//   D1   the top bar's entries for each role, in order, with no "More" (and,
+//        since the 30% that applies itself, T-137, R4, no "30% off"); the
 //        Dashboard as the home every sign-in, set-password and the lockup
 //        go to; which pages wear the dark look, "/admin" covering itself only
 //   D2   Today, Brand Owners, Stats, Settings and Discord test gone: their
@@ -45,15 +46,23 @@ const leavesOf = (entries) => entries.flatMap((e) => (e.type === 'leaf' ? [e] : 
 // ════════════════════════════════════════════════════════════════════════════
 console.log('\n=== D1: the bar for each role ===')
 {
+  // The 30% that applies itself (T-137, R4): the 30% goes on by itself, so "30% off" left the bar; the page stays, reached
+  // from the Dashboard's "30% needs a hand" and a student's page.
   const founder = barOf('founder')
-  ok(show(founder) === show(['Dashboard', '30% off', 'Tasks', 'Students[All students, Student journey]', 'Feedback[Lesson feedback, Survey]', 'Templates', 'Insights', 'Team']),
-     'a founder: Dashboard · 30% off · Tasks · Students ▾ · Feedback ▾ · Templates · Insights · Team', show(founder))
+  ok(show(founder) === show(['Dashboard', 'Tasks', 'Students[All students, Student journey]', 'Feedback[Lesson feedback, Survey]', 'Templates', 'Insights', 'Team']),
+     'a founder: Dashboard · Tasks · Students ▾ · Feedback ▾ · Templates · Insights · Team', show(founder))
   const admin = barOf('admin')
-  ok(show(admin) === show(['Dashboard', '30% off', 'Tasks', 'Students[All students, Student journey]', 'Feedback[Lesson feedback, Survey]', 'Templates', 'Insights']),
+  ok(show(admin) === show(['Dashboard', 'Tasks', 'Students[All students, Student journey]', 'Feedback[Lesson feedback, Survey]', 'Templates', 'Insights']),
      'an admin: the same without Team (founder only, as before)', show(admin))
   const csm = barOf('csm')
-  ok(show(csm) === show(['Dashboard', '30% off', 'Tasks', 'Students[All students, Student journey]', 'Templates', 'Insights']),
+  ok(show(csm) === show(['Dashboard', 'Tasks', 'Students[All students, Student journey]', 'Templates', 'Insights']),
      'a csm: no Feedback (both its pages are hidden from the csm role, as they were) and no Team', show(csm))
+  const leaves = ['founder', 'admin', 'csm', undefined].flatMap((role) => leavesOf(entriesFor(role)))
+  ok(!leaves.some((l) => l.href === '/admin/discounts' || l.label === '30% off') && exists('src/app/admin/(authenticated)/discounts/page.tsx'),
+     'T-137, R4: no role\'s bar has a "30% off" entry, and the 30% page itself stays', show([...new Set(leaves.map((l) => l.label))]))
+  const dash = src('src/components/admin/dashboard/DashboardView.tsx')
+  ok(/href="\/admin\/discounts"[\s\S]{0,120}title="30% needs a hand"/.test(dash) && /href=\{`\/admin\/discounts\?student=/.test(src('src/components/admin/students/StudentDetailView.tsx')),
+     'the page is reached from the Dashboard\'s "30% needs a hand" tile and from a student\'s page')
   ok(show(barOf(undefined)) === show(admin), 'no member read yet: the founder-only entry stays hidden')
   ok(ADMIN_NAV[0].type === 'leaf' && ADMIN_NAV[0].label === 'Dashboard' && ADMIN_NAV[0].href === ADMIN_HOME,
      'Dashboard is the first entry, and it is the home')
@@ -74,7 +83,8 @@ console.log('\n=== D1: which entry is marked ===')
   const marked = (pathname) => leavesOf(entriesFor('founder')).filter((l) => isActive(l, pathname)).map((l) => l.label)
   const cases = [
     ['/admin', ['Dashboard']],
-    ['/admin/discounts', ['30% off']],
+    // The 30% page is still a page, with no entry of its own to mark (T-137, R4).
+    ['/admin/discounts', []],
     ['/admin/tasks', ['Tasks']],
     ['/admin/tasks/insights', ['Tasks']],
     ['/admin/students', ['All students']],

@@ -17,8 +17,12 @@
 // The page's reads (readDashboard in src/app/admin/(authenticated)/page.tsx)
 // are taken from the source with TypeScript's parser and run on a client that
 // records every call and answers it: the open tasks get the tasks reset's
-// floor, 30% to decide counts the pending requests from 1 October, and a
-// count that did not come back is a failure.
+// floor, and a count that did not come back is a failure. The two 30% reads
+// (the 30% that applies itself, T-137, R5) run on stub-server.ts's database:
+// "30% needs a hand" counts exactly the requests the 30% page lists
+// (readNeedsHand, the page's own reads, against loadThirtyData's list on the
+// same rows at the same moment), and "30% off applied" the applied requests
+// from 1 October; a failed read is a failure, never 0.
 import fs from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import ts from 'typescript'
@@ -33,6 +37,8 @@ const { ADMIN_STUDENT_JOIN_CUTOFF, TASKS_STUDENT_JOIN_CUTOFF } = await import('.
 const { CURRICULUM_RESET_KEY } = await import('./_gen/curriculum-reset.ts')
 const { checkTasksResetAt } = await import('./_gen/tasks-reset.ts')
 const { fetchAllRowsByKey } = await import('./_gen/supabase-pagination.ts')
+const { readNeedsHand, loadThirtyData } = await import('./_gen/thirty-data.ts')
+const { FakeDb, fakeClient } = await import('./_gen/stub-server.ts')
 
 let pass = 0
 const fails = []
@@ -54,7 +60,7 @@ const read = (data) => ({ ok: true, data })
 const failed = (error) => ({ ok: false, error })
 /** Every read fine and empty, the switch on 19 Oct: each test changes what it is about. */
 const reads = (over = {}) => ({
-  students: read([]), bounty: read([]), openTasks: read(0), tasksResetAt: read(null), toDecide: read(0),
+  students: read([]), bounty: read([]), openTasks: read(0), tasksResetAt: read(null), needsHand: read(0), thirtyApplied: read(0),
   snapshots: read([]), canceling: read([]), resetAt: read('2026-10-19T14:33:33.972Z'), ...over,
 })
 
@@ -212,18 +218,25 @@ console.log('\n=== The reads: a failure is never a number ===')
 console.log('\n=== The whole page: what a failed read takes with it ===')
 {
   const students = [student('s1', '2026-10-10T08:00:00.000Z')]
-  const fine = M.buildDashboard(reads({ students: read(students), openTasks: read(31), toDecide: read(3), tasksResetAt: read('2026-10-21T05:00:00.000Z') }), NOW_OCT)
+  const fine = M.buildDashboard(reads({ students: read(students), openTasks: read(31), needsHand: read(3), thirtyApplied: read(27), tasksResetAt: read('2026-10-21T05:00:00.000Z') }), NOW_OCT)
   ok(fine.failed.length === 0 && fine.openTasks.ok && fine.openTasks.value.count === 31 && fine.openTasks.value.since === '2026-10-21T05:00:00.000Z',
      'open tasks: the count, and the reset it counts from')
-  ok(fine.toDecide.ok && fine.toDecide.value.count === 3 && fine.toDecide.value.since === DISCOUNT_ELIGIBLE_FROM,
-     '30% to decide: the count, from 1 October, the 30% page\'s Applied tab')
+  ok(fine.needsHand.ok && fine.needsHand.value.count === 3 && fine.needsHand.value.since === DISCOUNT_ELIGIBLE_FROM,
+     '30% needs a hand: the count of the 30% page\'s list, from 1 October')
+  ok(fine.thirtyApplied.ok && fine.thirtyApplied.value.count === 27 && fine.thirtyApplied.value.since === DISCOUNT_ELIGIBLE_FROM,
+     '30% off applied: the count, from 1 October')
+  ok(!('toDecide' in fine), 'no "30% to decide" any more (T-137, R5)')
   ok(fine.active.ok && fine.active.value.count === 1 && fine.canceling.ok && fine.canceling.value.count === 0, 'Active and Canceling from the students')
 
   const noStudents = M.buildDashboard(reads({ students: failed('canceling statement due to statement timeout') }), NOW_OCT)
   const studentTiles = ['monthTwo', 'bounty', 'active', 'canceling'].map((k) => noStudents[k])
   ok(studentTiles.every((t) => !t.ok && t.error === 'canceling statement due to statement timeout'),
      'no students read: Month 2, Bounty, Active and Canceling all fail, with the reason; none shows a number')
-  ok(noStudents.openTasks.ok && noStudents.toDecide.ok, 'the counts that do not need it stand')
+  ok(noStudents.openTasks.ok && noStudents.needsHand.ok && noStudents.thirtyApplied.ok, 'the counts that do not need it stand')
+  const noThirty = M.buildDashboard(reads({ needsHand: failed('discount_request_events (write_failed): JWT expired'), thirtyApplied: failed('JWT expired') }), NOW_OCT)
+  ok(!noThirty.needsHand.ok && !noThirty.thirtyApplied.ok && noThirty.openTasks.ok
+       && show(noThirty.failed.map((f) => f.read)) === show(['30% needs a hand', '30% off applied']),
+     'a 30% read that failed: its tile fails, never 0, and the list names the read', show(noThirty.failed))
 
   const settingsDown = 'admin_config: permission denied for table admin_config'
   const noSettings = M.buildDashboard(reads({ tasksResetAt: failed(settingsDown), resetAt: failed(settingsDown), openTasks: failed(settingsDown) }), NOW_OCT)
@@ -236,7 +249,7 @@ console.log('\n=== The whole page: what a failed read takes with it ===')
      'two different reads that failed alike stay two lines', show(twoTimeouts.failed))
 
   const reasons = M.buildDashboard(M.allFailed('Failed to fetch'), NOW_OCT)
-  const tiles = ['monthTwo', 'bounty', 'openTasks', 'toDecide', 'active', 'canceling', 'churned', 'avgProgress']
+  const tiles = ['monthTwo', 'bounty', 'openTasks', 'needsHand', 'thirtyApplied', 'active', 'canceling', 'churned', 'avgProgress']
   ok(tiles.every((k) => !reasons[k].ok), 'a loader that threw: every tile fails, none shows a number')
 }
 
@@ -349,18 +362,23 @@ console.log("\n=== The page's reads (readDashboard in page.tsx) ===")
     configReads: M.configReads, countRead: M.countRead, rowsRead: M.rowsRead, trendDays: M.trendDays,
     DASH_STUDENT_COLUMNS: M.DASH_STUDENT_COLUMNS, DASH_STUDENT_STATUSES: M.DASH_STUDENT_STATUSES, SNAPSHOT_COLUMNS: M.SNAPSHOT_COLUMNS, TASKS_RESET_KEY: M.TASKS_RESET_KEY,
     CURRICULUM_RESET_KEY, ADMIN_STUDENT_JOIN_CUTOFF, TASKS_STUDENT_JOIN_CUTOFF, PAYING_WHOP_PLAN_IDS_ARRAY,
-    fetchAllRowsByKey, DISCOUNT_ELIGIBLE_FROM,
+    fetchAllRowsByKey, DISCOUNT_ELIGIBLE_FROM, readNeedsHand,
   }
   const names = Object.keys(scope)
   const readDashboard = new Function(...names, `${js}\nreturn readDashboard;`)(...names.map((n) => scope[n]))
 
-  /** A client that records every call of every query and answers it from `answer(table, calls)`. */
-  function recorder(answer) {
+  /**
+   * A client that records every call of every query and answers it from `answer(table, calls)`. With `db`, the two
+   * tables of the 30% (discount_requests, discount_request_events) are read from stub-server.ts's database instead, as
+   * PostgREST answers them (its own log records those calls).
+   */
+  function recorder(answer, db = null) {
     const log = []
     return {
       log,
       client: {
         from(table) {
+          if (db && (table === 'discount_requests' || table === 'discount_request_events')) return fakeClient(db).from(table)
           const calls = []
           log.push({ table, calls })
           const chain = new Proxy({}, {
@@ -381,7 +399,6 @@ console.log("\n=== The page's reads (readDashboard in page.tsx) ===")
     if (over[table]) return over[table](calls)
     if (table === 'admin_config') return config([{ key: CURRICULUM_RESET_KEY, value: '2026-10-19T14:33:33.972Z' }])
     if (table === 'tasks') return { data: null, count: 31, error: null }
-    if (table === 'discount_requests') return { data: null, count: 3, error: null }
     if (table === 'students') return { data: [student('s1', '2026-10-10T08:00:00.000Z')], error: null }
     return { data: [], error: null }
   }
@@ -398,10 +415,6 @@ console.log("\n=== The page's reads (readDashboard in page.tsx) ===")
        && has(tasks.calls, 'eq', 'student.csm_exempt', false) && has(tasks.calls, 'gte', 'student.first_paid_at', TASKS_STUDENT_JOIN_CUTOFF),
        'with the Tasks page\'s own filters: a template, not exempt, first paid since the tasks\' cutoff', show(tasks.calls))
     ok(!tasks.calls.some((c) => c[0] === 'gte' && c[1] === 'created_at'), 'and no created_at floor before the reset')
-    const [disc] = queries(log, 'discount_requests')
-    ok(has(disc.calls, 'select', 'id', { count: 'exact', head: true }) && has(disc.calls, 'eq', 'status', 'pending')
-       && has(disc.calls, 'gte', 'created_at', DISCOUNT_ELIGIBLE_FROM) && r.toDecide.ok && r.toDecide.data === 3,
-       '30% to decide: the pending requests from 1 October, counted by the database (the Applied tab)', show(disc.calls))
     const [stu] = queries(log, 'students')
     ok(has(stu.calls, 'select', M.DASH_STUDENT_COLUMNS) && has(stu.calls, 'not', 'whop_membership_id', 'is', null)
        && has(stu.calls, 'in', 'membership_status', ['active', 'past_due', 'canceled', 'expired'])
@@ -435,14 +448,64 @@ console.log("\n=== The page's reads (readDashboard in page.tsx) ===")
        'no settings: the open tasks are not counted without their floor, and carry the reason', show(r.openTasks))
   }
   {
-    const { client } = recorder(answers({ tasks: () => ({ data: null, count: null, error: null }), discount_requests: () => ({ data: null, count: null, error: { message: 'JWT expired' } }) }))
+    const { client } = recorder(answers({ tasks: () => ({ data: null, count: null, error: null }) }))
     const r = await readDashboard(client, NOW_OCT)
-    ok(!r.openTasks.ok && !r.toDecide.ok && r.toDecide.error === 'JWT expired', 'a count that did not come back, and one that failed: failures, never 0')
+    ok(!r.openTasks.ok, 'a count that did not come back: a failure, never 0')
   }
   {
     const { client } = recorder(answers({ students: () => ({ data: null, error: { message: 'canceling statement due to statement timeout' } }) }))
     const r = await readDashboard(client, NOW_OCT)
     ok(!r.students.ok && r.students.error === 'canceling statement due to statement timeout', 'a failed page of students is a failed read, never an empty list')
+  }
+  {
+    // The two 30% reads (T-137, R5) on stub-server.ts's database, at one moment.
+    const NOW = at('2026-10-21T09:00:00.000Z')
+    const ago = (minutes) => iso(NOW - minutes * 60_000)
+    const req = (id, status, created_at, more = {}) => ({ id, student_id: `s-${id}`, status, created_at, promo_code: null, rejection_reason: null, ...more })
+    const ev = (request_id, event, created_at, reason = null) => ({ request_id, student_id: `s-${request_id}`, event, actor: 'job', reason, created_at })
+    const rows = [
+      req('p-31m', 'pending', ago(31)), // waiting 31 minutes: listed
+      req('p-29m', 'pending', ago(29)), // 29 minutes: the app's own tries still come first
+      req('a-old', 'approved', ago(60 * 50)), // approved, whatever its age: listed
+      req('p-sept', 'pending', '2026-09-30T21:59:00.000Z'), // before 1 October: never listed
+      req('x-app', 'applied', ago(600), { applied_at: ago(590) }), // applied: counted as applied, not listed
+      req('x-wf', 'rejected', ago(600)), // its newest event a write_failed: listed
+      req('x-wf-31d', 'rejected', ago(60 * 24 * 31)), // a write_failed 31 days ago: not
+      req('x-wf-then', 'applied', ago(600)), // a write_failed, then applied: not listed, counted as applied
+      req('x-app-sept', 'applied', '2026-09-20T10:00:00.000Z'), // applied before 1 October: not counted
+    ]
+    const events = [
+      ev('x-wf', 'rejected', ago(500)), ev('x-wf', 'attempt_failed', ago(499), 'write_failed'),
+      ev('x-wf-31d', 'attempt_failed', ago(60 * 24 * 31 - 10), 'write_failed'),
+      ev('x-wf-then', 'attempt_failed', ago(500), 'write_failed'), ev('x-wf-then', 'applied', ago(490)),
+      ev('p-31m', 'attempt_failed', ago(20), 'no_membership'),
+    ]
+    const seed = () => new FakeDb({
+      discount_requests: rows,
+      discount_request_events: events,
+      students: rows.map((x) => ({ id: x.student_id, first_paid_at: '2026-10-10T08:00:00.000Z', membership_status: 'active' })),
+    })
+    const db = seed()
+    const r = await readDashboard(recorder(answers(), db).client, NOW)
+    const page = await loadThirtyData(fakeClient(db), NOW)
+    const listed = page.ok ? page.data.requests.map((x) => x.id).sort() : null
+    ok(r.needsHand.ok && r.needsHand.data === 3 && show(listed) === show(['a-old', 'p-31m', 'x-wf']) && r.needsHand.data === listed.length,
+       '30% needs a hand counts the 30% page\'s own list at the same moment: pending or approved 30 minutes after applying (from 1 October), and a request whose newest event is a write_failed from the last 30 days; not one waiting 29 minutes, one from September, a write_failed 31 days old or one followed by its applied event',
+       show({ hand: r.needsHand, listed }))
+    const direct = await readNeedsHand(fakeClient(seed()), NOW)
+    ok(direct.ok && show(direct.requests.map((x) => x.id).sort()) === show(listed), 'it is readNeedsHand\'s own answer, the reads the page makes', show(direct))
+    const applied = db.log.filter((q) => q.table === 'discount_requests' && q.filters.includes('status=applied'))
+    ok(r.thirtyApplied.ok && r.thirtyApplied.data === 2 && applied.length === 1 && applied[0].filters.includes(`created_at>=${DISCOUNT_ELIGIBLE_FROM}`),
+       '30% off applied: the applied requests made from 1 October, counted by the database (not the one from September)', show({ applied: r.thirtyApplied, filters: applied[0]?.filters }))
+    const noEvents = seed()
+    noEvents.fail['discount_request_events.select'] = { message: 'permission denied for table discount_request_events' }
+    const r2 = await readDashboard(recorder(answers(), noEvents).client, NOW)
+    ok(!r2.needsHand.ok && r2.needsHand.error.includes('permission denied for table discount_request_events') && r2.thirtyApplied.ok,
+       'the events unread: "30% needs a hand" is a failure with its reason, never fewer rows or 0; the applied count stands', show(r2.needsHand))
+    const noRequests = seed()
+    noRequests.fail['discount_requests.select'] = { message: 'JWT expired' }
+    const r3 = await readDashboard(recorder(answers(), noRequests).client, NOW)
+    ok(!r3.needsHand.ok && !r3.thirtyApplied.ok && r3.thirtyApplied.error === 'JWT expired', 'the requests unread: both 30% tiles fail, never 0', show([r3.needsHand, r3.thirtyApplied]))
   }
 }
 

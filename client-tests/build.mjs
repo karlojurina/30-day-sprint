@@ -314,6 +314,8 @@ gen('../src/app/api/admin/thirty/route.ts', './_gen/admin-thirty-route.ts', [
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ['from "@/lib/admin/thirty-data"', 'from "./thirty-data.ts"'],
   ['from "@/lib/admin/thirty-view"', 'from "./thirty-view.ts"'],
+  // The 30% that applies itself (T-137): the switch the answer's `paused` reads, from the shared step's copy below.
+  THIRTY_APPLY,
   ...toStub('next/server'),
 ])
 gen('../src/lib/admin/config-keys.ts', './_gen/config-keys.ts', [
@@ -549,6 +551,14 @@ gen('../src/lib/thirty-apply.ts', './_gen/thirty-apply.ts', [
   ['from "@/lib/world/discount"', 'from "./discount.ts"'],
   ['from "@/lib/thirty-words"', 'from "./thirty-words.ts"'],
 ])
+// The 30% page's calls (admin-transport.ts, T-137's work item 5, thirty-view.test.mjs): Approve's and Reject's
+// answers as the page gets them. The browser client goes to the hand-written stand-in (a2-browser-stub.ts), so the
+// test's own fetch() answers; its imports from the page's builder are TYPES, and the words' lists are the copy above.
+gen('../src/lib/admin/admin-transport.ts', './_gen/admin-transport.ts', [
+  ['from "@/lib/supabase-browser"', 'from "./a2-browser-stub.ts"'],
+  ['from "@/lib/admin/thirty-view"', 'from "./thirty-view.ts"'],
+  ['from "@/lib/thirty-words"', 'from "./thirty-words.ts"'],
+])
 // The job (GET /api/cron/apply-thirty, T-137's work item 3,
 // apply-thirty-cron.test.mjs): the shared step's copy above, the real
 // cron-auth.ts on stub-server.ts (as the coupon cron's copy above), the pages
@@ -676,6 +686,8 @@ gen('../src/lib/admin/insights-data.ts', './_gen/insights-data.ts', [
   ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
   // The course switch, for Avg progress's floor (the review's fix round).
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  // The 30% codes applied from 1 October (T-137, R5): the rule's dates, copied above, as survey-data.ts's copy maps them.
+  ['from "@/lib/world/discount"', 'from "./discount.ts"'],
 ])
 // The message renderer the preview runs (templates.ts): its one value import
 // is getDayNumber from the types file, which has no imports and runs as it is.

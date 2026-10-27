@@ -196,7 +196,8 @@ console.log('\n=== Rows: the actions on the right; the pill rows on one line on 
      'RowSplit: the words, then the actions in a column of their own from 768px, right-aligned; under the words below it')
   const thirty = fromSrc('src/components/admin/thirty/ThirtyView.tsx')
   const tasks = fromSrc('src/components/admin/tasks/TasksView.tsx')
-  ok((thirty.match(/<RowSplit/g) ?? []).length === 2 && (tasks.match(/<RowSplit/g) ?? []).length === 1, 'the 30% page\'s two kinds of row and the task row use it')
+  // The 30% page's rows since the 30% that applies itself (T-137, R4): pending, approved, and a rejected or applied one listed for a write_failed.
+  ok((thirty.match(/<RowSplit/g) ?? []).length === 3 && (tasks.match(/<RowSplit/g) ?? []).length === 1, 'the 30% page\'s three kinds of row and the task row use it')
   ok(LISTP.PILL_ROW.includes('max-sm:flex-nowrap') && LISTP.PILL_ROW.includes('max-sm:overflow-x-auto') && LISTP.PILL_ROW.includes('flex-wrap'),
      'PILL_ROW: wrapping when wide, one line that scrolls sideways under 640px', LISTP.PILL_ROW)
   const rows = {
@@ -379,6 +380,8 @@ console.log('\n=== The 30%: the team\'s own code, the coupon\'s row ===')
       req('r5', 'a5', 'approved'),
       req('r6', 'a6', 'approved'),
     ],
+    // No failed attempt on any of them (the 30% that applies itself, T-137): the builder reads it, the rows are as before.
+    failures: new Map(),
     team: new Map(),
     lastSyncAt: new Map(),
     coupons: { data: new Map([
@@ -388,7 +391,7 @@ console.log('\n=== The 30%: the team\'s own code, the coupon\'s row ===')
     ]), error: null },
   }
   const live = new Map([
-    // Whop now: the team added the request's own code in Whop, before Mark code applied.
+    // Whop now: the request's own code is on the membership (the team added it in Whop before Mark code applied went).
     ['a1', { ok: true, row: coupon('a1', 'ECOM30-A1', 'promo_a1') }],
     // The same, its name not read: only the request's own promo id says it is theirs.
     ['a2', { ok: true, row: coupon('a2', null, 'promo_a2') }],
@@ -404,7 +407,7 @@ console.log('\n=== The 30%: the team\'s own code, the coupon\'s row ===')
   ok(row('r1').coupon.ours && !TV.couponWarns(row('r1')) && row('r1').couponCheck === 'live', 'Approved, Whop showing the team\'s ECOM30 code: theirs, no warning', show(said('r1')))
   ok(row('r2').coupon.ours && !TV.couponWarns(row('r2')) && row('r2').coupon.code === 'promo_a2', 'Approved, the code\'s name not read but its id the request\'s own: theirs, no warning', show(said('r2')))
   ok(!row('r3').coupon.ours && TV.couponWarns(row('r3')), 'Approved, evolve10 on the membership: the warning stays', show(said('r3')))
-  ok(row('r4').coupon.ours && !TV.couponWarns(row('r4')), 'Code Applied, its ECOM30 code stored: theirs, and no tab but Approved warns anyway', show(said('r4')))
+  ok(row('r4').coupon.ours && !TV.couponWarns(row('r4')), 'applied, its ECOM30 code stored: theirs, and no row but an approved one warns anyway', show(said('r4')))
   ok(!row('r5').coupon.ours && TV.couponWarns(row('r5')) && row('r5').couponCheck === 'stored', 'Approved, Whop silent, evolve10 stored: the warning, from the stored row', show(said('r5')))
   ok(row('r6').coupon.ours && !TV.couponWarns(row('r6')) && row('r6').couponCheck === 'stored', 'Approved, Whop silent, the request\'s own id stored: no warning', show(said('r6')))
   const loader = fromSrc('src/lib/admin/thirty-data.ts')
@@ -429,7 +432,8 @@ console.log('\n=== The 30%: the team\'s own code, the coupon\'s row ===')
      'Reject is raised on that row, its reason filled in when it opens')
   ok(/row\.couponCheck === "not-checked" && verdict\.ok && \(/.test(pending) && !pending.includes('Approve asks Whop again first.'),
      '"Coupon not checked yet" only beside the rule\'s yes: never on a row refused for another reason')
-  ok(/const coupon = couponWarns\(row\) \? row\.coupon : null;/.test(page), 'the Approved row warns through couponWarns: never about the team\'s own code')
+  ok(/const coupon = couponWarns\(row\) \? row\.coupon : null;/.test(page.slice(page.indexOf('function ApprovedRow('), page.indexOf('function DecidedRow('))),
+     'the approved row warns through couponWarns: never about the team\'s own code')
 }
 
 // ── The cron's population ───────────────────────────────────────────────────

@@ -1,14 +1,20 @@
 /**
  * The 30% page's answer (GET /api/admin/thirty), built from loadThirtyData's
  * reads by the student app's own rule. Pure: no database, no clock of its
- * own; the route hands it the moment and the course switch's date.
+ * own; the route hands it the moment, the course switch's date and whether
+ * THIRTY_AUTO_APPLY pauses the automatic part (`paused`).
  *
- * Admin rebuild 2 (D4): the page lists every request from 1 October in four
- * tabs (Applied = pending, Approved, Rejected, Code Applied = applied), each
- * row with the student, the date applied, a verdict line on a pending one,
- * the coupon and the decision. Can still earn, the plan, the last contact,
- * the action items and the survey answers went with it, and in the review's
- * fix round the words they were shown in (the C4 reasons, the hours left).
+ * The 30% that applies itself (T-137, R4): the 30% goes on by itself, so the
+ * page is one list of the requests the app could not finish, oldest first
+ * (loadThirtyData's THE LIST: pending or approved 30 minutes after the
+ * student applied, or with a write_failed as their newest event in the last
+ * 30 days). Each row carries its newest failed attempt (`lastFailure`, from
+ * its attempt_failed event), its age in hours, and its Why line (`why`,
+ * thirtyWords in src/lib/thirty-words.ts): what went wrong, and what happens
+ * next, by who will act. Until then (admin rebuild 2, D4) the page listed
+ * every request from 1 October in four tabs. Can still earn, the plan, the
+ * last contact, the action items and the survey answers went with D4, and in
+ * the review's fix round the words they were shown in.
  *
  * A pending request is judged the way POST /api/discounts/approve judges it
  * (D5 first, then the rule):
@@ -50,17 +56,16 @@
  * approve route refuses it (UNPAID_APPROVAL). It was the no-real-payment
  * verdict from the review of the same day until the owner's answers.
  *
- * The coupon of a decided row (the render review's fix round): once the team
- * adds the 30% code in Whop, Whop shows it on the membership as a discount on
- * the next renewal. That code is the team's own (isThirtyCode: an ECOM30
- * code, or the request's own whop_promo_id), so the coupon carries `ours`
- * and the Approved and Code Applied rows never warn about it (couponWarns).
- * An Applied row the coupon refuses offers only Reject, with its reason
- * filled in (COUPON_REJECT_REASON: the map's own sentence to the student,
- * since the student reads the reason there), and since the render review's
- * second round "Check Whop again" (POST /api/admin/thirty/check-coupon),
- * which stores Whop's answer now: with the coupon gone, the next read judges
- * the row by the rule again.
+ * The coupon of a decided row (the render review's fix round): once the 30%
+ * code is on the membership, Whop shows it there as a discount on the next
+ * renewal. That code is the team's own (isThirtyCode: an ECOM30 code, or the
+ * request's own whop_promo_id), so the coupon carries `ours` and an approved
+ * row never warns about it (couponWarns). A pending row the coupon refuses
+ * offers only Reject, with its reason filled in (COUPON_REJECT_REASON: the
+ * map's own sentence to the student, since the student reads the reason
+ * there), and since the render review's second round "Check Whop again"
+ * (POST /api/admin/thirty/check-coupon), which stores Whop's answer now: with
+ * the coupon gone, the next read judges the row by the rule again.
  */
 
 import {
@@ -89,11 +94,13 @@ import {
 } from "./discount-server.ts";
 import type { ApprovalRefusal, ApprovalVerdict, DiscountFacts, DiscountReads, VideoRow } from "./discount-server.ts";
 import { isMembershipId, rowShowsUnpaid, storedRowApplies } from "./membership-discount.ts";
-// The 30% that applies itself (T-137): the reasons a request waits, from the words module the page reads too (no server code).
+// The 30% that applies itself (T-137): the reasons a request waits and the team's words for them, from the words module
+// the page reads too (no server code).
+import { THIRTY_REASONS, thirtyWords } from "./thirty-words.ts";
 import type { ThirtyReason } from "./thirty-words.ts";
 import { dayLabel } from "./croatia-dates.ts";
 import { bareUsername } from "./people-common.ts";
-import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyStudent } from "./thirty-data.ts";
+import type { LiveCoupon, ThirtyCouponRow, ThirtyData, ThirtyFailureEvent, ThirtyStudent } from "./thirty-data.ts";
 
 /** A team member as a row names them. `name` is null when the id is no longer a team member. */
 export interface TeamRef {
@@ -196,8 +203,8 @@ export interface Coupon {
   unpaid: boolean;
   /**
    * The code is the request's own 30% code (isThirtyCode): the team added it
-   * in Whop. An Approved or Code Applied row never warns about it. Always
-   * false on an Applied row, where the coupon decides as the approve route
+   * in Whop. An approved or applied row never warns about it. Always
+   * false on a pending row, where the coupon decides as the approve route
    * decides (any discount on the next renewal refuses).
    */
   ours: boolean;
@@ -208,21 +215,21 @@ export interface Coupon {
 
 /**
  * Where a row's coupon comes from (the review's fix round):
- *   live         Whop answered now (an Approved row)
+ *   live         Whop answered now (an approved row)
  *   stored       the stored row for the membership the student has now
  *                (storedRowApplies: with no membership id on file, the
  *                student's row)
  *   not-checked  no stored row applies to this membership yet: never
- *                checked, or a membership changed since (an Applied row
+ *                checked, or a membership changed since (a pending row
  *                says so; Approve asks Whop first, through the student's
  *                Whop user when the id on file is not a membership's, T-122)
  *   no-membership  a decided row whose student's Whop id is missing or is
  *                not a membership's (the webhook has stored a payment's id
- *                there): the page's own read of the Approved rows asks by
+ *                there): the page's own read of the approved rows asks by
  *                membership id alone, so the row says to check Whop. Never
- *                an Applied row since T-122: the cron and Approve find the
+ *                a pending row since T-122: the cron and Approve find the
  *                membership through the student's Whop user.
- *   failed       Whop gave no answer now and nothing is stored (an Approved row)
+ *   failed       Whop gave no answer now and nothing is stored (an approved row)
  *   unread       the stored coupons could not be read at all (couponsUnread)
  */
 export type CouponCheck = "live" | "stored" | "not-checked" | "no-membership" | "failed" | "unread";
@@ -235,15 +242,23 @@ export interface ThirtyRequestRow {
   reviewedBy: TeamRef | null;
   appliedAt: string | null;
   appliedBy: TeamRef | null;
-  /** The 30% code Approve made (ECOM30-...). */
+  /** The request's 30% code (ECOM30-...): on a pending row with no Whop id, a claim whose code may exist. */
   promoCode: string | null;
+  /** The code's Whop promo id once Whop made it (whop_promo_id); null before, or for a code the app cannot check. */
+  whopPromoId: string | null;
   rejectionReason: string | null;
+  /** Hours since the student applied, at the moment the answer was built: the Why line's 48-hour rule. */
+  ageHours: number;
+  /** The newest failed attempt (an attempt_failed event), or null when there is none. */
+  lastFailure: ThirtyFailure | null;
+  /** The Why line (thirtyWords): what went wrong, if anything, and what happens next. */
+  why: string;
   student: StudentBrief;
   /** Pending rows only: what the verdict judged. */
   facts: Facts | null;
   /** Pending rows only. */
   verdict: Verdict | null;
-  /** The coupon (Whop's answer now on an Approved row, else the stored one), or null when none is known for this membership. */
+  /** The coupon (Whop's answer now on an approved row, else the stored one), or null when none is known for this membership. */
   coupon: Coupon | null;
   /** Where `coupon` comes from, or why there is none. */
   couponCheck: CouponCheck;
@@ -278,8 +293,59 @@ export interface ThirtyView {
   requiredCount: number | null;
   /** The stored coupons could not be read: no row shows one, and the approve route still asks Whop. */
   couponsUnread: boolean;
-  /** Every listed request, oldest first (the date applied, then the id): each tab keeps this order. */
+  /** THIRTY_AUTO_APPLY pauses the automatic part (R7): the page says so, and every Why line names the team. */
+  paused: boolean;
+  /** Every request that needs a hand, oldest first (the date applied, then the id). */
   requests: ThirtyRequestRow[];
+}
+
+/** A detail field as a string, or null. */
+const textOf = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
+
+/**
+ * An attempt_failed event as the Why line reads it (ThirtyFailure): its
+ * reason, and from its detail the step, Whop's words, the membership's
+ * status, the code, the product and `confirmed`. Null for an event whose
+ * reason is not one of v116's (THIRTY_REASONS): the line then says nothing
+ * that is not so.
+ */
+export function failureOf(event: ThirtyFailureEvent | undefined | null): ThirtyFailure | null {
+  if (!event || !(THIRTY_REASONS as readonly string[]).includes(event.reason ?? "")) return null;
+  const d = event.detail && typeof event.detail === "object" ? event.detail : {};
+  return {
+    reason: event.reason as ThirtyReason,
+    step: textOf(d.step),
+    at: event.created_at,
+    message: textOf(d.message),
+    membershipStatus: textOf(d.membership_status),
+    code: textOf(d.code),
+    product: textOf(d.product),
+    confirmed: typeof d.confirmed === "boolean" ? d.confirmed : null,
+  };
+}
+
+/**
+ * A row's Why line (thirtyWords): the newest failure's reason and step, with
+ * the row as it is now. `claimed` comes from the row (a pending request
+ * holding a code name with no Whop id), never from the failure; the code the
+ * sentence names is the failure's, else the row's.
+ */
+export function whyLine(
+  row: Pick<ThirtyRequestRow, "status" | "ageHours" | "promoCode" | "whopPromoId" | "lastFailure">,
+  paused: boolean,
+): string {
+  const f = row.lastFailure;
+  return thirtyWords(f?.reason ?? null, f?.step ?? null, {
+    ageHours: row.ageHours,
+    status: row.status,
+    paused,
+    claimed: row.status === "pending" && row.promoCode !== null && row.whopPromoId === null,
+    code: f?.code ?? row.promoCode,
+    product: f?.product ?? null,
+    membershipStatus: f?.membershipStatus ?? null,
+    message: f?.message ?? null,
+    confirmed: f?.confirmed ?? null,
+  });
 }
 
 const ELIGIBLE_DAY = dayLabel(DISCOUNT_ELIGIBLE_FROM);
@@ -438,7 +504,11 @@ export function couponOf(row: ThirtyCouponRow | undefined, student: Pick<ThirtyS
   };
 }
 
-/** The 30% codes: Approve makes ECOM30- and 6 characters of the student's id (the approve route); any ECOM30 code is the team's. */
+/**
+ * The 30% codes: ECOM30- and 6 random characters since the 30% that applies
+ * itself (thirty-apply.ts thirtyCodeName), 6 characters of the student's id
+ * before it; any ECOM30 code is the team's.
+ */
 const THIRTY_CODE = /^ECOM30/i;
 
 /**
@@ -457,16 +527,16 @@ export function isThirtyCode(
 }
 
 /**
- * An Approved row's warning: a discount on the next renewal that is not the
- * request's own 30% code. The team checks Whop before adding the code, since
- * adding it would replace that discount. No other tab warns.
+ * An approved row's warning: a discount on the next renewal that is not the
+ * request's own 30% code. The team checks Whop before the code goes on (Try
+ * again), since it would replace that discount. No other row warns.
  */
 export function couponWarns(row: Pick<ThirtyRequestRow, "status" | "coupon">): boolean {
   return row.status === "approved" && row.coupon !== null && row.coupon.discounted && !row.coupon.ours;
 }
 
 /**
- * The reason an Applied row refused by the coupon starts its Reject with (the
+ * The reason a pending row refused by the coupon starts its Reject with (the
  * render review's fix round). The student reads a rejection's reason on
  * their map's 30% panel, so since its second round this is the map's own
  * sentence for a discount already on the account, the owner's words
@@ -478,7 +548,7 @@ export function couponWarns(row: Pick<ThirtyRequestRow, "status" | "coupon">): b
 export const COUPON_REJECT_REASON = MEMBERSHIP_DISCOUNT_LINE;
 
 /**
- * What "Approve anyway" skips on an Applied row (the owner's review,
+ * What "Approve anyway" skips on a pending row (the owner's review,
  * 2026-10-21: a founder or an admin approves past any check), or null where
  * nothing refused it: "coupon" on a row the coupon refuses (the coupon check
  * and the rule: the approve route's `overrideCoupon` and `override`), "rule"
@@ -687,14 +757,18 @@ const byId = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id 
 
 /**
  * The page's answer. `live`: Whop's answers now for the students holding an
- * approved request (readApprovedCoupons); an Approved row shows that coupon,
+ * approved request (readApprovedCoupons); an approved row shows that coupon,
  * or the stored one when Whop said nothing, or that it could not check.
+ * `paused`: THIRTY_AUTO_APPLY pauses the automatic part (the route reads the
+ * switch, thirty-apply.ts thirtyAutoApplyPaused; the dev page passes its
+ * state), which the page says and every Why line follows.
  */
 export function buildThirtyView(
   data: ThirtyData,
   now: Date,
   resetAt: string | null,
   live?: ReadonlyMap<string, LiveCoupon>,
+  paused: boolean = false,
 ): ThirtyView {
   const students = new Map(data.students.map((s) => [s.id, s] as const));
   const ref = (id: string | null): TeamRef | null => (id ? { id, name: data.team.get(id) ?? null } : null);
@@ -715,7 +789,7 @@ export function buildThirtyView(
       const s = students.get(r.student_id)!;
       const stored = couponOf(data.coupons.data?.get(s.id), s);
       // Approve asks Whop about any student, through their Whop user when the id on file is not a membership's
-      // (T-122); the Approved rows' read below asks by membership id alone: with no id, or a payment's, it cannot.
+      // (T-122); the approved rows' read below asks by membership id alone: with no id, or a payment's, it cannot.
       const askable = r.status === "pending" || isMembershipId(s.whop_membership_id);
       let coupon = stored;
       let couponCheck: CouponCheck =
@@ -743,16 +817,24 @@ export function buildThirtyView(
         // payment that went through (2026-10-26), as the approve route refuses it before the rule.
         verdict = coupon?.discounted ? couponVerdict(coupon) : coupon?.unpaid ? unpaidVerdict() : judged.verdict;
       }
+      const asked = Date.parse(r.created_at);
+      const head = {
+        status: r.status,
+        promoCode: r.promo_code ?? null,
+        whopPromoId: r.whop_promo_id ?? null,
+        ageHours: Number.isFinite(asked) ? (now.getTime() - asked) / 3_600_000 : 0,
+        lastFailure: failureOf(data.failures.get(r.id)),
+      };
       return {
         id: r.id,
-        status: r.status,
+        ...head,
         askedAt: r.created_at,
         reviewedAt: r.reviewed_at ?? null,
         reviewedBy: ref(r.reviewed_by ?? null),
         appliedAt: r.applied_at ?? null,
         appliedBy: ref(r.applied_by ?? null),
-        promoCode: r.promo_code ?? null,
         rejectionReason: r.rejection_reason ?? null,
+        why: whyLine(head, paused),
         student: brief(s),
         facts,
         verdict,
@@ -770,6 +852,7 @@ export function buildThirtyView(
         ? requiredLessons(toDiscountLessons(data.catalog.data, new Set(data.videos.data.map((v) => v.lesson_id)))).length
         : null,
     couponsUnread: data.coupons.data === null,
+    paused,
     requests,
   };
 }

@@ -35,15 +35,22 @@ import { TrendChart, pointDay } from "./TrendChart";
  * The Dashboard, /admin, the admin's home (admin rebuild 2, D1 and D3), in
  * the brand kit's dark look.
  *
- * Top: Today, what waits for the team (open tasks, 30% requests to decide),
- * each tile a link to its page. Then the program's two numbers, the Bounty
- * Program on the left and Month 2 conversion on the right in every state, the
- * two cards as tall as each other: until the first Month 2 rate is in, Month
- * 2 is a compact tile (when the first renewals come and how many paid since
- * the launch) beside the Bounty Program's wider chart; from then on, its full
- * tile with its chart, the two halves of the row. Then the trends of the
- * last 14 days. The tiles with a chart have "How it's counted" (the (i)
- * button) with the whole rule.
+ * Top: Today, what waits for the team (open tasks, the 30% requests that
+ * need a hand), each tile a link to its page. Then the program's numbers, the
+ * Bounty Program on the left and Month 2 conversion beside it in every state,
+ * the two cards as tall as each other: until the first Month 2 rate is in,
+ * Month 2 is a compact tile (when the first renewals come and how many paid
+ * since the launch) beside the Bounty Program's wider chart; from then on,
+ * its full tile with its chart, the two halves of the row. "30% off applied"
+ * is the section's last card: from 1024px wide the row has a column more for
+ * it, in both states; under that it wraps onto a line of its own. Then the
+ * trends of the last 14 days. The tiles with a chart have "How it's counted"
+ * (the (i) button) with the whole rule.
+ *
+ * The 30% that applies itself (T-137, R5): "30% needs a hand" counts the
+ * requests the 30% page lists, by the page's own reads, where "30% to
+ * decide" counted the pending ones; "30% off applied" counts the codes on
+ * students' Whop memberships and links to Insights, which draws them per day.
  *
  * The owner's review (2026-10-21): no source or explanation line under the
  * program's and the trends' tiles (the (i) buttons keep the definitions), and
@@ -96,6 +103,8 @@ const NOTE_MS = 12_000;
 const LAUNCH_DAY = dayLabel(DISCOUNT_LAUNCH_DATE);
 
 const int = (n: number) => n.toLocaleString("en-US");
+/** "1 Oct": a day and its month, as a tile's source line names a date. */
+const dayMonth = (iso: string) => dayLabel(iso).replace(/^\S+ /, "");
 const pct0 = (v: number) => `${Math.round(v)}%`;
 const pct1 = (v: number) => `${v.toFixed(1)}%`;
 const pct2 = (v: number) => `${v.toFixed(2)}%`;
@@ -258,27 +267,40 @@ export function DashboardView({
             source={(v) => (v.since ? `Created since the reset, ${momentDay(v.since)}` : "Every task still to do")}
           />
           <CountTile
-            tileName="to-decide"
+            tileName="needs-hand"
             href="/admin/discounts"
-            title="30% to decide"
-            tile={model.toDecide}
+            title="30% needs a hand"
+            tile={model.needsHand}
             go="Go to 30% off"
-            none="Nothing to decide"
-            source={(v) => `Applied since ${dayLabel(v.since)}, waiting for a yes or no`}
+            none="Nothing waiting"
+            source={() => "Requests still waiting 30 minutes after the student applied"}
           />
         </div>
       </section>
 
       <section style={{ marginTop: SECTION_GAP }} aria-labelledby="dash-program">
         <SectionTitle id="dash-program">The program</SectionTitle>
-        {/* Bounty left, Month 2 right, in every state; the grid stretches both cards to the row's height. Until
-            the first Month 2 rate, Month 2 is the compact third beside the Bounty Program's wider chart. */}
-        <div className={waiting ? "grid grid-cols-1 md:grid-cols-3" : "grid grid-cols-1 md:grid-cols-2"} style={{ gap: 16 }}>
+        {/* Bounty left, Month 2 beside it, in every state; the grid stretches the cards to the row's height. Until
+            the first Month 2 rate, Month 2 is the compact third beside the Bounty Program's wider chart. "30% off
+            applied" is the last card: from 1024px the row has a column more for it (T-137, R5); under that it wraps. */}
+        <div className={waiting ? "grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4" : "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3"} style={{ gap: 16 }}>
           <div data-program-slot="bounty" className={waiting ? "flex md:col-span-2" : "flex"} style={{ minWidth: 0 }}>
             <BountyCard tile={model.bounty} />
           </div>
           <div data-program-slot="month2" className="flex" style={{ minWidth: 0 }}>
             {waiting ? <MonthTwoCompact m={waiting} nowMs={Date.parse(model.generatedAt)} /> : <MonthTwoCard tile={model.monthTwo} />}
+          </div>
+          {/* A grid of one, so the tile (a link) fills the slot both ways, as tall as the cards beside it. */}
+          <div data-program-slot="thirty" className="grid" style={{ minWidth: 0 }}>
+            <CountTile
+              tileName="thirty-applied"
+              href="/admin/insights/progress"
+              title="30% off applied"
+              tile={model.thirtyApplied}
+              go="See it on Insights"
+              none="None yet"
+              source={(v) => `Codes on students' Whop memberships, requests from ${dayMonth(v.since)}`}
+            />
           </div>
         </div>
       </section>
@@ -366,7 +388,17 @@ function RefreshNote({ note }: { note: RefreshSummary }) {
  * they feed say "Couldn't load" and nothing more.
  */
 function FailedReads({ model, onRetry, busy }: { model: DashboardModel; onRetry: () => void; busy: boolean }) {
-  const tiles = [model.monthTwo, model.bounty, model.openTasks, model.toDecide, model.active, model.canceling, model.churned, model.avgProgress];
+  const tiles = [
+    model.monthTwo,
+    model.bounty,
+    model.openTasks,
+    model.needsHand,
+    model.thirtyApplied,
+    model.active,
+    model.canceling,
+    model.churned,
+    model.avgProgress,
+  ];
   const everything = tiles.every((t) => !t.ok);
   return (
     <Card padding={0} style={{ marginBottom: 24, borderColor: "var(--color-border-strong)" }}>
@@ -1148,14 +1180,15 @@ export function DashboardSkeleton() {
         </div>
         <div style={{ marginTop: SECTION_GAP }}>
           <Bar w="120px" h={11} />
-          <div className="grid grid-cols-1 md:grid-cols-3" style={{ gap: 16, marginTop: 12 }}>
-            {[0, 1].map((i) => (
+          {/* The program row as it loads before the first Month 2 rate: Bounty, Month 2, then 30% off applied. */}
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4" style={{ gap: 16, marginTop: 12 }}>
+            {[0, 1, 2].map((i) => (
               <div key={i} className={i === 0 ? "flex md:col-span-2" : "flex"} style={{ minWidth: 0 }}>
                 <HeroCard>
                   <Bar w="38%" h={11} />
                   <Bar w="30%" h={48} mt={18} />
                   <Bar w="55%" mt={14} />
-                  <Bar w="100%" h={MONTH2_CHART} mt={32} />
+                  {i < 2 && <Bar w="100%" h={MONTH2_CHART} mt={32} />}
                 </HeroCard>
               </div>
             ))}

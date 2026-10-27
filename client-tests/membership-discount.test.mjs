@@ -2564,9 +2564,11 @@ console.log('\n=== T-122\'s second fix round: every real payment, a named code, 
     const on = await pageRow('mem_devThirtyOn', 'user_devThirty', 'approved')
     ok(on.check.discounted === false && on.check.code === THIRTY_NAME && on.coupon?.discounted === false && on.coupon?.ours === true && on.warns === false,
        'the student\'s own 30% still on the next renewal, an Approved row: no coupon (the promo id of their request), the page marks the code the team\'s own and does not warn', show(on))
+    // Since the 30% that applies itself (T-137, R4) the page lists what needs a hand: an applied request is on it only
+    // when its newest event is a write_failed, so a used 30% on an applied row is on no list.
     const usedPage = await pageRow('mem_devThirtyUsed', 'user_devThirty', 'applied')
-    ok(usedPage.check.discounted === false && usedPage.coupon?.discounted === false && usedPage.warns === false,
-       'the team\'s 30% applied and used, a Code Applied row: no coupon stored, so the page shows none', show(usedPage))
+    ok(usedPage.check.discounted === false && usedPage.status === null && usedPage.coupon === null && usedPage.warns === null,
+       'the team\'s 30% applied and used: no coupon stored, and the applied request (no write_failed) is not on the 30% page\'s list at all', show(usedPage))
     const realToo = await pageRow('mem_devThirtyUsed', 'user_devThirtyW50', 'approved')
     ok(realToo.check.discounted === true && realToo.coupon?.code === 'welcome50' && realToo.coupon?.ours === false && realToo.warns === true,
        'welcome50 and the team\'s 30%, an Approved row: the page warns about welcome50', show(realToo))

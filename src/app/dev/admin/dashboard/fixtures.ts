@@ -12,9 +12,12 @@
  * the lines and the numbers fit together as they do on the live page.
  *
  *   ?state=full      Tue 20 Oct, the day after the switch: Month 2 waits for
- *                    the first renewals, Avg progress has 2 days of line
- *          renewed   Tue 24 Nov: Month 2 has its rate, the tasks reset ran
- *          empty     nobody yet: every tile at its empty words
+ *                    the first renewals, Avg progress has 2 days of line; 3
+ *                    requests need a hand, 27 codes are on memberships
+ *          renewed   Tue 24 Nov: Month 2 has its rate, the tasks reset ran;
+ *                    5 need a hand, 212 codes on memberships
+ *          empty     nobody yet: every tile at its empty words ("Nothing
+ *                    waiting", "None yet" for the 30%)
  *          loading   the reads never answer: the skeletons
  *          error     every read fails
  *          partial   the open tasks and the daily snapshots fail, the rest loads
@@ -186,7 +189,8 @@ function readsFor(state: DashFixtureState, nowMs: number): DashboardReads {
       tasksResetAt: no("admin_config: permission denied for table admin_config"),
       resetAt: no("admin_config: permission denied for table admin_config"),
       openTasks: no("admin_config: permission denied for table admin_config"),
-      toDecide: no("permission denied for table discount_requests"),
+      needsHand: no("discount_request_events (write_failed): permission denied for table discount_request_events"),
+      thirtyApplied: no("permission denied for table discount_requests"),
       snapshots: no(TIMEOUT),
       canceling: no("permission denied for table canceling_snapshots"),
     };
@@ -198,7 +202,8 @@ function readsFor(state: DashFixtureState, nowMs: number): DashboardReads {
       tasksResetAt: ok(null),
       resetAt: ok(RESET_AT),
       openTasks: ok(0),
-      toDecide: ok(0),
+      needsHand: ok(0),
+      thirtyApplied: ok(0),
       snapshots: ok([]),
       canceling: ok([]),
     };
@@ -212,7 +217,8 @@ function readsFor(state: DashFixtureState, nowMs: number): DashboardReads {
     tasksResetAt: ok(renewed ? TASKS_RESET_AT : null),
     resetAt: ok(RESET_AT),
     openTasks: state === "partial" ? no("permission denied for table tasks") : ok(renewed ? 12 : 95),
-    toDecide: ok(renewed ? 5 : 3),
+    needsHand: ok(renewed ? 5 : 3),
+    thirtyApplied: ok(renewed ? 212 : 27),
     snapshots: state === "partial" ? no(TIMEOUT) : ok(snapshots),
     canceling: ok(canceling),
   };

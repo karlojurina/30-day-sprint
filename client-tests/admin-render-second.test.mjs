@@ -119,7 +119,8 @@ const pending = page.slice(page.indexOf('function PendingRow('), page.indexOf('/
   const check = page.slice(page.indexOf('async function checkCoupon('), page.indexOf('function closeNotice('))
   ok(/const r = await transport\.checkCoupon\(row\.id\);/.test(check) && /if \(!r\.ok\) return refused\("check", row, r\);/.test(check) && /await reload\(\);/.test(check) && !/lock\(row\.id\)/.test(check),
      'the page: the check, then the list read again, which judges the row by what was stored; nothing was decided, so the row is not locked')
-  ok(/function listIsStale\(kind: RowCall, status: number\): boolean \{\s*return status === 409 \|\| status === 404 \|\| \(status === 400 && \(kind === "approve" \|\| kind === "applied"\)\);/.test(page),
+  // Mark code applied, the "applied" call, went with its route in the 30% that applies itself (T-137): Try again is an Approve.
+  ok(/function listIsStale\(kind: RowCall, status: number\): boolean \{\s*return status === 409 \|\| status === 404 \|\| \(status === 400 && kind === "approve"\);/.test(page),
      'a request decided meanwhile (409) or gone (404) reads the list again; any other refusal stays on the row')
   ok(/send<[^>]*>\("POST", "\/api\/admin\/thirty\/check-coupon", \(\) => \(\{ requestId \}\)\)/.test(fromSrc('src/lib/admin/admin-transport.ts')),
      'the transport posts the request\'s id to POST /api/admin/thirty/check-coupon')
@@ -169,22 +170,24 @@ console.log('\n=== The Dashboard: its header when nothing loaded; a short line\'
   const read = (data) => ({ ok: true, data })
   const no = (error) => ({ ok: false, error })
   const reads = (over = {}) => ({
-    students: read([]), bounty: read([]), openTasks: read(0), tasksResetAt: read(null), toDecide: read(0),
+    // The two 30% reads since the 30% that applies itself (T-137, R5): "30% to decide" was one, toDecide.
+    students: read([]), bounty: read([]), openTasks: read(0), tasksResetAt: read(null), needsHand: read(0), thirtyApplied: read(0),
     snapshots: read([]), canceling: read([]), resetAt: read('2026-10-19T14:33:33.972Z'), ...over,
   })
   const TIMEOUT = 'canceling statement due to statement timeout'
   ok(M.nothingLoaded(M.buildDashboard(M.allFailed('Failed to fetch'), NOW)), 'the loader threw (every read failed): nothing loaded')
   const everyRead = reads({
     students: no(TIMEOUT), bounty: no('permission denied for table student_milestones'), tasksResetAt: no('admin_config: x'), resetAt: no('admin_config: x'),
-    openTasks: no('admin_config: x'), toDecide: no('permission denied for table discount_requests'), snapshots: no(TIMEOUT), canceling: no('x'),
+    openTasks: no('admin_config: x'), needsHand: no('permission denied for table discount_requests'), thirtyApplied: no('permission denied for table discount_requests'),
+    snapshots: no(TIMEOUT), canceling: no('x'),
   })
   ok(M.nothingLoaded(M.buildDashboard(everyRead, NOW)), 'every read failed on its own (the dev page\'s ?state=error): nothing loaded')
-  const tilesDown = reads({ students: no(TIMEOUT), snapshots: no(TIMEOUT), toDecide: no(TIMEOUT), tasksResetAt: no(TIMEOUT) })
+  const tilesDown = reads({ students: no(TIMEOUT), snapshots: no(TIMEOUT), needsHand: no(TIMEOUT), thirtyApplied: no(TIMEOUT), tasksResetAt: no(TIMEOUT) })
   ok(M.nothingLoaded(M.buildDashboard(tilesDown, NOW)),
      'the reads every tile needs failed, the bounty stamps, the canceling rows and the switch read: still no tile to draw, so nothing loaded')
   ok(!M.nothingLoaded(M.buildDashboard(reads({ openTasks: no(TIMEOUT), snapshots: no(TIMEOUT) }), NOW)) && !M.nothingLoaded(M.buildDashboard(reads(), NOW))
        && !M.nothingLoaded(M.buildDashboard(reads({ students: no(TIMEOUT), snapshots: no(TIMEOUT), tasksResetAt: no(TIMEOUT) }), NOW)),
-     'one tile drawn (30% to decide alone, or most of the page): the header keeps its time')
+     'one tile drawn (the 30% tiles alone, or most of the page): the header keeps its time')
   const view = fromSrc('src/components/admin/dashboard/DashboardView.tsx')
   ok(/const meta = nothingLoaded\(model\) \? \(\s*<FailedMeta text=\{busyNote \? `Couldn't load · \$\{busyNote\}` : "Couldn't load"\} \/>\s*\) : \(\s*\[`Updated \$\{clockLabel\(model\.generatedAt\)\}`, busyNote\]\.filter\(Boolean\)\.join\(" · "\)\s*\);/.test(view),
      'the header: "Couldn\'t load" with the warning dot (FailedMeta, as every page\'s) when no tile could be drawn, "Updated 10:30" otherwise')

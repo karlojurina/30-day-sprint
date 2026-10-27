@@ -1,9 +1,25 @@
 /**
- * The reads behind the admin's 30% page (GET /api/admin/thirty): every
- * request for the 30% made from 1 October (DISCOUNT_ELIGIBLE_FROM), the
- * students holding them, the rule's reads for each of those students, and
- * the coupons stored for them (admin rebuild 2, D4 and D5). Older requests
- * stay in the database and are not listed.
+ * The reads behind the admin's 30% page (GET /api/admin/thirty): the requests
+ * that need a hand, the students holding them, the rule's reads for each of
+ * those students, the coupons stored for them (admin rebuild 2, D4 and D5),
+ * and each listed request's newest failed attempt.
+ *
+ * THE LIST (the 30% that applies itself, T-137, R4: the 30% goes on by itself,
+ * so the page lists only what the app could not finish). readNeedsHand reads
+ * it, and the Dashboard's "30% needs a hand" counts the same reads
+ * (src/app/admin/(authenticated)/page.tsx), so the tile and the page agree:
+ *   - requests made from 1 October (DISCOUNT_ELIGIBLE_FROM) still pending or
+ *     approved 30 minutes after the student applied (NEEDS_HAND_AFTER_MS), and
+ *   - any request whose newest event (discount_request_events, v116) is a
+ *     write_failed from the last 30 days (WRITE_FAILED_LISTED_MS), whatever
+ *     its status: a code Whop made that the app could not record, or one Whop
+ *     attached after the request was rejected.
+ * Applied and rejected requests are otherwise left out, as are requests from
+ * before 1 October. loadThirtyData also reads each listed request's newest
+ * attempt_failed event (`failures`), the Why line's facts (thirty-view.ts).
+ * Any of these reads that fails fails the whole load: a missing event would
+ * leave a row off the list, or say "The app hasn't tried yet." of a request
+ * it tried and could not finish.
  *
  * The student app judges one student from five reads (loadDiscountReads in
  * discount-server.ts). This file makes each read once for every listed
@@ -35,9 +51,9 @@
  * mark-action-shipped delete rows), so each read of completions holds only as
  * many students as fit in one page (a student has at most one row per lesson,
  * unique(student_id, lesson_id)): every read is a single query. The pending
- * and the decided requests are two reads; the decided ones are read after the
- * pending ones, so a request decided in between is on both (and kept once, as
- * decided) and never on neither.
+ * and the approved requests are two reads; the approved ones are read after
+ * the pending ones, so a request approved in between is on both (and kept
+ * once, as approved) and never on neither.
  *
  * A read that fails is never an empty list. A failed read the rule needs (the
  * catalog, the videos, a batch of completions or of requests) becomes that
@@ -46,13 +62,16 @@
  * (factsFromReads). The stored coupons are the same: a failed read is
  * `coupons: { data: null, error }`, and the page says it could not read them
  * (the approve route asks Whop itself). Any other failed read (the listed
- * requests and the students holding them, the team's names, the Whop sync)
- * fails the whole load, so the page shows an error instead of a list with
- * people missing.
+ * requests, their events and the students holding them, the team's names,
+ * the Whop sync) fails the whole load, so the page shows an error instead of
+ * a list with people missing.
  *
- * Server only. lesson_videos is readable by the service role alone: any other
- * client sees no videos and no error, and the rule would then close the offer
- * for everyone. Hand this the service-role client requireTeam gives a route.
+ * Server only, but for readNeedsHand. lesson_videos is readable by the
+ * service role alone: any other client sees no videos and no error, and the
+ * rule would then close the offer for everyone. Hand loadThirtyData the
+ * service-role client requireTeam gives a route. readNeedsHand reads only
+ * discount_requests and discount_request_events, which the team's own session
+ * reads too (their RLS policies), so the Dashboard runs it in the browser.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -93,13 +112,37 @@ export interface ThirtyRequest extends DiscountRequestRow {
   applied_at: string | null;
   applied_by: string | null;
   /**
-   * The Whop promo id of the 30% code Approve made (the approve route stores
-   * it beside promo_code). A coupon with this id on the membership is the
-   * request's own code: never warned about (the render review's fix round).
+   * The Whop promo id of the request's 30% code, stored once Whop made it. A
+   * coupon with this id on the membership is the request's own code: never
+   * warned about (the render review's fix round). A pending request holding a
+   * code name with no id is a claim (thirty-apply.ts): its code may exist.
    */
   whop_promo_id?: string | null;
 }
 export const LISTED_REQUEST_COLUMNS = `${REQUEST_COLUMNS}, student_id, reviewed_at, reviewed_by, applied_at, applied_by, whop_promo_id`;
+
+/** A pending or approved request is listed once the student applied this long ago (R4): the app's own tries come first. */
+export const NEEDS_HAND_AFTER_MS = 30 * 60_000;
+/** A request whose newest event is a write_failed stays listed this long after it, whatever its status (R4). */
+export const WRITE_FAILED_LISTED_MS = 30 * 86_400_000;
+
+/**
+ * A listed request's newest failed attempt: an attempt_failed event of v116's
+ * history (discount_request_events), as written by the shared step
+ * (thirty-apply.ts) or the job. `detail` holds the step, Whop's words, the
+ * membership's status, the code, the product and, for a code attached after
+ * a reject, whether Whop showed it attached.
+ */
+export interface ThirtyFailureEvent {
+  request_id: string;
+  reason: string | null;
+  detail: Record<string, unknown> | null;
+  created_at: string;
+}
+export const FAILURE_EVENT_COLUMNS = "request_id, reason, detail, created_at, id";
+
+/** The requests that need a hand (readNeedsHand), or the reads that failed. */
+export type NeedsHandRead = { ok: true; requests: ThirtyRequest[] } | { ok: false; failed: string[] };
 
 /** A completion on a lesson the offer asks for. */
 export interface ThirtyCompletion {
@@ -132,8 +175,10 @@ export interface ThirtyData {
   students: ThirtyStudent[];
   /** Per student id: the five reads loadDiscountReads would have made for them. */
   reads: Map<string, DiscountReads>;
-  /** The listed requests: every one made from DISCOUNT_ELIGIBLE_FROM on, whatever its status, by id. */
+  /** The listed requests, the ones that need a hand (readNeedsHand), by id. */
   requests: ThirtyRequest[];
+  /** Per listed request id: its newest attempt_failed event; absent when it has none. */
+  failures: Map<string, ThirtyFailureEvent>;
   /** Per team member id: their name (team_members.full_name). */
   team: Map<string, string>;
   /** Per student id: the last Whop backfill (student_whop_sync.last_sync_at), absent when none ran. */
@@ -240,48 +285,150 @@ function groupBy<T>(rows: readonly T[], key: (r: T) => string): Map<string, T[]>
 const failure = (name: string, r: Read<unknown>) => `${name}: ${r.error?.message ?? "no data"}`;
 const byIdOrder = (a: { id: string }, b: { id: string }) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
-  // The pending requests, then the decided ones, both made from
-  // DISCOUNT_ELIGIBLE_FROM on: a request decided in between is on both lists
-  // (kept once below, as decided), never on neither.
-  const pendingRead = paged<ThirtyRequest>(() =>
-    db
-      .from("discount_requests")
-      .select(LISTED_REQUEST_COLUMNS)
-      .eq("status", "pending")
-      .gte("created_at", DISCOUNT_ELIGIBLE_FROM)
-      .order("id"),
-  );
-  const decidedRead = pendingRead.then(() =>
+/** An event as the write_failed read needs it: its request, kind and reason, and its place in time (created_at, then id). */
+type EventStamp = { request_id: string; event: string; reason: string | null; created_at: string; id: number };
+
+/** The newer of two events: the later created_at, the higher id on a tie (v116's identity, given in insert order). */
+function newerOf(a: EventStamp, b: EventStamp): EventStamp {
+  const ta = Date.parse(a.created_at);
+  const tb = Date.parse(b.created_at);
+  if (ta !== tb) return ta > tb ? a : b;
+  return a.id >= b.id ? a : b;
+}
+
+/**
+ * The requests that need a hand at `nowMs` (the header's THE LIST): the
+ * pending ones made from 1 October at least 30 minutes ago, then the approved
+ * ones (read after the pending ones, so a request approved in between is on
+ * both and kept once, as approved, never on neither), and every request whose
+ * newest event is a write_failed from the last 30 days. Each request once, by
+ * id. The 30% page lists exactly these; the Dashboard's "30% needs a hand"
+ * counts them. A read that fails is a failure, never fewer rows.
+ */
+export async function readNeedsHand(db: SupabaseClient, nowMs: number = Date.now()): Promise<NeedsHandRead> {
+  const madeBy = new Date(nowMs - NEEDS_HAND_AFTER_MS).toISOString();
+  const waiting = (status: "pending" | "approved") =>
     paged<ThirtyRequest>(() =>
       db
         .from("discount_requests")
         .select(LISTED_REQUEST_COLUMNS)
-        .neq("status", "pending")
+        .eq("status", status)
         .gte("created_at", DISCOUNT_ELIGIBLE_FROM)
+        .lte("created_at", madeBy)
         .order("id"),
-    ),
-  );
-  // Everything that does not depend on who is listed, at once.
-  const [catalog, videos, pending, decided, team] = await Promise.all([
-    paged<CatalogLessonRow>(() => db.from(LESSONS_TABLE).select(LESSON_COLUMNS).order("sort_order").order("id")),
-    paged<VideoRow>(() => db.from("lesson_videos").select(VIDEO_COLUMNS).order("lesson_id")),
-    pendingRead,
-    decidedRead,
-    paged<{ id: string; full_name: string | null }>(() => db.from("team_members").select("id, full_name").order("id")),
-  ]);
+    );
+  const pendingRead = waiting("pending");
+  const approvedRead = pendingRead.then(() => waiting("approved"));
+  const [pending, approved, wrote] = await Promise.all([pendingRead, approvedRead, readWriteFailed(db, nowMs)]);
   const failed: string[] = [];
   if (!pending.data) failed.push(failure("discount_requests (pending)", pending));
-  if (!decided.data) failed.push(failure("discount_requests (decided)", decided));
-  if (!team.data) failed.push(failure("team_members", team));
+  if (!approved.data) failed.push(failure("discount_requests (approved)", approved));
+  if (!wrote.ok) failed.push(...wrote.failed);
   if (failed.length) return { ok: false, failed };
 
-  // One row per request. A request decided between the two reads is on both,
-  // and its decided row, read second, is the newer.
+  // One row per request: an approved row read after its pending one is the newer, a write_failed row is as read.
   const byRequest = new Map<string, ThirtyRequest>();
-  for (const r of pending.data!) byRequest.set(r.id, r);
-  for (const r of decided.data!) byRequest.set(r.id, r);
-  const requests = [...byRequest.values()].sort(byIdOrder);
+  for (const r of [...pending.data!, ...approved.data!, ...(wrote.ok ? wrote.requests : [])]) byRequest.set(r.id, r);
+  return { ok: true, requests: [...byRequest.values()].sort(byIdOrder) };
+}
+
+/**
+ * The requests whose newest event is a write_failed from the last 30 days:
+ * the write_failed events of those days, then every event of their requests
+ * from the same days (an event newer than the write_failed is among them),
+ * then the requests whose newest is the write_failed itself.
+ */
+async function readWriteFailed(db: SupabaseClient, nowMs: number): Promise<NeedsHandRead> {
+  const since = new Date(nowMs - WRITE_FAILED_LISTED_MS).toISOString();
+  const wrote = await paged<{ request_id: string }>(() =>
+    db
+      .from("discount_request_events")
+      .select("request_id, id")
+      .eq("event", "attempt_failed")
+      .eq("reason", "write_failed")
+      .gte("created_at", since)
+      .order("id"),
+  );
+  if (!wrote.data) return { ok: false, failed: [failure("discount_request_events (write_failed)", wrote)] };
+  const candidates = [...new Set(wrote.data.map((e) => e.request_id))].sort();
+  if (candidates.length === 0) return { ok: true, requests: [] };
+
+  const events = await byBatch<EventStamp>(candidates, (batch) =>
+    db
+      .from("discount_request_events")
+      .select("request_id, event, reason, created_at, id")
+      .in("request_id", batch)
+      .gte("created_at", since)
+      .order("id"),
+  );
+  const newest = new Map<string, EventStamp>();
+  for (const id of candidates) {
+    const read = events.get(id)!;
+    if (!read.data) return { ok: false, failed: [failure("discount_request_events (the newest of a write_failed request)", read)] };
+    for (const e of read.data) {
+      if (e.request_id !== id) continue;
+      const had = newest.get(id);
+      newest.set(id, had ? newerOf(had, e) : e);
+    }
+  }
+  const listed = candidates.filter((id) => {
+    const e = newest.get(id);
+    return e !== undefined && e.event === "attempt_failed" && e.reason === "write_failed";
+  });
+  if (listed.length === 0) return { ok: true, requests: [] };
+
+  const rows = await byBatch<ThirtyRequest>(listed, (batch) =>
+    db.from("discount_requests").select(LISTED_REQUEST_COLUMNS).in("id", batch).order("id"),
+  );
+  const requests = new Map<string, ThirtyRequest>();
+  for (const id of listed) {
+    const read = rows.get(id)!;
+    if (!read.data) return { ok: false, failed: [failure("discount_requests (with a write_failed)", read)] };
+    for (const r of read.data) requests.set(r.id, r);
+  }
+  return { ok: true, requests: [...requests.values()] };
+}
+
+export async function loadThirtyData(db: SupabaseClient, nowMs: number = Date.now()): Promise<ThirtyLoad> {
+  // Everything that does not depend on who is listed, at once.
+  const [catalog, videos, listedRead, team] = await Promise.all([
+    paged<CatalogLessonRow>(() => db.from(LESSONS_TABLE).select(LESSON_COLUMNS).order("sort_order").order("id")),
+    paged<VideoRow>(() => db.from("lesson_videos").select(VIDEO_COLUMNS).order("lesson_id")),
+    readNeedsHand(db, nowMs),
+    paged<{ id: string; full_name: string | null }>(() => db.from("team_members").select("id, full_name").order("id")),
+  ]);
+  if (!listedRead.ok || !team.data) {
+    return {
+      ok: false,
+      failed: [...(listedRead.ok ? [] : listedRead.failed), ...(team.data ? [] : [failure("team_members", team)])],
+    };
+  }
+  const requests = listedRead.requests;
+
+  // Each listed request's newest failed attempt (the Why line's facts): newest first, so a request's first row is its newest.
+  const failureReads = await byBatch<ThirtyFailureEvent>(
+    requests.map((r) => r.id),
+    (batch) =>
+      db
+        .from("discount_request_events")
+        .select(FAILURE_EVENT_COLUMNS)
+        .eq("event", "attempt_failed")
+        .in("request_id", batch)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false }),
+  );
+  const failures = new Map<string, ThirtyFailureEvent>();
+  const groupedFailures = new Map<Read<ThirtyFailureEvent[]>, Map<string, ThirtyFailureEvent[]>>();
+  for (const r of requests) {
+    const read = failureReads.get(r.id)!;
+    if (!read.data) return { ok: false, failed: [failure("discount_request_events (attempt_failed)", read)] };
+    let byRequest = groupedFailures.get(read);
+    if (!byRequest) groupedFailures.set(read, (byRequest = groupBy(read.data, (e) => e.request_id)));
+    const newest = byRequest.get(r.id)?.[0];
+    if (newest) {
+      failures.set(r.id, { request_id: newest.request_id, reason: newest.reason ?? null, detail: newest.detail ?? null, created_at: newest.created_at });
+    }
+  }
 
   // The students holding a listed request.
   const holderIds = [...new Set(requests.map((r) => r.student_id))].sort();
@@ -429,7 +576,8 @@ export async function loadThirtyData(db: SupabaseClient): Promise<ThirtyLoad> {
       students,
       reads,
       requests,
-      team: new Map(team.data!.map((m) => [m.id, m.full_name ?? ""] as const)),
+      failures,
+      team: new Map(team.data.map((m) => [m.id, m.full_name ?? ""] as const)),
       lastSyncAt,
       coupons,
     },

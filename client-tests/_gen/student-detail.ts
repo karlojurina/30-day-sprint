@@ -17,7 +17,10 @@
  *
  * THE 30% REQUEST is named and coloured by the one map every admin page
  * uses (discount-status.ts): "Applied", "Approved", "Rejected", "Code
- * Applied", as on the 30% page's tabs and the Survey.
+ * Applied", as on the Survey. Its code is offered to copy only once Whop made
+ * it (whop_promo_id set, the 30% that applies itself, T-137): a pending
+ * request holding a code name with no Whop id is a claim the app is still
+ * working on, and its code may not exist.
  *
  * THE QUICK DMS (quickDms below) are the words of the messages draft of
  * admin rebuild 2 (WI-10, _admin/prds/admin-rebuild-2/messages_v2.md), for
@@ -100,7 +103,7 @@ export interface StudentDetailReads {
   regions: Read<Array<{ id: string; name: string; order_num: number }>>;
   lessons: Read<DetailLesson[]>;
   completions: Read<DetailCompletion[]>;
-  discount: Read<{ status: string; promo_code: string | null; created_at: string } | null>;
+  discount: Read<{ status: string; promo_code: string | null; whop_promo_id: string | null; created_at: string } | null>;
   streak: Read<{ current_streak: number | null; last_streak_date: string | null } | null>;
   sync: Read<DetailSync | null>;
   /** admin_config.program_login_link, the {programLink} of the messages: the Welcome DM's link. */
@@ -124,7 +127,7 @@ export async function readStudentDetail(supabase: SupabaseClient, studentId: str
     // The latest request, of any date. No row is no request, not a failure.
     supabase
       .from("discount_requests")
-      .select("status, promo_code, created_at")
+      .select("status, promo_code, whop_promo_id, created_at")
       .eq("student_id", studentId)
       .order("created_at", { ascending: false })
       .limit(1)
@@ -206,7 +209,8 @@ export interface StudentDetail {
    * the video is watched, for both kinds.
    */
   actionItems: Read<Array<{ id: string; title: string; shipped: boolean; status: ActionItemStatus; link: string | null }>>;
-  discount: Read<{ status: string; text: string; tone: DiscountTone; code: string | null; askedAt: string } | null>;
+  /** `whopPromoId`: the code's Whop id once Whop made it; the page copies the code only then. */
+  discount: Read<{ status: string; text: string; tone: DiscountTone; code: string | null; whopPromoId: string | null; askedAt: string } | null>;
   sync: Read<SyncView>;
   /** The program link the Welcome DM sends, or null when it is not set or could not be read (the sentence then has no link). */
   programLink: string | null;
@@ -344,6 +348,7 @@ export function buildStudentDetail(
               text: discountStatusWords(reads.discount.data.status).label,
               tone: discountStatusWords(reads.discount.data.status).tone,
               code: reads.discount.data.promo_code,
+              whopPromoId: reads.discount.data.whop_promo_id ?? null,
               askedAt: reads.discount.data.created_at,
             }
           : null,

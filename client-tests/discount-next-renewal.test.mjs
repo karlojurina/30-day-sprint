@@ -18,7 +18,11 @@
 // moment starts for an applied request from day 5. One already due takes its
 // line from the discount state as it is, on the same clock: "Your 30% is on
 // your next payment." within the 5 days, "The discount has been approved."
-// after them (WorldCelebrations.tsx).
+// after them (WorldCelebrations.tsx). Section 1's label "the panel says 'on
+// your next renewal'" is from before R6 and is kept as it was (the PRD keeps
+// that block): what it checks, renewalStillAhead, is the moment's line now,
+// "Your 30% is on your next payment." against "The discount has been
+// approved." (the build's review of 2026-10-27).
 //
 //   1  The reviewer's student, through the real discountState and
 //      approvalOnMap (the _gen copies): first paid 10 October, applied for on

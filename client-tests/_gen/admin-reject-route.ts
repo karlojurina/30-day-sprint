@@ -24,7 +24,8 @@ import { thirtyWords } from "./thirty-words.ts";
  *     rejected and the claim given back. Made: where it is (whereIsCode); on
  *     nobody's membership, rejected with its Whop id stored (usable at
  *     checkout); on the student's own, the 30% is theirs (409, the job marks
- *     it applied); elsewhere, the words for it (409); Whop not answering, 503.
+ *     it applied, or Approve anyway while the app is paused); elsewhere, the
+ *     words for it (409); Whop not answering, 503.
  *   - pending reopened by hand, or approved with the app's code id: where the
  *     code is first; on nobody's membership, rejected (usable at checkout);
  *     anything else, nothing done, in the same words.
@@ -32,13 +33,21 @@ import { thirtyWords } from "./thirty-words.ts";
  *     before this build or hand SQL): rejected, the code named as one Whop may
  *     have made.
  *   - applied or rejected: 409 "This request was already decided."
+ * A request whose code Whop answered with another code of the same name on
+ * the student's membership (an attempt_failed write_failed, step
+ * attach_other_code, in its history) is never rejected here: that 30% is on
+ * their membership, and only the hand fix closes it (409, the words of its
+ * Why line; the build's review of 2026-10-27).
  * Every write is conditional on the row as it was read (a value read as NULL
  * matched with .is()), carries audit_actor team, the member and one
  * correlation id per press (v116's trigger records the change), and a write
  * that finds the row changed answers 409 "This request changed meanwhile.
  * Refresh the list." A 200 answers { success: true, code, codeState }: the
  * code's name and "usable" (made, on nobody's membership), "may_exist" (code
- * unknown) or null (no code made).
+ * unknown) or null (no code made). A usable code's name then comes off the
+ * rejected row, which the student can read, and the request stays on the
+ * team's 30% page for 30 days (an attempt_failed write_failed, step
+ * rejected_usable, naming the code), as its notice says (the same review).
  */
 
 // Whop is asked at most twice (the code by its name, then where it sits), inside the press's own time limit.
@@ -52,6 +61,8 @@ const ROW_COLUMNS = "id, student_id, status, promo_code, promo_claimed_at, whop_
 /** Under this much time left, no Whop call starts; each one waits at most the time left less a second, and 8 seconds. */
 const LAST_CALL_MS = 2_000;
 const CALL_MS = 8_000;
+/** A detail field as a string, or null. */
+const textOf = (v: unknown): string | null => (typeof v === "string" && v !== "" ? v : null);
 
 type Row = {
   id: string;
@@ -108,17 +119,66 @@ export async function POST(request: NextRequest) {
     audit_correlation_id: randomUUID(),
     audit_team_member_id: auth.teamMember.id,
   };
-  /** A conditional write's answer: 200 with the code and its state, 409 when the row changed, 500 on a database error. */
-  const wrote = (
+  /**
+   * A Reject that left a code usable at checkout: its name comes off the
+   * rejected row (the student can read their own rows), and the request stays
+   * on the team's list for 30 days through an attempt_failed write_failed,
+   * step rejected_usable, naming the code (the list's own rule). The history
+   * keeps the name: the trigger's rejected and code_changed events, and this
+   * one, written last so it is the newest. Neither write changes the answer:
+   * the rejection is saved, and a failure is logged.
+   */
+  const leftUsable = async (code: string, promoId: string) => {
+    try {
+      if (row.promo_code !== null) {
+        const { error } = await supabase
+          .from("discount_requests")
+          .update({
+            promo_code: null,
+            audit_actor: "team",
+            audit_correlation_id: rejected.audit_correlation_id,
+            audit_team_member_id: auth.teamMember.id,
+          })
+          .eq("id", row.id)
+          .eq("status", "rejected")
+          .eq("promo_code", row.promo_code)
+          .eq("whop_promo_id", promoId)
+          .select("id");
+        if (error) console.error(`[discount reject] request ${requestId}: rejected, but the name ${code} could not come off the row: ${error.message}`);
+      }
+      const { error } = await supabase.from("discount_request_events").insert({
+        request_id: row.id,
+        student_id: row.student_id,
+        event: "attempt_failed",
+        actor: "team",
+        team_member_id: auth.teamMember.id,
+        correlation_id: rejected.audit_correlation_id,
+        reason: "write_failed",
+        detail: { step: "rejected_usable", http: null, message: null, membership_status: null, code, product: null, whop_promo_id: promoId },
+      });
+      if (error) console.error(`[discount reject] request ${requestId}: rejected, but ${code} was not listed for the team: ${error.message}`);
+    } catch (e) {
+      console.error(`[discount reject] request ${requestId}: rejected, but ${code} was not seen to: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+
+  /**
+   * A conditional write's answer: 200 with the code and its state, 409 when
+   * the row changed, 500 on a database error. A code left usable (`promoId`
+   * its Whop id) is seen to first (leftUsable).
+   */
+  const wrote = async (
     w: { data: unknown[] | null; error: { message: string } | null },
     code: string | null,
     codeState: "usable" | "may_exist" | null,
+    promoId: string | null = null,
   ) => {
     if (w.error) {
       console.error(`[discount reject] request ${requestId}: the rejection was not saved: ${w.error.message}`);
       return NextResponse.json({ error: "Update failed" }, { status: 500 });
     }
     if (!w.data || w.data.length === 0) return NextResponse.json({ error: CHANGED }, { status: 409 });
+    if (codeState === "usable" && code !== null && promoId !== null) await leftUsable(code, promoId);
     return NextResponse.json({ success: true, code, codeState });
   };
 
@@ -175,6 +235,24 @@ export async function POST(request: NextRequest) {
   };
 
   try {
+    // Whop put another code of this request's name on their membership (attach_other_code, in its history): that 30%
+    // is on, and only the hand fix closes the request. Asked of the database before Whop.
+    const sameName = await supabase
+      .from("discount_request_events")
+      .select("detail")
+      .eq("request_id", row.id)
+      .eq("event", "attempt_failed")
+      .eq("reason", "write_failed");
+    if (sameName.error) throw new Error(`its history could not be read: ${sameName.error.message}`);
+    const other = (sameName.data ?? []).find((e) => (e.detail as { step?: unknown } | null)?.step === "attach_other_code");
+    if (other) {
+      const code = textOf((other.detail as { code?: unknown }).code) ?? row.promo_code ?? row.whop_promo_id ?? "the code";
+      return NextResponse.json(
+        { error: thirtyWords("write_failed", "attach_other_code", { status: row.status, ageHours: 0, code }) },
+        { status: 409 },
+      );
+    }
+
     if (shape === "settling") {
       // A claim that lost its answer: is its code on Whop? A read only; the write below is the rejection itself.
       const name = row.promo_code as string;
@@ -191,12 +269,16 @@ export async function POST(request: NextRequest) {
           .eq("promo_code", name)
           .is("whop_promo_id", null);
         q = row.promo_claimed_at === null ? q.is("promo_claimed_at", null) : q.eq("promo_claimed_at", row.promo_claimed_at);
-        return wrote(await q.select("id"), null, null);
+        return await wrote(await q.select("id"), null, null);
       }
       const w = await where(found.found);
       if (w === null || w.where !== "nowhere") {
-        // The claim stays for the job's settle.
-        return refusedFor(w, name, "The code is already on their membership, so the 30% is theirs. The app marks it applied within the hour.");
+        // The claim stays for the job's settle; while the app is paused, Approve anyway marks it applied.
+        return refusedFor(
+          w,
+          name,
+          "The code is already on their membership, so the 30% is theirs. The app marks it applied within the hour; while the app is paused, press Approve anyway.",
+        );
       }
       const q = supabase
         .from("discount_requests")
@@ -205,7 +287,7 @@ export async function POST(request: NextRequest) {
         .eq("status", "pending")
         .eq("promo_code", name)
         .is("whop_promo_id", null);
-      return wrote(await q.select("id"), name, "usable");
+      return await wrote(await q.select("id"), name, "usable", found.found);
     }
 
     // Reopened by hand (pending with a Whop id), or approved with the app's code id.
@@ -225,7 +307,7 @@ export async function POST(request: NextRequest) {
       .eq("id", row.id)
       .eq("status", row.status)
       .eq("whop_promo_id", promoId);
-    return wrote(await q.select("id"), code, "usable");
+    return await wrote(await q.select("id"), code, "usable", promoId);
   } catch (e) {
     console.error(`[discount reject] request ${requestId}: nothing was saved: ${e instanceof Error ? e.message : String(e)}`);
     return NextResponse.json({ error: "Update failed" }, { status: 500 });

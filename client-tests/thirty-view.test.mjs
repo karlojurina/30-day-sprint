@@ -689,9 +689,9 @@ console.log('\n=== The one list: what needs a hand, each row\'s newest failure a
      show(ids))
   const row = (id) => view.requests.find((r) => r.id === id)
   const fail = row('r-fail')
-  ok(show(fail.lastFailure) === show({ reason: 'membership_not_active', step: 'membership', at: ago(30), message: null, membershipStatus: 'past_due', code: null, product: null, confirmed: null })
+  ok(show(fail.lastFailure) === show({ reason: 'membership_not_active', step: 'membership', at: ago(30), message: null, membershipStatus: 'past_due', code: null, product: null, confirmed: null, count: 3 })
        && fail.why === 'Their membership is past_due on Whop, so the code can\'t go on yet. The app tries again.' && Math.abs(fail.ageHours - 2) < 1e-9,
-     'its newest failure of three (by time, whatever order they were written in), from its detail; its Why line; its age in hours', show(fail))
+     'its newest failure of three (by time, whatever order they were written in), from its detail, with how many failed (3); its Why line; its age in hours', show(fail))
   ok(row('r-p31').lastFailure === null && row('r-p31').why === 'The app hasn\'t tried yet.' && row('r-pold').why === 'The app only tries requests from the last 2 days. Approve or reject it.',
      'never tried: "The app hasn\'t tried yet." under 48 hours, the 2-day line from 48 hours; a reason outside v116\'s list counts as none', show([row('r-p31').why, row('r-pold').why]))
   ok(row('r-claim').promoCode === 'ECOM30-CLA1MD' && row('r-claim').whopPromoId === null && row('r-claim').why === 'Whop didn\'t answer. The app tries again.',
@@ -726,6 +726,58 @@ console.log('\n=== The one list: what needs a hand, each row\'s newest failure a
   const half = await loadThirtyData(fakeClient(noEvents), NOW_MS)
   ok(!half.ok && half.failed.some((x) => x.startsWith('discount_request_events (attempt_failed)') && x.includes('timeout')),
      'the failures unread: the load fails and names it (a Why line saying "The app hasn\'t tried yet." of a request it tried would be a wrong one)', show(half.failed))
+}
+{
+  // The build's review of 2026-10-27, through the real loader and builder: the job stopping after 6 failures only a
+  // person can clear; another code of the name Whop put on; a Reject that left its code usable (its name off the row,
+  // listed by its write_failed); and a check's refusal the verdict already says, said once.
+  const NOW = '2026-10-23T09:00:00.000Z'
+  const NOW_MS = Date.parse(NOW)
+  const ago = (minutes) => new Date(NOW_MS - minutes * 60_000).toISOString()
+  const f = fixtures()
+  const ev = (request_id, event, created_at, reason = null, detail = {}) =>
+    f.events.push({ request_id, student_id: `s-${request_id.slice(2)}`, event, actor: 'job', reason, created_at, detail })
+  const one = (key, status, created_at, more = {}) => {
+    f.person(`s-${key}`, `${key} Example`, '2026-10-02T10:00:00.000Z')
+    f.watched(`s-${key}`, REQUIRED, FROM_WHOP)
+    f.request(`s-${key}`, `r-${key}`, created_at, status, more)
+  }
+  const HAS = { step: 'membership', membership_status: 'active' }
+  one('gave', 'approved', ago(600), { promo_code: 'ECOM30-G1V3UP', whop_promo_id: 'promo_devgiveup', reviewed_at: ago(590) })
+  for (let i = 0; i < 6; i++) ev('r-gave', 'attempt_failed', ago(60 + i * 60), 'membership_has_code', { ...HAS, code: 'ECOM30-G1V3UP' })
+  one('five', 'approved', ago(600), { promo_code: 'ECOM30-F1V3AA', whop_promo_id: 'promo_devfive', reviewed_at: ago(590) })
+  for (let i = 0; i < 5; i++) ev('r-five', 'attempt_failed', ago(60 + i * 60), 'membership_has_code', { ...HAS, code: 'ECOM30-F1V3AA' })
+  one('same', 'approved', ago(600), { promo_code: 'ECOM30-S4MEN4', whop_promo_id: 'promo_devsame', reviewed_at: ago(590) })
+  ev('r-same', 'attempt_failed', ago(60), 'write_failed', { step: 'attach_other_code', code: 'ECOM30-S4MEN4', attached: 'promo_devsibling' })
+  one('usable', 'rejected', ago(600), { promo_code: null, whop_promo_id: 'promo_devusable', reviewed_at: ago(100), reviewed_by: 'tm-1' })
+  ev('r-usable', 'rejected', ago(100))
+  ev('r-usable', 'code_changed', ago(100))
+  ev('r-usable', 'attempt_failed', ago(99), 'write_failed', { step: 'rejected_usable', code: 'ECOM30-US4BL3', whop_promo_id: 'promo_devusable' })
+  // The coupon on the membership, and the job's refusal over it in the approve route's words, which the verdict says too.
+  one('coupon', 'pending', ago(120))
+  f.coupons.push({
+    student_id: 's-coupon', whop_membership_id: 'mem_devscoupon', promo_code_id: 'promo_devEvolve', promo_code: 'evolve10',
+    renewal_price: '87.30', plan_renewal_price: '97.00', discounted: true, checked_at: ago(130),
+  })
+  ev('r-coupon', 'attempt_failed', ago(110), 'check_refused', { step: null, message: couponApprovalRefusal('evolve10') })
+  // The same refusal on a row whose verdict now says something else (the coupon taken off since): shown.
+  one('gone', 'pending', ago(120))
+  ev('r-gone', 'attempt_failed', ago(110), 'check_refused', { step: null, message: couponApprovalRefusal('evolve10') })
+
+  const loaded = await loadThirtyData(fakeClient(world(f, NOW)), NOW_MS)
+  const view = loaded.ok ? buildThirtyView(loaded.data, new Date(NOW), RESET) : null
+  const row = (id) => view?.requests.find((r) => r.id === id)
+  ok(row('r-gave')?.lastFailure.count === 6 && row('r-gave').why === 'Their membership already has another code on Whop. The app stopped after 6 tries. Press Try again once that code is off their membership, or reject it.'
+       && row('r-five')?.lastFailure.count === 5 && row('r-five').why === 'Their membership already has another code on Whop. The app tries again.',
+     'another code on the membership: after 6 failures the job has stopped and the Why line hands it to the team; after 5 it still tries', show([row('r-gave')?.why, row('r-five')?.why]))
+  ok(row('r-same')?.status === 'approved' && row('r-same').why === 'Whop put another code named ECOM30-S4MEN4 on their membership. Check it in Whop, then tell the owner so the app records it.',
+     'another code of its name put on by Whop: listed (approved), its own words and no next line', row('r-same')?.why)
+  ok(row('r-usable')?.status === 'rejected' && row('r-usable').promoCode === null && row('r-usable').lastFailure.code === 'ECOM30-US4BL3'
+       && row('r-usable').why === 'Rejected. The code ECOM30-US4BL3 stays usable at checkout until someone switches it off in Whop.',
+     'a Reject that left its code usable: listed by its write_failed (rejected_usable), the name off the row and in the event, its words', show(row('r-usable')))
+  ok(row('r-coupon')?.verdict.reason === 'has-discount' && row('r-coupon').verdict.text === couponApprovalRefusal('evolve10') && row('r-coupon').why === '' && row('r-coupon').lastFailure.reason === 'check_refused'
+       && row('r-gone')?.verdict.ok && row('r-gone').why === couponApprovalRefusal('evolve10'),
+     'a check\'s refusal the verdict already says word for word: said once (the Why line empty); once the verdict says otherwise, the Why line shows it again', show([row('r-coupon')?.why, row('r-gone')?.why]))
 }
 
 // ── The controls ───────────────────────────────────────────────────────────

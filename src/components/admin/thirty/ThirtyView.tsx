@@ -259,6 +259,8 @@ export function approveNotice(row: ThirtyRequestRow, answer: ApproveAnswer, tryA
       code,
       membershipStatus: answer.membershipStatus,
       message: answer.message,
+      // This press's failure is the request's newest: one more than the row counted.
+      failures: (row.lastFailure?.count ?? 0) + 1,
     });
   const said = (head: string) => [head, why()].filter((s) => s !== "").join(" ");
   if (answer.status === "applied") {
@@ -268,9 +270,11 @@ export function approveNotice(row: ThirtyRequestRow, answer: ApproveAnswer, tryA
     return { tone: "warning", text: said(`${name}: the code ${named} is made but not on their membership yet.`), ...copy };
   }
   if (answer.status === "pending" && (answer.step === "create" || answer.step === "create_no_id")) {
+    // While the app is paused it looks for nothing by itself (the build's review of 2026-10-27).
+    const next = paused ? "the app is paused, so it won't look by itself." : "otherwise the app looks within the hour.";
     return {
       tone: "warning",
-      text: `${name}: Whop didn't answer while making ${named}. Press Approve again in 5 minutes to look for it on Whop now; otherwise the app looks within the hour.`,
+      text: `${name}: Whop didn't answer while making ${named}. Press Approve again in 5 minutes to look for it on Whop now; ${next}`,
       ...copy,
     };
   }

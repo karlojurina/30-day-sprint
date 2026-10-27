@@ -450,8 +450,12 @@ export async function whereIsCode(promoId: string, student: ThirtyStudent, ctx: 
 /**
  * A lost claim (a code name with no Whop id, 5 minutes old or more, or with
  * no claim time): is its code on Whop? Looks it up by name among the codes
- * made from 5 minutes before the claim (findThirtyCodeByName). A read only:
- * the writes that follow stay with putThirtyOn and Reject. `db` is the
+ * made from 5 minutes before the claim (findThirtyCodeByName), and with a
+ * claim time no further than 5 minutes after it: the claim's own create
+ * starts at the claim and ends inside the request's time limit, so a code
+ * made later is not its code (the review of 2026-10-27: a claim settled days
+ * late paged through every code made since and gave up after 500). A read
+ * only: the writes that follow stay with putThirtyOn and Reject. `db` is the
  * caller's client, unused by the read itself.
  */
 export async function settleClaim(
@@ -462,7 +466,9 @@ export async function settleClaim(
   const claimed = row.promo_claimed_at === null ? NaN : Date.parse(row.promo_claimed_at);
   const from = Number.isFinite(claimed) ? claimed : Date.parse(row.created_at);
   if (!Number.isFinite(from)) return { failed: "no_claim_time" };
-  const r = await findThirtyCodeByName(row.promo_code, new Date(from - CLAIM_LOOKBACK_MS).toISOString(), ctx);
+  // With no claim time the claim could be any time after the request: no end to look to.
+  const until = Number.isFinite(claimed) ? new Date(claimed + CLAIM_LOOKBACK_MS).toISOString() : null;
+  const r = await findThirtyCodeByName(row.promo_code, new Date(from - CLAIM_LOOKBACK_MS).toISOString(), ctx, until);
   if (!r.ok) return { failed: r.fail };
   return r.id !== null ? { found: r.id } : { notFound: true };
 }
@@ -724,11 +730,17 @@ export async function putThirtyOn(db: SupabaseClient, requestId: string, opts: P
     if (ms === null) return { where: "unknown", step: "deadline", fail: null };
     return whereIsCode(promoId, student, readsFor(ms));
   };
-  /** A code elsewhere, or no telling where: the reason, and the step that said so. */
+  /**
+   * A code elsewhere, or no telling where: the reason, and the step that said
+   * so. Whop refusing the key (401 or 403) is key_not_allowed, its step naming
+   * the scope (the review of 2026-10-27: it read as Whop not answering).
+   */
   const whereFailed = (w: Exclude<Awaited<ReturnType<typeof where>>, { where: "on_theirs" } | { where: "nowhere" }>) =>
     w.where === "elsewhere"
       ? fail("landed_elsewhere", { step: w.step, product: w.product, extra: { membership: w.membershipId } })
-      : fail("whop_no_answer", { step: w.step, message: w.fail });
+      : w.fail === "http_401_403"
+        ? fail("key_not_allowed", { step: w.step, message: w.fail })
+        : fail("whop_no_answer", { step: w.step, message: w.fail });
 
   /**
    * Applied: only while the row is still approved with our id. 0 rows: a
@@ -737,6 +749,8 @@ export async function putThirtyOn(db: SupabaseClient, requestId: string, opts: P
    */
   const markApplied = async (): Promise<ThirtyResult> => {
     const ours = row.whop_promo_id as string;
+    // The code's name as read before the write: a Reject takes it off the row (the review of 2026-10-27).
+    const name = row.promo_code;
     const { data, error } = await db
       .from("discount_requests")
       .update({ status: "applied", applied_at: new Date().toISOString(), applied_by: team, ...audit })
@@ -750,16 +764,21 @@ export async function putThirtyOn(db: SupabaseClient, requestId: string, opts: P
       return answer("applied");
     }
     const now = await reread();
-    if (now.status === "rejected") return endedRejected(true);
+    if (now.status === "rejected") return endedRejected(true, name);
     return answer(now.status === "applied" ? "applied" : "unchanged");
   };
 
-  /** Whop holds the code on their membership (or may), and the request was rejected meanwhile: only Whop can take it off. */
-  const endedRejected = (confirmed: boolean): Promise<ThirtyResult> => {
+  /**
+   * Whop holds the code on their membership (or may), and the request was
+   * rejected meanwhile: only Whop can take it off. `code` is the name as read
+   * before the reject, which takes it off the row.
+   */
+  const endedRejected = (confirmed: boolean, code: string | null): Promise<ThirtyResult> => {
+    const named = code ?? row.promo_code;
     console.error(
-      `[thirty apply] request ${row.id}: Whop ${confirmed ? "attached" : "may have attached"} ${row.promo_code} after the request was rejected. It can only come off in Whop.`,
+      `[thirty apply] request ${row.id}: Whop ${confirmed ? "attached" : "may have attached"} ${named} after the request was rejected. It can only come off in Whop.`,
     );
-    return fail("write_failed", { step: "attach_after_reject", outcome: "ended_rejected", extra: { confirmed }, confirmed });
+    return fail("write_failed", { step: "attach_after_reject", outcome: "ended_rejected", code: named, extra: { confirmed }, confirmed });
   };
 
   /**
@@ -832,20 +851,36 @@ export async function putThirtyOn(db: SupabaseClient, requestId: string, opts: P
 
   /**
    * 5. Attach, the row still approved with our id: a fresh Idempotency-Key
-   * every attach. Our id in the answer: applied. Another id: the membership
-   * had a code. A refusal: the key, or Whop's words. No code named, or no
-   * telling what happened: Whop is asked where the code is, once.
+   * every attach. Our id in the answer: applied. Another id: on a membership
+   * read just before with no code on it, Whop attached another code by this
+   * name (Whop lets two codes share one and attaches by name), recorded as a
+   * write_failed of its own (attach_other_code) for the team; otherwise the
+   * membership had a code. A refusal: the key, or Whop's words. No code
+   * named, or no telling what happened: Whop is asked where the code is, once.
    */
   const attach = async (target: Target): Promise<ThirtyResult> => {
     const now = await reread();
     if (now.status !== "approved" || !isOurId(now.whop_promo_id)) return answer("unchanged");
     if (row.promo_code === null) return fail("code_unknown", { step: "attach" });
+    const name = row.promo_code;
     const ms = callLimit();
     if (ms === null) return fail("whop_no_answer", { step: "deadline", membershipStatus: target.status });
     const on = { membershipStatus: target.status, extra: { membership: target.id } };
-    const a = await applyWhopPromoCode(target.id, row.promo_code, randomUUID(), ms);
+    const a = await applyWhopPromoCode(target.id, name, randomUUID(), ms);
     if (a.ok && a.promoCodeId === row.whop_promo_id) return markApplied();
-    if (a.ok && a.promoCodeId !== null) return fail("membership_has_code", { step: "attach", http: 200, ...on });
+    if (a.ok && a.promoCodeId !== null) {
+      if (target.promoCodeId === null) {
+        // The review of 2026-10-27: a same-name code is on their membership now, and only Whop can take it off.
+        console.error(`[thirty apply] request ${row.id}: Whop put another code named ${name} (${a.promoCodeId}) on membership ${target.id}, not this request's.`);
+        return fail("write_failed", {
+          step: "attach_other_code",
+          http: 200,
+          membershipStatus: target.status,
+          extra: { membership: target.id, attached: a.promoCodeId, whop_promo_id: row.whop_promo_id },
+        });
+      }
+      return fail("membership_has_code", { step: "attach", http: 200, ...on });
+    }
     if (!a.ok && a.outcome === "refused") {
       return fail(a.http === 401 || a.http === 403 ? "key_not_allowed" : "apply_refused", { step: "attach", http: a.http, message: a.message, ...on });
     }
@@ -855,7 +890,7 @@ export async function putThirtyOn(db: SupabaseClient, requestId: string, opts: P
       if (w.where === "on_theirs") return markApplied();
     }
     const after = await reread();
-    if (after.status === "rejected") return endedRejected(false);
+    if (after.status === "rejected") return endedRejected(false, name);
     return fail("whop_no_answer", { step: again === null ? "deadline" : "attach", http: a.ok ? 200 : a.http, message: a.ok ? null : a.message, ...on });
   };
 
@@ -1075,7 +1110,7 @@ export async function putThirtyOn(db: SupabaseClient, requestId: string, opts: P
     const ms = callLimit();
     if (ms === null) return fail("whop_no_answer", { step: "deadline" });
     const s = await settleClaim(db, { promo_code: claimName, promo_claimed_at: row.promo_claimed_at, created_at: row.created_at }, readsFor(ms));
-    if ("failed" in s) return fail("whop_no_answer", { step: "list", message: s.failed });
+    if ("failed" in s) return fail(s.failed === "http_401_403" ? "key_not_allowed" : "whop_no_answer", { step: "list", message: s.failed });
     if (opts.dry) return answer("planned", { would: "settle_claim", found: "found" in s });
     if ("found" in s) {
       const written = await approvedWrite(claimName, s.found);

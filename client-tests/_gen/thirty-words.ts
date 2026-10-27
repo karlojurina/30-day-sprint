@@ -16,9 +16,17 @@
  * notices after Approve and Try again. First what went wrong, by the reason
  * and its step; then what happens next, chosen by who will act: the app (an
  * approved row, a claimed row, a pending row under 48 hours) or the team (the
- * app paused, an unclaimed pending row 48 hours or older). A reason the job
- * does not retry, or one whose own words already say what to do, adds no
- * second line.
+ * app paused, an unclaimed pending row 48 hours or older, a request the job
+ * stopped trying). A reason the job does not retry, or one whose own words
+ * already say what to do, adds no second line.
+ *
+ * THE JOB STOPS (jobGivesUp, the build's review of 2026-10-27): a request
+ * whose newest failure only a person can clear (another code on the
+ * membership, a membership canceled or expired on Whop, a code with no Whop
+ * id) is tried JOB_GIVES_UP_AFTER times, then left to the team; the job
+ * (src/app/api/cron/apply-thirty/route.ts) and the Why line read the same
+ * rule, so the page never says "The app tries again." of a request the job
+ * no longer takes.
  */
 
 /** v116's `event` check. */
@@ -59,13 +67,44 @@ export type ThirtyReason = (typeof THIRTY_REASONS)[number];
 export const JOB_NEW_CODE_WINDOW_MS = 48 * 60 * 60 * 1000;
 const JOB_NEW_CODE_WINDOW_HOURS = JOB_NEW_CODE_WINDOW_MS / 3_600_000;
 
+/** The job stops trying a request after this many failed attempts when its newest failure only a person can clear (jobGivesUp). */
+export const JOB_GIVES_UP_AFTER = 6;
+
+/**
+ * A failure only a person can clear: another code on the membership (Whop
+ * keeps a used-up code's id on it), a membership canceled or expired on Whop
+ * (only the student joining again changes it), a code with no Whop id (the
+ * app cannot ask about it). A past_due membership (Whop retries the payment)
+ * and a trial (it turns into a paid membership) can clear by themselves.
+ */
+export function needsAPerson(reason: string | null, membershipStatus: string | null | undefined): boolean {
+  if (reason === "membership_has_code" || reason === "code_unknown") return true;
+  if (reason === "membership_not_active") {
+    const status = (membershipStatus ?? "").trim().toLowerCase();
+    return status === "canceled" || status === "expired";
+  }
+  return false;
+}
+
+/**
+ * Whether the job has stopped trying a request: its newest failure only a
+ * person can clear (needsAPerson), and `failures` (every attempt_failed of the
+ * request, the newest included) has reached JOB_GIVES_UP_AFTER. The job skips
+ * such a request; its Why line hands it to the team.
+ */
+export function jobGivesUp(reason: string | null, membershipStatus: string | null | undefined, failures: number): boolean {
+  return failures >= JOB_GIVES_UP_AFTER && needsAPerson(reason, membershipStatus);
+}
+
 /**
  * What the words need to know about the request and its last failure.
  * `claimed` comes from the row itself (a promo_code with no whop_promo_id),
  * never from a failure's code. `code` is the request's code as the sentence
  * names it; `product` the title of the product a code landed on; `message`
  * Whop's words, or a check's own sentence for check_refused; `confirmed`
- * whether Whop showed a code attached after a reject (attach_after_reject).
+ * whether Whop showed a code attached after a reject (attach_after_reject);
+ * `failures` how many attempts of the request failed, the newest included
+ * (jobGivesUp; left out, none is counted).
  */
 export interface ThirtyWordsContext {
   /** Hours since the student applied. */
@@ -80,6 +119,7 @@ export interface ThirtyWordsContext {
   membershipStatus?: string | null;
   message?: string | null;
   confirmed?: boolean | null;
+  failures?: number;
 }
 
 /** The ending of each landed_elsewhere sentence: only the team can move a code on Whop. */
@@ -100,7 +140,12 @@ function whatWentWrong(reason: ThirtyReason | null, step: string | null, c: Thir
     case "membership_has_code":
       return "Their membership already has another code on Whop.";
     case "key_not_allowed":
-      return "Whop refused the app's key. It needs member:manage.";
+      // The scope of the call Whop refused: the code list, the memberships holding a code, else the attach's.
+      return step === "list"
+        ? "Whop refused the app's key. It needs promo_code:basic:read."
+        : step === "where"
+          ? "Whop refused the app's key. It needs member:basic:read."
+          : "Whop refused the app's key. It needs member:manage.";
     case "code_not_made":
       return c.message ? `Whop wouldn't make the code: ${c.message}` : "Whop wouldn't make the code.";
     case "apply_refused":
@@ -125,6 +170,10 @@ function whatWentWrong(reason: ThirtyReason | null, step: string | null, c: Thir
           ? `Whop may have attached ${code} after the request was rejected. Check their membership in Whop.`
           : `Whop attached ${code} after the request was rejected. It can only come off in Whop.`;
       }
+      // Whop attaches by name and lets two codes share one: it put the other on (the build's review of 2026-10-27).
+      if (step === "attach_other_code") return `Whop put another code named ${code} on their membership. Check it in Whop, then tell the owner so the app records it.`;
+      // A Reject that left the code usable: listed until someone sees to it, as its notice said.
+      if (step === "rejected_usable") return `Rejected. The code ${code} stays usable at checkout until someone switches it off in Whop.`;
       return `Whop made ${code}, but saving it failed.`;
     case "old_code":
       return "This code was made before the app attached codes itself. Press Try again to attach it, or attach it in Whop.";
@@ -183,6 +232,15 @@ function jobRetries(reason: ThirtyReason, step: string | null, c: ThirtyWordsCon
   }
 }
 
+/** The job stopped trying (jobGivesUp): what the team does next, by the reason and the row. */
+function stoppedLine(reason: ThirtyReason, approved: boolean): string {
+  const stopped = `The app stopped after ${JOB_GIVES_UP_AFTER} tries.`;
+  if (!approved) return `${stopped} Approve or reject it.`;
+  return reason === "membership_has_code"
+    ? `${stopped} Press Try again once that code is off their membership, or reject it.`
+    : `${stopped} Press Try again if they join again, or reject it.`;
+}
+
 /** What happens next, by who will act; null for nothing to add. */
 function whatHappensNext(reason: ThirtyReason | null, step: string | null, c: ThirtyWordsContext): string | null {
   if (reason !== null && addsNothing(reason, step, c)) return null;
@@ -194,6 +252,8 @@ function whatHappensNext(reason: ThirtyReason | null, step: string | null, c: Th
   const claimed = pending && c.claimed === true;
   if (approved || claimed || c.ageHours < JOB_NEW_CODE_WINDOW_HOURS) {
     if (reason === null) return "The app hasn't tried yet.";
+    // Tried enough times for a failure only a person can clear: the job no longer takes it.
+    if (jobGivesUp(reason, c.membershipStatus, c.failures ?? 0)) return stoppedLine(reason, approved);
     return jobRetries(reason, step, c) ? "The app tries again." : null;
   }
   return "The app only tries requests from the last 2 days. Approve or reject it.";

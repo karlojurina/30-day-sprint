@@ -62,12 +62,19 @@
  *           the verdict in the page's own words, no Approve, a plain Approve
  *           refused and the row turning, Check Whop again, Approve anyway, a
  *           csm's row); then its
- *           paths by clicks: Approve on the rule's yes (the 30% on, the row
- *           gone), Approve refused for a
+ *           paths by clicks, the dev page deciding where a code goes as the
+ *           shared step does (since the build's review of 2026-10-27): Approve
+ *           on the rule's yes (the code made; on, and the row gone, where the
+ *           membership takes it; else made but not on, the row approved),
+ *           Approve refused for a
  *           coupon Whop names only then (its row turns to the coupon, no
  *           Approve anyway after it), the Approve anyway link and its confirm,
- *           Reject, a 409 on approve and on reject, a failed reload, Try
- *           again, the coupon warning on an approved row, ?student=; every
+ *           Reject (a code left usable keeps the request listed, rejected,
+ *           with the code), a 409 on approve (the request stays listed with
+ *           the code to delete) and on reject (another member's Approve put
+ *           the 30% on), a failed reload, Try again (Whop silent; the code
+ *           already on, ?state=owncode), the coupon warning on an approved
+ *           row, ?student=; every
  *           tap 44px, the link too. Since the render review's second round:
  *           a coupon row's Reject starting with the map's sentence, changed
  *           by the team before sending, and Check Whop again with each of
@@ -712,7 +719,8 @@ if (wanted('thirty')) {
     'Leo Hartmann': TWO_DAYS,
     'Sofia Marin': `Whop's coupon check didn't answer. ${TWO_DAYS}`,
     'Ethan Cole': `Their membership already has another code on Whop. ${AGAIN}`,
-    'Tara Quinn': COUPON_LINE,
+    // The job's refusal is her verdict word for word: said once, by the verdict (the build's review of 2026-10-27).
+    'Tara Quinn': null,
     'Hugo Lindahl': `Whop's coupon check didn't answer. ${AGAIN}`,
     'Iris Novak': 'Whop attached ECOM30-Q8M3TZ after the request was rejected. It can only come off in Whop.',
     'Maya Lindqvist': "The app hasn't tried yet.",
@@ -755,6 +763,22 @@ if (wanted('thirty')) {
     .map((n) => ({ text: n.querySelector('p')?.textContent ?? '', role: n.getAttribute('role'), copy: [...n.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Copy code') })))
   const shown = (text) => page.waitForFunction((t) => document.body.innerText.includes(t), { timeout: 10000 }, text)
   const rowAlert = (h) => h.evaluate((r) => r.querySelector('[role="alert"]')?.textContent ?? null)
+  /** A row's status on the page (data-row-status), or null when it is off the list. */
+  const statusOf = async (name) => (await row(name)).evaluate((r) => r?.dataset.rowStatus ?? null)
+  // The approve table's "made but not on their membership yet": since the build's review of 2026-10-27 the dev page's
+  // stand-in decides as the shared step does, so a press past the checks ends there when the membership can't take the
+  // code (past_due, canceled, another code on it, Whop silent, no paid course membership), the row then approved.
+  const NO_MEMBERSHIP = 'Whop shows no paid course membership to put the code on.'
+  const HAS_CODE = 'Their membership already has another code on Whop.'
+  const escaped = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  /** The notice's whole sentence, the code being the one the press made (ECOM30- and 6 characters) unless named. */
+  const madeNotOn = (name, why, code = null) =>
+    new RegExp(`^${escaped(name)}: the code ${code ? escaped(code) : 'ECOM30-[A-Z0-9]{6}'} is made but not on their membership yet\\. ${escaped(why)}$`)
+  /** After a press: its notice (it stays, with Copy code) says `re`, and the row is still listed with `status`. */
+  const leftOn = async (name, re, status = 'approved') => {
+    const n = (await notices()).find((x) => re.test(x.text))
+    return { ok: Boolean(n && n.role === 'alert' && n.copy) && (await statusOf(name)) === status, said: (await notices()).map((x) => x.text), status: await statusOf(name) }
+  }
 
   for (const size of SIZES) {
     const [w, h] = size
@@ -793,7 +817,7 @@ if (wanted('thirty')) {
       expect(line && line.text === PAUSED && line.role === 'status' && line.top >= head - 1, `${label}: under the header, "${PAUSED}"`, JSON.stringify(line))
       const got = await whys()
       const wrong = Object.entries(WHY_PAUSED).filter(([n, t]) => got[n] !== t)
-      expect(wrong.length === 0, `${label}: every pending and approved row's Why line names the team; Tara's hold, Priya's refusal and Iris's decided row keep their words`, JSON.stringify(wrong.map(([n]) => [n, got[n]])))
+      expect(wrong.length === 0, `${label}: every pending and approved row's Why line names the team; Priya's refusal and Iris's decided row keep their words, Tara's refusal is still said once, by her verdict`, JSON.stringify(wrong.map(([n]) => [n, got[n]])))
       await check(label, `thirty-paused-${w}`)
     }
     {
@@ -827,9 +851,11 @@ if (wanted('thirty')) {
       expect(!(await bodyText()).includes("Couldn't read the membership coupons") && !(await bodyText()).includes('Approve still asks Whop'),
         `${label}: no sentence above the list about the coupons (the owner's review)`)
       const tara = await row('Tara Quinn')
-      // Her Why line still holds the job's coupon refusal (her newest attempt_failed); the verdict is the rule's.
-      expect((await tara.evaluate((r) => r.querySelector('[data-verdict]')?.dataset.verdict)) === 'yes' && !(await rowText(tara)).includes('Coupon not checked') && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled)),
-        `${label}: Tara's row shows the rule's yes and no coupon, Approve on (the approve route asks Whop itself)`)
+      // Her Why line still holds the job's coupon refusal (her newest attempt_failed), shown now that the verdict says
+      // something else: the rule's yes, the stored coupon unread.
+      expect((await tara.evaluate((r) => r.querySelector('[data-verdict]')?.dataset.verdict)) === 'yes' && !(await rowText(tara)).includes('Coupon not checked') && !(await (await buttonIn(tara, 'Approve')).evaluate((b) => b.disabled))
+          && (await tara.evaluate((r) => r.querySelector('[data-why]')?.textContent ?? null)) === COUPON_LINE,
+        `${label}: Tara's verdict is the rule's yes with no stored coupon shown, Approve on (the approve route asks Whop itself); her Why line still says the job's last refusal over the coupon`)
       await check(label, `thirty-nocoupons-${w}`)
     }
     {
@@ -869,9 +895,9 @@ if (wanted('thirty')) {
       'no Open in Discord, survey answers, Can still earn, last contact, Mark messaged, deadline or payment facts, "not pulled" pill or Mark code applied')
     const got = await whys()
     const wrong = Object.entries(WHY).filter(([n, t]) => got[n] !== t)
-    expect(wrong.length === 0, 'every row\'s Why line, thirtyWords over its newest failure: never tried, the 2-day line, a hold, a retry, a code Whop attached after a reject', JSON.stringify(wrong.map(([n]) => [n, got[n]])))
+    expect(wrong.length === 0, 'every row\'s Why line, thirtyWords over its newest failure: never tried, the 2-day line, a hold, a retry, a code Whop attached after a reject; none on Tara\'s row, whose refusal her verdict says word for word', JSON.stringify(wrong.map(([n]) => [n, got[n]])))
     const dots = await page.$$eval('[data-why]', (ps) => ps.map((p) => ({ why: p.dataset.why, dot: getComputedStyle(p.querySelector('span')).backgroundColor })))
-    expect(dots.length === 11 && new Set(dots.filter((d) => d.why === 'none').map((d) => d.dot)).size === 1 && dots.filter((d) => d.why !== 'none').every((d) => d.dot === dots.find((x) => x.why !== 'none').dot)
+    expect(dots.length === 10 && new Set(dots.filter((d) => d.why === 'none').map((d) => d.dot)).size === 1 && dots.filter((d) => d.why !== 'none').every((d) => d.dot === dots.find((x) => x.why !== 'none').dot)
         && dots.find((d) => d.why === 'none').dot !== dots.find((d) => d.why !== 'none').dot,
       'a Why line\'s dot: the warning colour once an attempt failed, grey while nothing has been tried', JSON.stringify(dots.slice(0, 3)))
     const maya = await row('Maya Lindqvist')
@@ -1072,11 +1098,12 @@ if (wanted('thirty')) {
       'Jonah\'s Approve anyway asks once, naming why the rule says no', confirmText)
     await check('30% off, Approve anyway past an unpaid student, 1280x720', 'thirty-unpaid-anyway-1280')
     await press(await buttonIn(await row('Jonah Pereira'), 'Yes, create the code'))
-    await shown('Approved Jonah Pereira. The code ECOM30-')
+    await shown('Jonah Pereira: the code ECOM30-')
     await settled()
     const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
-    expect(JSON.stringify(sent.at(-1)) === JSON.stringify(['r-jonah', true, false]) && (await isNull(await row('Jonah Pereira'))),
-      'Approve anyway: one approve call with override, the code made and on the membership, so Jonah leaves the list', JSON.stringify(sent))
+    const left = await leftOn('Jonah Pereira', madeNotOn('Jonah Pereira', `${NO_MEMBERSHIP} ${AGAIN}`))
+    expect(JSON.stringify(sent.at(-1)) === JSON.stringify(['r-jonah', true, false]) && left.ok,
+      'Approve anyway: one approve call with override; the code made, and with no paid course membership to put it on (his last failure) Jonah stays listed, approved, the notice saying why (until the review of 2026-10-27 the dev page put every code on)', JSON.stringify({ sent, left }))
     // A csm: no Approve anyway, so Jonah's row has Check Whop again and Reject.
     await open('?state=unpaid&role=csm')
     await waitReady()
@@ -1084,19 +1111,22 @@ if (wanted('thirty')) {
     expect(JSON.stringify(csm) === JSON.stringify(['Check Whop again', 'Reject']), 'a csm: Jonah\'s row has Check Whop again and Reject (Reject alone until the review of 2026-10-26)', JSON.stringify(csm))
   }
 
-  console.log('\n30% off: Approve on the rule\'s yes puts the 30% on, and Hugo, whose coupon Whop names only now (D5)')
+  console.log('\n30% off: Approve on the rule\'s yes makes the code, and Hugo, whose coupon Whop names only now (D5)')
   {
     await open('')
     await waitReady()
     await press(await buttonIn(await row('Jonah Pereira'), 'Approve'))
-    await shown('Approved Jonah Pereira.')
+    await shown('Jonah Pereira: the code ECOM30-')
     await settled()
     const made = await calls()
     expect(made.filter((c) => c.name === 'approve').map((c) => JSON.stringify(c.args)).join() === '["r-jonah",false,false]',
       'Approve on Jonah: one approve call, without override', JSON.stringify(made.map((c) => c.name)))
-    const n = (await notices()).find((x) => x.text.startsWith('Approved Jonah Pereira.'))
-    expect(n && /^Approved Jonah Pereira\. The code ECOM30-[A-Z0-9]{6} is on their membership\.$/.test(n.text) && n.role === 'status' && n.copy && (await isNull(await row('Jonah Pereira'))),
-      'the approve table\'s "applied": "Approved Jonah Pereira. The code ECOM30-... is on their membership.", with Copy code, and Jonah leaves the list (applied)', JSON.stringify(n))
+    // Whop shows him no paid course membership (his last failure): the shared step makes the code and leaves it there.
+    // The approve table's "applied" is proven on Tara below (?state=stalecoupon), whose membership takes the code.
+    const left = await leftOn('Jonah Pereira', madeNotOn('Jonah Pereira', `${NO_MEMBERSHIP} ${AGAIN}`))
+    const why = await (await row('Jonah Pereira')).evaluate((r) => r?.querySelector('[data-why]')?.textContent ?? null)
+    expect(left.ok && why === `${NO_MEMBERSHIP} ${AGAIN}` && JSON.stringify(await actionsOf(await row('Jonah Pereira'))) === JSON.stringify(['Try again', 'Reject']),
+      'the approve table\'s "made but not on their membership yet": the notice stays with Copy code, and Jonah stays listed, approved, with Try again and Reject and the same Why line (until the review of 2026-10-27 the dev page put the code on and he left the list)', JSON.stringify({ left, why }))
 
     await press(await buttonIn(await row('Hugo Lindahl'), 'Approve'))
     await shown('Hugo Lindahl: This student already has a discount on their membership')
@@ -1186,7 +1216,10 @@ if (wanted('thirty')) {
     await press(await buttonIn(await row('Tara Quinn'), 'Approve'))
     await shown('Approved Tara Quinn.')
     await settled()
-    expect(await isNull(await row('Tara Quinn')), 'and Approve goes through: the code on, Tara leaves the list')
+    // Her membership active, no code on it now: the shared step puts the code on (the approve table's "applied").
+    const n = (await notices()).find((x) => x.text.startsWith('Approved Tara Quinn.'))
+    expect(n && /^Approved Tara Quinn\. The code ECOM30-[A-Z0-9]{6} is on their membership\.$/.test(n.text) && n.role === 'status' && n.copy && (await isNull(await row('Tara Quinn'))),
+      'and Approve goes through, the approve table\'s "applied": "Approved Tara Quinn. The code ECOM30-... is on their membership.", a success with Copy code, and Tara leaves the list', JSON.stringify(n))
 
     // whop=down: Whop gives no answer. The row says so, and nothing changes.
     await open('?whop=down')
@@ -1220,11 +1253,13 @@ if (wanted('thirty')) {
     }
     await viewport([1280, 720])
     await press(await buttonIn(await row('Priya Raman'), 'Yes, create the code'))
-    await shown('Approved Priya Raman.')
+    await shown('Priya Raman: the code ECOM30-')
     await settled()
     const after = await calls()
     expect(after.some((c) => c.name === 'approve' && c.args[0] === 'r-priya' && c.args[1] === true && c.args[2] === false), 'the second click sends approve with override, the coupon still checked', JSON.stringify(after.filter((c) => c.name === 'approve')))
-    expect(await isNull(await row('Priya Raman')), 'the code made and on: Priya leaves the list')
+    // Her payment failed (past_due): the code is made, and can't go on until Whop takes the payment.
+    const left = await leftOn('Priya Raman', madeNotOn('Priya Raman', `Their membership is past_due on Whop, so the code can't go on yet. ${AGAIN}`))
+    expect(left.ok, 'the code made, not on: her membership is past_due, so Priya stays listed, approved, the notice saying why (until the review of 2026-10-27 she left the list)', JSON.stringify(left))
   }
 
   // The owner's review (2026-10-21): a founder or an admin approves past any check, the coupon's row too.
@@ -1243,11 +1278,13 @@ if (wanted('thirty')) {
     }
     await viewport([1280, 720])
     await press(await buttonIn(await row('Tara Quinn'), 'Yes, create the code'))
-    await shown('Approved Tara Quinn.')
+    await shown('Tara Quinn: the code ECOM30-')
     await settled()
     const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
-    expect(JSON.stringify(sent) === JSON.stringify([['r-tara', true, true]]) && (await isNull(await row('Tara Quinn'))),
-      'one approve call, with override and overrideCoupon; the code made past evolve10, and Tara leaves the list', JSON.stringify(sent))
+    // evolve10 is still on her membership: the code is made past the check, and the membership can't take it.
+    const left = await leftOn('Tara Quinn', madeNotOn('Tara Quinn', `${HAS_CODE} ${AGAIN}`))
+    expect(JSON.stringify(sent) === JSON.stringify([['r-tara', true, true]]) && left.ok,
+      'one approve call, with override and overrideCoupon; the code made past evolve10, which is still on her membership, so Tara stays listed, approved, "made but not on their membership yet" (until the review of 2026-10-27 she left the list)', JSON.stringify({ sent, left }))
   }
 
   console.log('\n30% off: the approve route\'s 409 "The course changed", then Approve anyway in Approve\'s place')
@@ -1259,7 +1296,7 @@ if (wanted('thirty')) {
     await press(await buttonIn(await row('Jonah Pereira'), 'Approve'))
     await shown(COURSE)
     await settled()
-    let jonah = await row('Jonah Pereira')
+    const jonah = await row('Jonah Pereira')
     const alert = await rowAlert(jonah)
     expect(alert === COURSE && (await isNull(await buttonIn(jonah, 'Approve'))) && !(await isNull(await linkIn(jonah)))
         && (await rowText(jonah)).includes(YES),
@@ -1281,12 +1318,12 @@ if (wanted('thirty')) {
     }
     await viewport([1280, 720])
     await press(await buttonIn(await row('Jonah Pereira'), 'Yes, create the code'))
-    await shown('Approved Jonah Pereira.')
+    await shown('Jonah Pereira: the code ECOM30-')
     await settled()
     const sent = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
     expect(JSON.stringify(sent) === JSON.stringify([['r-jonah', false, false], ['r-jonah', true, false]]), 'Approve, then Approve anyway with override: the code made', JSON.stringify(sent))
-    jonah = await row('Jonah Pereira')
-    expect(await isNull(jonah), 'Jonah is off the list, the 30% on')
+    const left = await leftOn('Jonah Pereira', madeNotOn('Jonah Pereira', `${NO_MEMBERSHIP} ${AGAIN}`))
+    expect(left.ok, 'Jonah stays listed, approved: no paid course membership to put the code on (until the review of 2026-10-27 the dev page put it on)', JSON.stringify(left))
   }
 
   console.log('\n30% off: a csm has no Approve anyway, and no Reject where the code may exist')
@@ -1353,9 +1390,16 @@ if (wanted('thirty')) {
     await shown('this request had already been decided, so the code must be deleted in Whop.')
     await settled()
     expect((await calls()).filter((x) => x.name === 'loadThirty').length === 2, 'approve answered 409: its sentence is shown and the list is read again')
-    expect(await isNull(await row('Maya Lindqvist')), 'Maya is off the list: another member rejected it')
     const notice = await page.$eval('[role="alert"]', (e) => ({ text: e.textContent, copy: [...e.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Copy code') }))
     expect(notice.text.startsWith('Maya Lindqvist: The Whop code ECOM30-') && notice.copy, 'the notice names the student and the code to delete, with Copy code', JSON.stringify(notice))
+    // As the approve route leaves it (the build's review of 2026-10-27): rejected by another member, holding the code
+    // Whop made, with a write_failed (decided_meanwhile) naming it, so the request stays listed for 30 days with that code.
+    const code = notice.text.match(/ECOM30-[A-Z0-9]{6}/)?.[0] ?? null
+    const maya = await row('Maya Lindqvist')
+    const mayaNow = await maya.evaluate((r) => r ? { status: r.dataset.rowStatus, why: r.querySelector('[data-why]')?.textContent ?? null, code: r.querySelector('code')?.textContent ?? null,
+      buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)), copy: [...r.querySelectorAll('button')].some((b) => b.textContent.trim() === 'Copy code') } : null)
+    expect(code && mayaNow && mayaNow.status === 'rejected' && mayaNow.why === `Whop made ${code}, but the request had changed. Delete ${code} in Whop.` && mayaNow.code === code && mayaNow.copy && mayaNow.buttons.length === 0,
+      'Maya stays on the list, rejected by another member: "Whop made <code>, but the request had changed. Delete <code> in Whop.", the code with Copy code, nothing to press (until the review she left the list)', JSON.stringify(mayaNow))
     await sleep(500)
     expect((await page.$('[role="alert"]')) !== null, 'it is still there a moment later (a refusal is never hidden by itself)')
     for (const size of SIZES) {
@@ -1368,9 +1412,10 @@ if (wanted('thirty')) {
     await press(await buttonIn(await row('Jonah Pereira'), 'Reject the request'))
     await shown('Jonah Pereira: This request was already decided.')
     await settled()
-    const jonah = await row('Jonah Pereira')
-    expect(!(await isNull(jonah)) && (await jonah.evaluate((r) => r.dataset.rowStatus)) === 'approved' && JSON.stringify(await actionsOf(jonah)) === JSON.stringify(['Try again', 'Reject']),
-      'reject answered 409: its sentence is shown and the list read again, Jonah now an approved row (another member approved it), with Try again')
+    // Another member's Approve went through first, as the routes do it: the 30% on, the request applied (the build's
+    // review of 2026-10-27: the dev page had turned it approved, which no route answers "already decided" for).
+    expect(await isNull(await row('Jonah Pereira')) && (await calls()).filter((x) => x.name === 'loadThirty').length === 3,
+      'reject answered 409: its sentence is shown and the list read again, Jonah gone from it (another member\'s Approve put the 30% on)')
   }
 
   console.log('\n30% off: a decision goes through, then the list cannot be read again')
@@ -1385,8 +1430,11 @@ if (wanted('thirty')) {
       status: [...document.querySelectorAll('[role="status"]')].map((e) => e.textContent),
       alert: [...document.querySelectorAll('[role="alert"]')].map((e) => e.textContent),
     }))
-    expect(said.status.some((t) => /^Approved Maya Lindqvist\. The code ECOM30-[A-Z0-9]{6} is on their membership\./.test(t)) && said.alert.some((t) => t.startsWith(STALE)),
-      'the approval and its code in a notice of their own, the list being out of date on a line of its own', JSON.stringify(said))
+    // Her membership still holds welcome50's id (a used-up code stays on it): the code is made, not on (the build's
+    // review of 2026-10-27; the dev page had put it on).
+    expect(said.alert.some((t) => /^Maya Lindqvist: the code ECOM30-[A-Z0-9]{6} is made but not on their membership yet\. Their membership already has another code on Whop\. The app tries again\./.test(t))
+        && said.alert.some((t) => t.startsWith(STALE)),
+      'what the press did and its code in a notice of their own, the list being out of date on a line of its own', JSON.stringify(said))
     const maya = await row('Maya Lindqvist')
     expect((await (await buttonIn(maya, 'Approve')).evaluate((b) => b.disabled)) && (await (await buttonIn(maya, 'Reject')).evaluate((b) => b.disabled))
       && (await maya.evaluate((r) => r.textContent.includes('Saved. Press Refresh to see this row as it is now.'))),
@@ -1406,13 +1454,15 @@ if (wanted('thirty')) {
       await check(`30% off, the approved rows, ${size.join('x')}`, `thirty-approved-${size[0]}`)
     }
     await viewport([1280, 720])
+    // Whop gives no answer about Nora's membership: Try again can't tell where the code is (the build's review of
+    // 2026-10-27; the dev page had put it on).
     await press(await buttonIn(await row('Nora Brandt'), 'Try again'))
-    await shown('Nora Brandt: the code ECOM30-7B20C4 is on their membership.')
+    await shown('Nora Brandt: the code ECOM30-7B20C4 is made but not on their membership yet.')
     await settled()
     const tried = (await calls()).filter((c) => c.name === 'approve').map((c) => c.args)
-    const n = (await notices()).find((x) => x.text.startsWith('Nora Brandt:'))
-    expect(JSON.stringify(tried) === JSON.stringify([['r-nora', false, false]]) && n?.role === 'status' && n.copy && (await isNull(await row('Nora Brandt'))),
-      'Try again: one approve call on the approved request, no override; "Nora Brandt: the code ECOM30-7B20C4 is on their membership.", and she leaves the list (applied)', JSON.stringify({ tried, n }))
+    const left = await leftOn('Nora Brandt', madeNotOn('Nora Brandt', `Whop didn't answer. ${AGAIN}`, 'ECOM30-7B20C4'))
+    expect(JSON.stringify(tried) === JSON.stringify([['r-nora', false, false]]) && left.ok,
+      'Try again: one approve call on the approved request, no override; Whop silent about her membership: "Nora Brandt: the code ECOM30-7B20C4 is made but not on their membership yet. Whop didn\'t answer. The app tries again.", and she stays listed, approved', JSON.stringify({ tried, left }))
     await press(await buttonIn(await row('Ethan Cole'), 'Reject'))
     await page.waitForSelector('[data-reject-confirm]')
     const confirm = await page.$eval('[data-reject-confirm]', (e) => e.textContent)
@@ -1423,10 +1473,32 @@ if (wanted('thirty')) {
     await shown('Rejected. The code ECOM30-3F9A21 stays usable at checkout until someone switches it off in Whop.')
     await settled()
     const r = (await notices()).find((x) => x.text.startsWith('Rejected.'))
-    expect(r?.role === 'alert' && r.copy && (await isNull(await row('Ethan Cole'))) && (await calls()).some((c) => c.name === 'reject' && c.args[0] === 'r-ethan'),
-      'the reject table\'s "usable": the notice stays until dismissed (there is something to do in Whop), with Copy code; Ethan leaves the list', JSON.stringify(r))
+    // The build's review of 2026-10-27: the request stays on the list (a write_failed, rejected_usable), rejected, with
+    // the code to switch off and its words; until then it left the list with the notice the only trace.
+    const ethan = await (await row('Ethan Cole')).evaluate((r) => r ? { status: r.dataset.rowStatus, why: r.querySelector('[data-why]')?.textContent ?? null, code: r.querySelector('code')?.textContent ?? null,
+      buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)) } : null)
+    expect(r?.role === 'alert' && r.copy && (await calls()).some((c) => c.name === 'reject' && c.args[0] === 'r-ethan')
+        && ethan?.status === 'rejected' && ethan.why === 'Rejected. The code ECOM30-3F9A21 stays usable at checkout until someone switches it off in Whop.' && ethan.code === 'ECOM30-3F9A21' && ethan.buttons.length === 0,
+      'the reject table\'s "usable": the notice stays until dismissed, with Copy code; Ethan stays on the list, rejected, with the code and the same words, nothing to press', JSON.stringify({ r, ethan }))
     await sleep(500)
     expect((await notices()).some((x) => x.text.startsWith('Rejected.')), 'and it is still there a moment later')
+    for (const size of SIZES) {
+      await viewport(size)
+      await check(`30% off, a Reject that left the code usable, ${size.join('x')}`, `thirty-rejected-usable-${size[0]}`)
+    }
+    await viewport([1280, 720])
+  }
+  {
+    // ?state=owncode: the team's own code is on Nora's membership in Whop already, so Try again marks it applied
+    // (the approve table's "applied" for Try again).
+    await open('?state=owncode')
+    await waitReady()
+    await press(await buttonIn(await row('Nora Brandt'), 'Try again'))
+    await shown('Nora Brandt: the code ECOM30-7B20C4 is on their membership.')
+    await settled()
+    const n = (await notices()).find((x) => x.text.startsWith('Nora Brandt:'))
+    expect(n?.role === 'status' && n.copy && /^Nora Brandt: the code ECOM30-7B20C4 is on their membership\.$/.test(n.text) && (await isNull(await row('Nora Brandt'))),
+      'Try again, her own code already on her membership: "Nora Brandt: the code ECOM30-7B20C4 is on their membership.", a success with Copy code, and she leaves the list (applied)', JSON.stringify(n))
   }
 
   console.log('\n30% off: ?student= keeps the list to one student; an old ?tab= opens the list')
@@ -1485,9 +1557,16 @@ if (wanted('thirty')) {
       'No Whop Id': 'This request has a code with no Whop id, so the app can\'t check it. Check ECOM30-UNKN0W in Whop, then tell the owner so the app records it.',
       'Approved Trial': 'Their membership is a trial on Whop. The app leaves trials to the team: Approve or Try again puts the code on.',
       'Approved Canceled': `Their membership is canceled on Whop, so the code can't go on yet. ${AGAIN}`,
+      // The build's review of 2026-10-27: the where read's refused key names its scope; another code of the name Whop
+      // put on; the job stopped after 6 failures only a person can clear; a Reject that left its code usable.
+      'Where Key Refused': `Whop refused the app's key. It needs member:basic:read. ${AGAIN}`,
+      'Same Name': 'Whop put another code named ECOM30-S4MEN4 on their membership. Check it in Whop, then tell the owner so the app records it.',
+      'Gave Up Code': 'Their membership already has another code on Whop. The app stopped after 6 tries. Press Try again once that code is off their membership, or reject it.',
+      'Gave Up Canceled': "Their membership is canceled on Whop, so the code can't go on yet. The app stopped after 6 tries. Press Try again if they join again, or reject it.",
       'Decided Meanwhile': 'Whop made ECOM30-D3C1DD, but the request had changed. Delete ECOM30-D3C1DD in Whop.',
       'Maybe Attached': 'Whop may have attached ECOM30-MAYB3A after the request was rejected. Check their membership in Whop.',
       'Applied Meanwhile': 'Whop made ECOM30-EXTR4C, but the request had changed. Delete ECOM30-EXTR4C in Whop.',
+      'Rejected Usable': 'Rejected. The code ECOM30-R3JUSE stays usable at checkout until someone switches it off in Whop.',
     }
     for (const size of [[1440, 900], [390, 844]]) {
       await open('?state=reasons', size)
@@ -1502,8 +1581,8 @@ if (wanted('thirty')) {
         name: r.querySelector('a')?.textContent, code: r.querySelector('code')?.textContent ?? null,
         buttons: [...r.querySelectorAll('button')].map((b) => b.textContent.trim()).filter((t) => !/^Copy (code|Discord ID|username)$/.test(t)),
       })))
-      expect(JSON.stringify(decided.map((d) => [d.name, d.code, d.buttons.length])) === JSON.stringify([['Decided Meanwhile', 'ECOM30-D3C1DD', 0], ['Maybe Attached', 'ECOM30-MAYB3A', 0], ['Applied Meanwhile', 'ECOM30-EXTR4C', 0]]),
-        `${size.join('x')}: the rejected and applied rows: their words, the code Whop made or attached (the one to see to in Whop), the copy buttons only`, JSON.stringify(decided))
+      expect(JSON.stringify(decided.map((d) => [d.name, d.code, d.buttons.length])) === JSON.stringify([['Decided Meanwhile', 'ECOM30-D3C1DD', 0], ['Maybe Attached', 'ECOM30-MAYB3A', 0], ['Applied Meanwhile', 'ECOM30-EXTR4C', 0], ['Rejected Usable', 'ECOM30-R3JUSE', 0]]),
+        `${size.join('x')}: the rejected and applied rows: their words, the code Whop made or attached, or a Reject left usable (the one to see to in Whop, from the event: its name is off a rejected row), the copy buttons only`, JSON.stringify(decided))
       await check(`30% off, every other reason, the Why lines, ${size.join('x')}`, `thirty-reasons-why-${size[0]}`)
     }
     // A csm on the same rows: a pending row whose code may exist (a claim, a hand reopen) has no Reject; an approved one Try again alone.
@@ -1542,12 +1621,14 @@ if (wanted('thirty')) {
       ['No Whop Id', 'Reject', '^Rejected\\. Whop may have made ECOM30-UNKN0W: look for it in Whop\'s promo codes and switch it off if it\'s there\\.$', 'notice', 'alert'],
       ['Reject In Progress', 'Reject', '^Reject In Progress: The app is making this code right now\\. Try again in a few minutes\\.$', 'notice', 'alert'],
       ['Reject On Theirs', 'Reject', '^Reject On Theirs: The code is already on their membership, so the 30% is theirs\\. Press Try again to mark it applied\\.$', 'notice', 'alert'],
-      ['Reject Claim On Theirs', 'Reject', '^Reject Claim On Theirs: The code is already on their membership, so the 30% is theirs\\. The app marks it applied within the hour\\.$', 'notice', 'alert'],
+      ['Reject Claim On Theirs', 'Reject', '^Reject Claim On Theirs: The code is already on their membership, so the 30% is theirs\\. The app marks it applied within the hour; while the app is paused, press Approve anyway\\.$', 'notice', 'alert'],
       ['Reject Elsewhere', 'Reject', '^Reject Elsewhere: Whop shows ECOM30-ELS3WH on someone else\'s membership\\. Fix it in Whop, then tell the owner so the app records it\\.$', 'notice', 'alert'],
       ['Reject Cannot Tell', 'Reject', '^Reject Cannot Tell: The app can\'t tell whose membership ECOM30-CNTT3L is on\\. Check it in Whop\\.$', 'notice', 'alert'],
       ['Reject Changed', 'Reject', '^Reject Changed: This request changed meanwhile\\. Refresh the list\\.$', 'notice', 'alert'],
       ['Reject Whop Silent', 'Reject', '^Couldn\'t ask Whop\\. Try again\\.$', 'row'],
       ['Reject Lookup Silent', 'Reject', '^Couldn\'t ask Whop about this code\\. Try again\\.$', 'row'],
+      // The build's review of 2026-10-27: another code of its name on their membership, so Reject refuses.
+      ['Same Name', 'Reject', '^Same Name: Whop put another code named ECOM30-S4MEN4 on their membership\\. Check it in Whop, then tell the owner so the app records it\\.$', 'notice', 'alert'],
     ]
     const wrong = []
     for (const [name, label, pattern, where, tone] of PRESSES) {

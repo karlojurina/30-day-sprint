@@ -9,14 +9,22 @@
  *
  * WHO IS TAKEN. Requests made from 1 October (DISCOUNT_ELIGIBLE_FROM) and at
  * least 2 minutes ago (the student's own request has had its 26 seconds),
- * oldest first, up to 200: every pending request made in the last 48 hours,
+ * each kind read in full: every pending request made in the last 48 hours,
  * every pending request holding a code name whatever its age (a claim that
  * may have lost its answer, or a request reopened by hand), every approved
- * request whatever its age. A request whose last failure (an attempt_failed
- * event) is under 9 minutes old, or under 55 minutes once it failed 3 times
- * or more, waits for a later run, and so does one whose last failure is a
- * code on someone else's membership (landed_elsewhere: nothing the job does
- * changes it). The first 25 left are worked on, none started after 240 s,
+ * request whatever its age. Passed over, before anything is cut: a request
+ * whose last failure (an attempt_failed event) is under 9 minutes old, or
+ * under 55 minutes once it failed 3 times or more; one whose last failure is
+ * a code on someone else's membership (landed_elsewhere) or another code of
+ * its name that Whop put on their membership (write_failed,
+ * attach_other_code), which nothing the job does changes; and one the job
+ * stopped trying (`stopped`: its last failure only a person can clear, and
+ * JOB_GIVES_UP_AFTER failures, jobGivesUp in thirty-words.ts). The rest are
+ * worked on in this order (the build's review of 2026-10-27: requests that
+ * could never finish, read oldest first, had kept a new student's request
+ * from ever being tried): requests made in the last 48 hours, then requests
+ * never tried, each oldest first, then the rest by their last failure, the
+ * longest ago first. The first 25 are worked on, none started after 240 s,
  * each inside 20 seconds (270 s from the run's start at most).
  *
  * WHAT IS DONE. A new code is made only for a request from the last 48 hours,
@@ -37,11 +45,12 @@
  *
  * THE ANSWER names request ids only: { ok, paused, mode, examined (requests
  * read), applied, waiting (requests that ended pending or approved), skipped
- * (passed over by the wait or the landed_elsewhere rule), gaveUp (requests
- * with no code whose 48 hours ended in the 10 minutes before the run: they
- * wait for the team now), byReason (each failure's reason, counted), planned,
- * failed (requests whose step threw: a database read or write that failed,
- * which makes the run a failure) }.
+ * (passed over by the wait, or a code Whop put somewhere the job cannot
+ * change), stopped (passed over because the job stopped trying them: the
+ * team's now), gaveUp (requests with no code whose 48 hours ended in the 10
+ * minutes before the run: they wait for the team now), byReason (each
+ * failure's reason, counted), planned, failed (requests whose step threw: a
+ * database read or write that failed, which makes the run a failure) }.
  *
  * Auth: CRON_SECRET as a bearer, like every cron (src/lib/cron-auth.ts), with
  * a cron_runs row whose rows_affected is the number applied. THIRTY_AUTO_APPLY
@@ -57,7 +66,7 @@ import { createServiceClient } from "@/lib/supabase-server";
 import { verifyCronAuth, cronUnauthorizedResponse, logCronStart, logCronFinish } from "@/lib/cron-auth";
 import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
 import { DISCOUNT_ELIGIBLE_FROM } from "@/lib/world/discount";
-import { JOB_NEW_CODE_WINDOW_MS } from "@/lib/thirty-words";
+import { JOB_NEW_CODE_WINDOW_MS, jobGivesUp } from "@/lib/thirty-words";
 import { putThirtyOn, requestShape, thirtyApprovalChecks, thirtyAutoApplyPaused, type ThirtyResult } from "@/lib/thirty-apply";
 
 export const maxDuration = 300;
@@ -66,7 +75,6 @@ export const dynamic = "force-dynamic";
 const ROUTE_NAME = "apply-thirty";
 /** A request younger than this is still the student's own request's to finish. */
 const MIN_AGE_MS = 2 * 60_000;
-const CANDIDATES_MAX = 200;
 const TAKE_MAX = 25;
 /** No request is started after this, and none runs past RUN_MS from the run's start. */
 const START_BY_MS = 240_000;
@@ -93,6 +101,8 @@ type Candidate = {
   created_at: string;
 };
 type Planned = { requestId: string; status: string | null; would: string | null; reason: string | null };
+/** A candidate's failed attempts: how many, and the newest's moment, reason, step and the membership's status then. */
+type Failures = { count: number; at: number; reason: string | null; step: string | null; membershipStatus: string | null };
 
 /** Oldest first; the id breaks a tie, so every read gives one order. */
 const byAge = (a: Candidate, b: Candidate) => Date.parse(a.created_at) - Date.parse(b.created_at) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
@@ -134,57 +144,82 @@ export async function GET(request: NextRequest) {
   }
   if (!process.env.WHOP_API_KEY) return failedRun("WHOP_API_KEY is not set on this deployment. Nothing ran.");
 
-  // The candidates: three reads, each the oldest 200 of its kind, so the oldest 200 of all three are among them.
+  // The candidates: the three kinds, each read in full (in pages), so a request passed over never hides another.
   const nowMs = Date.now();
   const madeBy = new Date(nowMs - MIN_AGE_MS).toISOString();
-  const newFrom = new Date(nowMs - JOB_NEW_CODE_WINDOW_MS).toISOString();
+  const newFromMs = nowMs - JOB_NEW_CODE_WINDOW_MS;
+  const newFrom = new Date(newFromMs).toISOString();
   const read = () =>
     db.from("discount_requests").select(COLUMNS).gte("created_at", DISCOUNT_ELIGIBLE_FROM).lte("created_at", madeBy);
   const [made48, claimed, approved] = await Promise.all([
-    read().eq("status", "pending").gt("created_at", newFrom).order("created_at", { ascending: true }).order("id", { ascending: true }).limit(CANDIDATES_MAX),
-    read().eq("status", "pending").not("promo_code", "is", null).order("created_at", { ascending: true }).order("id", { ascending: true }).limit(CANDIDATES_MAX),
-    read().eq("status", "approved").order("created_at", { ascending: true }).order("id", { ascending: true }).limit(CANDIDATES_MAX),
+    fetchAllRowsPaginated<Candidate>(() => read().eq("status", "pending").gt("created_at", newFrom).order("created_at", { ascending: true }).order("id", { ascending: true })),
+    fetchAllRowsPaginated<Candidate>(() => read().eq("status", "pending").not("promo_code", "is", null).order("created_at", { ascending: true }).order("id", { ascending: true })),
+    fetchAllRowsPaginated<Candidate>(() => read().eq("status", "approved").order("created_at", { ascending: true }).order("id", { ascending: true })),
   ]);
   const readFailed = made48.error ?? claimed.error ?? approved.error;
   if (readFailed) return failedRun(`the requests could not be read: ${readFailed.message}`);
   const byId = new Map<string, Candidate>();
-  for (const r of [...(made48.data ?? []), ...(claimed.data ?? []), ...(approved.data ?? [])] as Candidate[]) byId.set(r.id, r);
-  const candidates = [...byId.values()].sort(byAge).slice(0, CANDIDATES_MAX);
+  for (const r of [...made48.data, ...claimed.data, ...approved.data]) byId.set(r.id, r);
+  const candidates = [...byId.values()].sort(byAge);
 
-  // Each candidate's failures: how many, the newest's time and reason.
-  const failures = new Map<string, { count: number; at: number; reason: string | null }>();
+  // Each candidate's failures: how many, and the newest's time, reason, step and membership status.
+  const failures = new Map<string, Failures>();
   const ids = candidates.map((c) => c.id);
   for (let i = 0; i < ids.length; i += ID_BATCH) {
     const batch = ids.slice(i, i + ID_BATCH);
-    const events = await fetchAllRowsPaginated<{ request_id: string; reason: string | null; created_at: string }>(() =>
+    const events = await fetchAllRowsPaginated<{ request_id: string; reason: string | null; detail: Record<string, unknown> | null; created_at: string }>(() =>
       db
         .from("discount_request_events")
-        .select("request_id, reason, created_at")
+        .select("request_id, reason, detail, created_at")
         .eq("event", "attempt_failed")
         .in("request_id", batch)
         .order("created_at", { ascending: false })
         .order("id", { ascending: false }),
     );
     if (events.error) return failedRun(`the requests' failures could not be read: ${events.error.message}`);
+    // Read newest first, so a request's first event is its newest; a later one in time replaces it all the same.
     for (const e of events.data) {
-      const at = Date.parse(e.created_at);
+      const d = e.detail && typeof e.detail === "object" ? e.detail : {};
+      const newest = {
+        at: Date.parse(e.created_at),
+        reason: e.reason,
+        step: typeof d.step === "string" ? d.step : null,
+        membershipStatus: typeof d.membership_status === "string" ? d.membership_status : null,
+      };
       const had = failures.get(e.request_id);
-      if (!had) failures.set(e.request_id, { count: 1, at, reason: e.reason });
+      if (!had) failures.set(e.request_id, { count: 1, ...newest });
       else {
         had.count += 1;
-        if (at > had.at) Object.assign(had, { at, reason: e.reason });
+        if (newest.at > had.at) Object.assign(had, newest);
       }
     }
   }
-  /** Whether a candidate waits for a later run: its last failure too recent, or a code on someone else's membership. */
-  const waitsLonger = (id: string) => {
+  /**
+   * Why a candidate is passed over this run, or null: stopped (the job no
+   * longer tries it, the team's now); skipped (a code Whop put where the job
+   * cannot change it, or its last failure too recent).
+   */
+  const passedOver = (id: string): "stopped" | "skipped" | null => {
     const f = failures.get(id);
-    if (!f) return false;
-    if (f.reason === "landed_elsewhere") return true;
-    return nowMs - f.at < (f.count >= LONG_WAIT_AFTER ? LONG_WAIT_MS : SHORT_WAIT_MS);
+    if (!f) return null;
+    if (f.reason === "landed_elsewhere" || (f.reason === "write_failed" && f.step === "attach_other_code")) return "skipped";
+    if (jobGivesUp(f.reason, f.membershipStatus, f.count)) return "stopped";
+    return nowMs - f.at < (f.count >= LONG_WAIT_AFTER ? LONG_WAIT_MS : SHORT_WAIT_MS) ? "skipped" : null;
   };
-  const left = candidates.filter((c) => !waitsLonger(c.id));
-  const skipped = candidates.length - left.length;
+  let skipped = 0;
+  let stopped = 0;
+  const left: Candidate[] = [];
+  for (const c of candidates) {
+    const why = passedOver(c.id);
+    if (why === "stopped") stopped += 1;
+    else if (why === "skipped") skipped += 1;
+    else left.push(c);
+  }
+  // The order they are worked in: the last 48 hours' requests (students waiting now), then requests never tried, each
+  // oldest first; then the rest, the one whose last failure was longest ago first.
+  const tierOf = (c: Candidate) => (Date.parse(c.created_at) > newFromMs ? 0 : failures.has(c.id) ? 2 : 1);
+  const lastFailedAt = (c: Candidate) => failures.get(c.id)?.at ?? 0;
+  left.sort((a, b) => tierOf(a) - tierOf(b) || (tierOf(a) === 2 ? lastFailedAt(a) - lastFailedAt(b) : 0) || byAge(a, b));
   const taken = left.slice(0, TAKE_MAX);
 
   // The requests with no code whose 48 hours just ended: the team's now.
@@ -265,7 +300,7 @@ export async function GET(request: NextRequest) {
     console.error(`[${ROUTE_NAME}] ${error}`);
   }
   return NextResponse.json(
-    { ok, paused: false, mode, examined: candidates.length, applied, waiting, skipped, gaveUp, byReason, planned, failed },
+    { ok, paused: false, mode, examined: candidates.length, applied, waiting, skipped, stopped, gaveUp, byReason, planned, failed },
     { status: ok ? 200 : 500 },
   );
 }

@@ -25,14 +25,25 @@
  * anyway on the coupon's row (`overrideCoupon`, a founder's or an admin's,
  * the owner's review of 2026-10-21) passes it. A refusal of the rule carries
  * code "rule", as the route's does, and a csm's override is refused as the
- * route refuses it. What passes the checks is applied: the code made and put
- * on the membership, as the route does since the 30% applies itself, and the
- * request leaves the list. Try again on an approved row applies it too.
+ * route refuses it. What passes the checks gets its code made, and then goes
+ * where the shared step (putThirtyOn) would take it, by the membership in
+ * Whop now (`live`, else the stored one): on, and applied, when the
+ * membership is active and holds no other code; else left approved with the
+ * step's reason (a membership past_due, canceled or with another code on it,
+ * Whop not answering, or no paid course membership as the request's last
+ * failure says), recorded as an attempt_failed, the notice the approve
+ * table's "made but not on their membership yet". Try again on an approved
+ * row does the same, after asking where the code is (the request's own code
+ * on the membership: applied). The build's review of 2026-10-27: until then
+ * every press past the checks was applied.
  * Reject follows the route's table: a request with no code is rejected; an
- * approved one is rejected with its code left usable; one whose code has no
- * Whop id with the code that may exist; a csm is refused on a request whose
- * code may exist. A request can carry its own answer to a press (`press`),
- * for each line of the approve and reject tables (PRD §9.4).
+ * approved one is rejected with its code left usable, the name off the row
+ * and the request listed for 30 days (a write_failed, rejected_usable); one
+ * whose code has no Whop id with the code that may exist; a csm is refused
+ * on a request whose code may exist; a request whose code Whop answered with
+ * another code of its name (attach_other_code) is refused. A request can
+ * carry its own answer to a press (`press`), for each line of the approve
+ * and reject tables (PRD §9.4).
  *
  *   ?state=full | empty | loading | error   (default full)
  *          partial    full, plus a student whose progress cannot be read
@@ -89,9 +100,13 @@
  * (POST /api/admin/thirty/check-coupon) reads Whop the way the approve route
  * does here, and stores what it read.
  *   ?conflict=1   approve and reject answer as if another team member decided
- *                 the request first: approve with the route's 409 and its
- *                 sentence (the code must be deleted in Whop), reject with
- *                 its 409 "This request was already decided."
+ *                 the request first, as the routes leave it: approve with the
+ *                 route's 409 and its sentence (the code must be deleted in
+ *                 Whop), the request rejected with its claimed code and a
+ *                 write_failed (decided_meanwhile), so it stays listed with
+ *                 that code; reject with its 409 "This request was already
+ *                 decided." after another member's Approve put the 30% on, so
+ *                 it leaves the list (the build's review of 2026-10-27)
  *   ?reload=fail  the first read of the list works, every later one fails
  *   ?whop=down    Check Whop again gets no answer from Whop: the route's 502
  *                 and its sentence, and nothing changes
@@ -374,8 +389,8 @@ function fullDb(): FixtureDb {
       { askId: "r-max-2", event: "attempt_failed", at: ago(27), reason: "membership_not_active", step: "membership", membershipStatus: "past_due" },
       // Priya: the job's checks refused her, in the approve route's words.
       { askId: "r-priya", event: "attempt_failed", at: ago(37), reason: "check_refused", message: PRIYA_RULE },
-      // Ethan: Whop took no code, the membership holding another one.
-      { askId: "r-ethan", event: "attempt_failed", at: ago(27), reason: "membership_has_code", step: "attach", code: "ECOM30-3F9A21" },
+      // Ethan: no code put on, the membership holding another one (read before the attach, as the step reads it).
+      { askId: "r-ethan", event: "attempt_failed", at: ago(27), reason: "membership_has_code", step: "membership", code: "ECOM30-3F9A21" },
       // Nora: Whop gave no answer to the attach.
       { askId: "r-nora", event: "attempt_failed", at: ago(7), reason: "whop_no_answer", step: "attach", code: "ECOM30-7B20C4" },
       // Iris: rejected while Whop attached the code, and Whop showed it attached.
@@ -508,8 +523,28 @@ function reasonsDb(): FixtureDb {
     a.promoId = promoIdOf(a.promoCode);
   }
   add("No Whop Id", { status: "approved", ...approvedAt, promoCode: code("UNKN0W") }, { reason: "code_unknown", code: code("UNKN0W") });
-  add("Approved Trial", { status: "approved", ...approvedAt, ...ours("TR1AL5") }, { reason: "membership_not_active", step: "membership", membershipStatus: "trialing" });
-  add("Approved Canceled", { status: "approved", ...approvedAt, ...ours("CANC3L") }, { reason: "membership_not_active", step: "membership", membershipStatus: "canceled" });
+  add("Approved Trial", { status: "approved", ...approvedAt, ...ours("TR1AL5") }, { reason: "membership_not_active", step: "membership", membershipStatus: "trialing" }, { status: "trialing" });
+  add("Approved Canceled", { status: "approved", ...approvedAt, ...ours("CANC3L") }, { reason: "membership_not_active", step: "membership", membershipStatus: "canceled" }, { status: "canceled" });
+  // The build's review of 2026-10-27: Whop's where read refusing the key names its scope; another code of the
+  // request's name put on their membership by Whop (its own write_failed: the job leaves it, Reject refuses it);
+  // and two the job stopped trying after JOB_GIVES_UP_AFTER failures only a person can clear.
+  add("Where Key Refused", { status: "approved", ...approvedAt, ...ours("WH3R3K") }, { reason: "key_not_allowed", step: "where", message: "http_401_403" });
+  add(
+    "Same Name",
+    { status: "approved", ...approvedAt, ...ours("S4MEN4") },
+    { reason: "write_failed", step: "attach_other_code", code: code("S4MEN4") },
+    // The other code of that name, on their membership in Whop now.
+    { live: { code: code("S4MEN4"), promoId: "promo_devsamenamesibling", renewal: 67.9, plan: 97 } },
+  );
+  {
+    const gaveUp = (name: string, k: string, f: Omit<Happening, "askId" | "event" | "at">, person: Partial<Person>) => {
+      // Asked and approved 8 hours ago; tried six times since, an hour apart, the newest 55 minutes ago.
+      const id = add(name, { status: "approved", minutes: 480, reviewedAt: ago(470), ...ours(k) }, f, person);
+      for (let i = 1; i <= 5; i++) events.push({ askId: id, event: "attempt_failed", at: ago(55 + i * 60), ...f });
+    };
+    gaveUp("Gave Up Code", "G1V3UP", { reason: "membership_has_code", step: "membership", membershipStatus: "active", code: code("G1V3UP") }, { stored: EVOLVE });
+    gaveUp("Gave Up Canceled", "G0N3CX", { reason: "membership_not_active", step: "membership", membershipStatus: "canceled", code: code("G0N3CX") }, { status: "canceled" });
+  }
 
   // ── Rejected and applied, listed for a write_failed ──
   {
@@ -524,11 +559,20 @@ function reasonsDb(): FixtureDb {
     const id = add("Applied Meanwhile", { status: "applied", reviewedAt: ago(70), appliedAt: ago(70), ...ours("HAND5X") });
     events.push({ askId: id, event: "applied", at: ago(70) }, { askId: id, event: "attempt_failed", at: ago(69), reason: "write_failed", step: "decided_meanwhile", code: code("EXTR4C") });
   }
+  {
+    // A Reject that left its code usable at checkout: the name off the row, listed for 30 days (the build's review of 2026-10-27).
+    const id = add("Rejected Usable", { status: "rejected", reviewedAt: ago(70), reviewedBy: "tm-robin", reason: "Two accounts on one card.", promoId: promoIdOf(code("R3JUSE")) });
+    events.push(
+      { askId: id, event: "rejected", at: ago(70) },
+      { askId: id, event: "code_changed", at: ago(70) },
+      { askId: id, event: "attempt_failed", at: ago(69), reason: "write_failed", step: "rejected_usable", code: code("R3JUSE") },
+    );
+  }
 
   // ── The presses: one request for each answer of the approve and reject tables (PRD §9.4) ──
   const press = (name: string, status: "pending" | "approved", p: Ask["press"], more: Partial<Ask> = {}) =>
     add(name, { status, ...(status === "approved" ? { ...approvedAt, ...ours(`P${String(n + 1).padStart(5, "0")}`) } : {}), ...more, press: p });
-  press("Approve Made Not On", "pending", { approve: { kind: "approved", reason: "membership_has_code", step: "attach", membershipStatus: "active" } });
+  press("Approve Made Not On", "pending", { approve: { kind: "approved", reason: "membership_has_code", step: "membership", membershipStatus: "active" } });
   press("Approve Create Silent", "pending", { approve: { kind: "pending", reason: "whop_no_answer", step: "create", claim: code("CR8SLN") } });
   press("Approve No Code Yet", "pending", { approve: { kind: "pending", reason: "whop_no_answer", step: "deadline" } });
   press("Approve Whop Refused", "pending", { approve: { kind: "refused", status: 502, error: "Couldn't create the promo code on Whop. The request is still pending. Details: A promo code needs a plan on this company." } });
@@ -542,7 +586,7 @@ function reasonsDb(): FixtureDb {
   press("Reject Usable", "approved", { reject: { kind: "rejected", codeState: "usable" } });
   press("Reject In Progress", "pending", { reject: { kind: "refused", status: 409, error: "The app is making this code right now. Try again in a few minutes." } }, { promoCode: code("1NPR0G") });
   press("Reject On Theirs", "approved", { reject: { kind: "refused", status: 409, error: "The code is already on their membership, so the 30% is theirs. Press Try again to mark it applied." } });
-  press("Reject Claim On Theirs", "pending", { reject: { kind: "refused", status: 409, error: "The code is already on their membership, so the 30% is theirs. The app marks it applied within the hour." } }, { promoCode: code("CL41MT") });
+  press("Reject Claim On Theirs", "pending", { reject: { kind: "refused", status: 409, error: "The code is already on their membership, so the 30% is theirs. The app marks it applied within the hour; while the app is paused, press Approve anyway." } }, { promoCode: code("CL41MT") });
   press("Reject Elsewhere", "approved", { reject: { kind: "refused", status: 409, error: `Whop shows ${code("ELS3WH")} on someone else's membership. Fix it in Whop, then tell the owner so the app records it.` } });
   press("Reject Cannot Tell", "approved", { reject: { kind: "refused", status: 409, error: `The app can't tell whose membership ${code("CNTT3L")} is on. Check it in Whop.` } });
   press("Reject Changed", "approved", { reject: { kind: "refused", status: 409, error: "This request changed meanwhile. Refresh the list." } });
@@ -652,10 +696,11 @@ function toData(db: FixtureDb, opts: { videosFail?: boolean; couponsFail?: boole
     });
   }
 
-  // Each listed request's newest attempt_failed, with the detail the shared step writes.
+  // Each listed request's newest attempt_failed, with the detail the shared step writes and how many it has.
   const failures = new Map<string, ThirtyFailureEvent>();
   for (const r of requests) {
-    const e = eventsOf(db, r.id).filter((x) => x.event === "attempt_failed").at(-1);
+    const mine = eventsOf(db, r.id).filter((x) => x.event === "attempt_failed");
+    const e = mine.at(-1);
     if (!e) continue;
     failures.set(r.id, {
       request_id: r.id,
@@ -670,6 +715,7 @@ function toData(db: FixtureDb, opts: { videosFail?: boolean; couponsFail?: boole
         product: e.product ?? null,
         ...(e.confirmed !== undefined ? { confirmed: e.confirmed } : {}),
       },
+      count: mine.length,
     });
   }
 
@@ -816,6 +862,35 @@ export function fixtureThirtyTransport(opts: {
   /** A failed attempt in the request's history, as the shared step records it. */
   const failed = (a: Ask, f: { reason: ThirtyReason; step?: string; membershipStatus?: string; message?: string }) =>
     db.events.push({ askId: a.id, event: "attempt_failed", at: at(), ...f, code: a.promoCode ?? undefined });
+  /** The statuses a membership takes a code in (thirty-apply.ts ATTACHABLE). */
+  const ATTACHABLE = new Set(["active", "trialing", "canceling"]);
+  /**
+   * Where the code goes once it exists, as the shared step decides it
+   * (putThirtyOn): null when it goes on (applied), else why not. The
+   * membership is the one in Whop now (`live`, else the stored one, else a
+   * clean one), its status the student's (the webhook keeps it as Whop has
+   * it). Try again first asks where the code is: Whop not answering stops
+   * it there (step where), and the request's own code on the membership is
+   * the 30% already on. Then where to attach: Whop not answering (step
+   * membership), a status that takes no code, no paid course membership (the
+   * request's last failure says so: Jonah's story), another code on it (a
+   * used-up one's id stays on the membership too). The team's press goes past
+   * a trial.
+   */
+  const whereItGoes = (a: Ask, tryAgain: boolean): { reason: ThirtyReason; step: string; membershipStatus?: string } | null => {
+    const p = person(a.studentId);
+    if (!p) return { reason: "no_membership", step: "membership" };
+    if (p.liveFails) return { reason: "whop_no_answer", step: tryAgain ? "where" : "membership" };
+    const m = p.live ?? p.stored ?? CLEAN;
+    const on = m.promoId !== undefined ? m.promoId : m.code ? promoIdOf(m.code) : null;
+    if (tryAgain && a.promoId && on === a.promoId) return null;
+    const status = (p.status ?? "active").toLowerCase();
+    if (!ATTACHABLE.has(status)) return { reason: "membership_not_active", step: "membership", membershipStatus: status };
+    const last = eventsOf(db, a.id).filter((e) => e.event === "attempt_failed").at(-1);
+    if (last?.reason === "no_membership") return { reason: "no_membership", step: "membership" };
+    if (on !== null && on !== a.promoId) return { reason: "membership_has_code", step: "membership", membershipStatus: status };
+    return null;
+  };
 
   return {
     calls,
@@ -847,10 +922,13 @@ export function fixtureThirtyTransport(opts: {
       const a = ask(id);
       if (!a) return later<ApproveAnswer>(notFound);
       if (opts.conflict) {
-        // Another team member rejected it while Whop made the code: the route's 409 (decided_meanwhile).
-        const code = codeFor(a.studentId);
-        Object.assign(a, { status: "rejected", reviewedAt: at(), reviewedBy: "tm-jamie", reason: "Decided by another team member." });
+        // Another team member rejected it while Whop made the code: the route's 409 (decided_meanwhile), and the
+        // request as the route leaves it: rejected, holding the code it claimed, with a write_failed naming that code,
+        // so it stays listed with the code to delete in Whop.
+        const code = a.promoCode ?? codeFor(a.studentId);
+        Object.assign(a, { status: "rejected", promoCode: code, reviewedAt: at(), reviewedBy: "tm-jamie", reason: "Decided by another team member." });
         db.events.push({ askId: a.id, event: "rejected", at: at() });
+        failed(a, { reason: "write_failed", step: "decided_meanwhile" });
         return later<ApproveAnswer>({
           ok: false,
           status: 409,
@@ -860,8 +938,9 @@ export function fixtureThirtyTransport(opts: {
       const p = a.press?.approve;
       if (p?.kind === "refused") return later<ApproveAnswer>({ ok: false, status: p.status, error: p.error });
       if (a.status === "approved") {
-        // Try again: no checks; where the code is, then on, then applied (or why not). What the step cannot change
-        // comes back as it was: a code with no Whop id, a code on someone else's membership, no telling whose.
+        // Try again: no checks; where the code is, then on, then applied (or why not, as the step decides it). What
+        // the step cannot change comes back as it was: a code with no Whop id, a code on someone else's membership,
+        // no telling whose.
         const last = eventsOf(db, a.id).filter((e) => e.event === "attempt_failed").at(-1);
         const stuck =
           p?.kind === "approved"
@@ -870,7 +949,7 @@ export function fixtureThirtyTransport(opts: {
               ? { reason: "code_unknown" as const }
               : last && (last.reason === "landed_elsewhere" || (last.reason === "whop_no_answer" && (last.step === "where_filter" || last.step === "where_no_ids")))
                 ? { reason: last.reason, step: last.step }
-                : null;
+                : whereItGoes(a, true);
         if (stuck) {
           failed(a, stuck);
           return later({
@@ -917,19 +996,30 @@ export function fixtureThirtyTransport(opts: {
           return later<ApproveAnswer>({ ok: false, status: 400, error: "Cannot approve: the rule says no.", code: "rule" });
         }
       }
-      if (p?.kind === "approved") {
-        // Made and approved, not on the membership yet.
-        a.promoCode = a.promoCode ?? codeFor(a.studentId);
-        Object.assign(a, { status: "approved", promoId: promoIdOf(a.promoCode), reviewedAt: at(), reviewedBy: ME });
-        db.events.push({ askId: a.id, event: "code_made", at: at() });
-        failed(a, p);
-        return later({ ok: true, status: 200, data: approveAnswer(a, { reason: p.reason, step: p.step ?? null, membershipStatus: p.membershipStatus ?? null, message: p.message ?? null }) });
-      }
       if (p?.kind === "pending") {
         // Nothing made yet, or a claim whose create Whop never answered.
         if (p.claim) a.promoCode = p.claim;
         failed(a, p);
         return later({ ok: true, status: 200, data: approveAnswer(a, { reason: p.reason, step: p.step ?? null, message: p.message ?? null }) });
+      }
+      // The code is made; then where it goes, as the step decides it (or as the request's own press says).
+      const notOn = p?.kind === "approved" ? p : whereItGoes(a, false);
+      if (notOn) {
+        // Made and approved, not on the membership yet: the approve table's "made but not on their membership yet".
+        a.promoCode = a.promoCode ?? codeFor(a.studentId);
+        Object.assign(a, { status: "approved", promoId: promoIdOf(a.promoCode), reviewedAt: at(), reviewedBy: ME });
+        db.events.push({ askId: a.id, event: "code_made", at: at() });
+        failed(a, notOn);
+        return later({
+          ok: true,
+          status: 200,
+          data: approveAnswer(a, {
+            reason: notOn.reason,
+            step: notOn.step ?? null,
+            membershipStatus: notOn.membershipStatus ?? null,
+            message: "message" in notOn ? (notOn.message ?? null) : null,
+          }),
+        });
       }
       applyNow(a);
       return later({ ok: true, status: 200, data: approveAnswer(a) });
@@ -940,8 +1030,10 @@ export function fixtureThirtyTransport(opts: {
       const a = ask(id);
       if (!a) return later<RejectAnswer>(notFound);
       if (opts.conflict) {
-        // Another team member approved it first, and the code is on.
-        Object.assign(a, { status: "approved", promoCode: codeFor(a.studentId), promoId: promoIdOf(codeFor(a.studentId)), reviewedAt: at(), reviewedBy: "tm-jamie" });
+        // Another team member's Approve went through first, as the route does it: the code made and on, the request
+        // applied. Reject answers that it was already decided, and the request leaves the list.
+        applyNow(a);
+        Object.assign(a, { reviewedBy: "tm-jamie", appliedBy: "tm-jamie" });
         return later<RejectAnswer>({ ok: false, status: 409, error: "This request was already decided." });
       }
       if (a.status !== "pending" && a.status !== "approved") return later<RejectAnswer>({ ok: false, status: 409, error: "This request was already decided." });
@@ -950,6 +1042,15 @@ export function fixtureThirtyTransport(opts: {
       if (mayExist && opts.role === "csm") return later<RejectAnswer>({ ok: false, status: 403, error: "Your team account can't do this." });
       const p = a.press?.reject;
       if (p?.kind === "refused") return later<RejectAnswer>({ ok: false, status: p.status, error: p.error });
+      // Another code of its name on their membership (attach_other_code): that 30% is on, and only the hand fix closes it.
+      const sameName = eventsOf(db, a.id).find((e) => e.event === "attempt_failed" && e.reason === "write_failed" && e.step === "attach_other_code");
+      if (sameName) {
+        return later<RejectAnswer>({
+          ok: false,
+          status: 409,
+          error: `Whop put another code named ${sameName.code ?? a.promoCode ?? "the code"} on their membership. Check it in Whop, then tell the owner so the app records it.`,
+        });
+      }
       // As the route: no code, rejected; a code with no Whop id, one that may exist; a code made, left usable at checkout.
       const codeState: RejectAnswer["codeState"] =
         p?.kind === "rejected" ? p.codeState : a.status === "approved" ? (a.promoId ? "usable" : "may_exist") : a.promoId ? "usable" : null;
@@ -958,6 +1059,12 @@ export function fixtureThirtyTransport(opts: {
       if (a.status === "pending" && !a.promoId) a.promoCode = null;
       Object.assign(a, { status: "rejected", reason, reviewedAt: at(), reviewedBy: ME });
       db.events.push({ askId: a.id, event: "rejected", at: at() });
+      if (codeState === "usable") {
+        // As the route: the name off the row the student reads, and the request listed for the team with the code.
+        a.promoCode = null;
+        db.events.push({ askId: a.id, event: "code_changed", at: at() });
+        db.events.push({ askId: a.id, event: "attempt_failed", at: at(), reason: "write_failed", step: "rejected_usable", code: code ?? undefined });
+      }
       return later<RejectAnswer>({ ok: true, status: 200, data: { code, codeState } });
     },
 

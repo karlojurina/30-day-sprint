@@ -643,6 +643,13 @@ console.log('\n=== What a student\'s browser gets of their request: never the pr
   const journal = fs.readFileSync(fileURLToPath(new URL('../src/app/journal/[studentId]/page.tsx', import.meta.url)), 'utf8')
   ok(/from\("discount_requests"\)\s*\.select\("status"\)/.test(journal) && !journal.includes('promo_code'),
      'the Field Journal reads the status alone: its view is a client component, so whatever it reads reaches the browser (checked in the source)')
+  // The form path (the questions form, POST /api/discounts/submit-feedback): the student's browser reads its own row
+  // again after a send. Since the 30% applies itself the route makes the code before it answers, so a select(*) there
+  // put the code in the browser (the build's review of 2026-10-27): it reads the data route's four columns.
+  const context = fs.readFileSync(fileURLToPath(new URL('../src/contexts/StudentContext.tsx', import.meta.url)), 'utf8')
+  const reads = [...context.matchAll(/\.from\("discount_requests"\)\s*\.select\(([^)]*)\)/g)].map((m) => m[1])
+  ok(reads.length === 1 && reads[0] === '"id, status, created_at, rejection_reason"',
+     'the form path\'s read after a send takes id, status, created_at and rejection_reason, the data route\'s columns: never the code (checked in the source)', show(reads))
 }
 
 ok(Date === RealDate, 'the clock is the real one again')

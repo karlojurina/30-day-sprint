@@ -1840,12 +1840,16 @@ export function StudentProvider({ children }: { children: ReactNode }) {
           return data?.error || `Submit failed (HTTP ${res.status})`;
         }
 
-        // Refetch the discount_request row so the dashboard widget
-        // flips into the "pending review" state.
+        // Refetch the discount_request row so the panel shows the state the
+        // send ended in. The columns /api/student/data reads, never select(*):
+        // the route makes and attaches the code before it answers (the 30%
+        // that applies itself, T-137), and the code works at any checkout
+        // until it is used, so it never comes to the browser (the build's
+        // review of 2026-10-27).
         const sb = createClient();
         const { data: fresh } = await sb
           .from("discount_requests")
-          .select("*")
+          .select("id, status, created_at, rejection_reason")
           .eq("student_id", student.id)
           .order("created_at", { ascending: false })
           .limit(1)

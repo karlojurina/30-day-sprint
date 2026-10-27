@@ -369,6 +369,12 @@ console.log('\n=== thirtyWords: every reason and step, by who acts next ===')
     ['write_failed', 'approved_write_error', { code: C }, `Whop made ${C}, but saving it failed.`, 'retried'],
     ['write_failed', 'attach_after_reject', { code: C, confirmed: true }, `Whop attached ${C} after the request was rejected. It can only come off in Whop.`, 'held'],
     ['write_failed', 'attach_after_reject', { code: C, confirmed: false }, `Whop may have attached ${C} after the request was rejected. Check their membership in Whop.`, 'held'],
+    // The build's review of 2026-10-27: another code of the name put on by Whop; a Reject that left the code usable;
+    // the key refused on the code list and on the where read, each naming its scope.
+    ['write_failed', 'attach_other_code', { code: C }, `Whop put another code named ${C} on their membership. Check it in Whop, then tell the owner so the app records it.`, 'held'],
+    ['write_failed', 'rejected_usable', { code: C }, `Rejected. The code ${C} stays usable at checkout until someone switches it off in Whop.`, 'held'],
+    ['key_not_allowed', 'list', {}, "Whop refused the app's key. It needs promo_code:basic:read.", 'retried'],
+    ['key_not_allowed', 'where', {}, "Whop refused the app's key. It needs member:basic:read.", 'retried'],
     ['old_code', null, { code: OLD }, 'This code was made before the app attached codes itself. Press Try again to attach it, or attach it in Whop.', 'held'],
     ['code_unknown', null, { code: C }, `This request has a code with no Whop id, so the app can't check it. Check ${C} in Whop, then tell the owner so the app records it.`, 'held'],
     ['check_refused', null, { message: 'This student already has a 30% request that went through.' }, 'This student already has a 30% request that went through.', 'held'],
@@ -411,6 +417,32 @@ console.log('\n=== thirtyWords: every reason and step, by who acts next ===')
      'with no message, or no status, a sentence still ends cleanly')
   const src = read('../src/lib/thirty-words.ts')
   ok(!/^import /m.test(src), 'thirty-words.ts imports nothing, so the 30% page (a client component) can read it')
+
+  // The build's review of 2026-10-27: the job stops trying a request whose newest failure only a person can clear,
+  // after JOB_GIVES_UP_AFTER failures, and the Why line hands it to the team.
+  const HAS = 'Their membership already has another code on Whop.'
+  const CANCELED = "Their membership is canceled on Whop, so the code can't go on yet."
+  const STOP = 'The app stopped after 6 tries.'
+  const words = (reason, step, ctx) => W.thirtyWords(reason, step, { ageHours: 100, status: 'approved', ...ctx })
+  const GIVE_UP = [
+    [words('membership_has_code', 'membership', { failures: 5 }), `${HAS} ${RETRY}`, 'another code, 5 failures: still tried'],
+    [words('membership_has_code', 'membership', { failures: 6 }), `${HAS} ${STOP} Press Try again once that code is off their membership, or reject it.`, 'another code, 6 failures: stopped, Try again once that code is off'],
+    [words('membership_not_active', 'membership', { failures: 6, membershipStatus: 'canceled' }), `${CANCELED} ${STOP} Press Try again if they join again, or reject it.`, 'canceled, 6: stopped, Try again if they join again'],
+    [words('membership_not_active', 'membership', { failures: 9, membershipStatus: 'expired' }), `Their membership is expired on Whop, so the code can't go on yet. ${STOP} Press Try again if they join again, or reject it.`, 'expired, 9: stopped'],
+    [words('membership_not_active', 'membership', { failures: 40, membershipStatus: 'past_due' }), `Their membership is past_due on Whop, so the code can't go on yet. ${RETRY}`, 'past_due, 40: still tried (Whop retries the payment)'],
+    [words('membership_not_active', 'membership', { failures: 40, membershipStatus: 'trialing' }), 'Their membership is a trial on Whop. The app leaves trials to the team: Approve or Try again puts the code on.', 'a trial, 40: its own words alone'],
+    [words('code_unknown', null, { failures: 40, code: C }), `This request has a code with no Whop id, so the app can't check it. Check ${C} in Whop, then tell the owner so the app records it.`, 'code unknown, 40: its own words alone (they already hand it to the team)'],
+    [words('whop_no_answer', 'attach', { failures: 40 }), `Whop didn't answer. ${RETRY}`, 'Whop not answering, 40: still tried'],
+    [words('membership_has_code', 'membership', { failures: 6, status: 'pending', ageHours: 5 }), `${HAS} ${STOP} Approve or reject it.`, 'a pending row under 48 hours, 6: stopped, Approve or reject it'],
+    [words('membership_has_code', 'membership', { failures: 6, paused: true }), `${HAS} ${PAUSED_APPROVED}`, 'paused: the paused line first'],
+  ]
+  const off = GIVE_UP.filter(([got, want]) => got !== want)
+  ok(off.length === 0 && W.JOB_GIVES_UP_AFTER === 6, `the stopped line, ${GIVE_UP.length} rows: ${GIVE_UP.map((g) => g[2]).join('; ')}`, off.map(([got, want, label]) => `${label}: "${got}" (want "${want}")`).slice(0, 2).join(' | '))
+  ok(W.needsAPerson('membership_not_active', 'CANCELED') && W.needsAPerson('membership_has_code', null) && W.needsAPerson('code_unknown', null)
+       && !W.needsAPerson('membership_not_active', 'past_due') && !W.needsAPerson('membership_not_active', 'trialing') && !W.needsAPerson('old_code', null)
+       && !W.needsAPerson('whop_no_answer', null) && !W.needsAPerson('no_membership', null)
+       && W.jobGivesUp('membership_has_code', null, 6) && !W.jobGivesUp('membership_has_code', null, 5) && !W.jobGivesUp('key_not_allowed', null, 99),
+     'needsAPerson: another code, canceled or expired (any case), a code with no Whop id; not past_due, a trial, the old name, Whop silent, no membership; jobGivesUp from the 6th failure')
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -724,6 +756,10 @@ console.log('\n=== putThirtyOn: an approved request, where its code is first ===
      'on someone else\'s: landed_elsewhere (other_person), nothing written but the event, which names the code and the membership', show(failed(elsewhere.db)))
   const unknown = await approved(() => { whop.answer = (req) => (req.path === '/api/v1/memberships' ? json(500, {}) : null) })
   ok(unknown.r.reason === 'whop_no_answer' && unknown.r.step === 'where' && unknown.applies === 0 && writes(unknown.db).length === 0, 'the where read fails: whop_no_answer (where), nothing attached', show(unknown.r))
+  // The build's review of 2026-10-27: a key the where read is refused for read as Whop not answering.
+  const keyWhere = await approved(() => { whop.answer = (req) => (req.path === '/api/v1/memberships' ? json(403, { error: { message: 'not authorized' } }) : null) })
+  ok(keyWhere.r.reason === 'key_not_allowed' && keyWhere.r.step === 'where' && keyWhere.applies === 0 && writes(keyWhere.db).length === 0 && failed(keyWhere.db)[0]?.detail.message === 'http_401_403',
+     'the where read refused the key (403): key_not_allowed (where), nothing attached', show(keyWhere.r))
   const nowhere = await approved(null)
   ok(nowhere.r.outcome === 'applied' && nowhere.where === 1 && nowhere.applies === 1 && writes(nowhere.db).length === 1 && audited(nowhere.db, 'job', null),
      'on nobody\'s: goes on, attached to their membership, applied', show(nowhere.r))
@@ -794,10 +830,27 @@ console.log('\n=== putThirtyOn: a lost claim, settled ===')
   ok(withOther.r.reason === 'check_refused' && withOther.r.message === 'This student already has a 30% request that went through.' && r1(withOther.db).promo_code === null && withOther.r.outcome === 'waiting',
      'not found, then a hold (another 30% that went through): released, and the hold\'s reason; nothing new made', show(withOther.r))
   const listDown = await settling(() => { whop.answer = (req) => (req.path === '/api/v1/promo_codes' ? json(502, {}) : null) })
-  const tooMany = await settling(() => { for (let i = 0; i < 600; i++) whop.codes.push({ id: `promo_m${i}`, code: `ECOM30-M${i}`, created_at: new Date(Date.now() - 4 * MIN + i).toISOString() }) })
+  // 600 codes made 2 minutes before the claim, inside the 5 minutes either side of it where its own code would be.
+  const tooMany = await settling(() => { for (let i = 0; i < 600; i++) whop.codes.push({ id: `promo_m${i}`, code: `ECOM30-M${i}`, created_at: new Date(Date.now() - 12 * MIN + i).toISOString() }) })
   ok(listDown.r.reason === 'whop_no_answer' && listDown.r.step === 'list' && tooMany.r.reason === 'whop_no_answer' && tooMany.r.step === 'list'
-       && writes(listDown.db).length === 0 && writes(tooMany.db).length === 0 && listDown.made === 0 && tooMany.made === 0 && r1(tooMany.db).promo_code === CLAIM,
-     'the list fails, or runs past 5 pages: whop_no_answer (list) both times, the claim kept, nothing made', show({ listDown: listDown.r.step, tooMany: tooMany.r.step }))
+       && writes(listDown.db).length === 0 && writes(tooMany.db).length === 0 && listDown.made === 0 && tooMany.made === 0 && r1(tooMany.db).promo_code === CLAIM
+       && tooMany.lists.length === 5,
+     'the list fails, or runs past 5 pages of codes made around the claim: whop_no_answer (list) both times, the claim kept, nothing made', show({ listDown: listDown.r.step, tooMany: tooMany.r.step, pages: tooMany.lists.length }))
+  // The build's review of 2026-10-27: a claim settled late, with 600 codes made after it (5 minutes or more after the
+  // claim, so none of them its own): the read stops at the first of them, not found, instead of giving up after 500.
+  const later = await settling(() => { for (let i = 0; i < 600; i++) whop.codes.push({ id: `promo_n${i}`, code: `ECOM30-N${i}`, created_at: new Date(Date.now() - 4 * MIN + i).toISOString() }) },
+    { ...JOB, freshChecks: pass, allowNewCode: true })
+  ok(later.r.outcome === 'applied' && later.lists.length === 1 && writes(later.db)[0].values.promo_code === null && later.made === 1,
+     'a claim settled after 600 newer codes were made: one page read, not found, released and made anew (the codes after the claim\'s 5 minutes cannot be its own)', show({ r: later.r, pages: later.lists.length }))
+  const unbounded = await settling(() => { for (let i = 0; i < 600; i++) whop.codes.push({ id: `promo_t${i}`, code: `ECOM30-T${i}`, created_at: new Date(Date.now() - 4 * MIN + i).toISOString() }) },
+    JOB, { promo_claimed_at: null })
+  ok(unbounded.r.reason === 'whop_no_answer' && unbounded.r.step === 'list' && unbounded.lists.length === 5 && r1(unbounded.db).promo_code === CLAIM,
+     'with no claim time there is no end to look to: past 5 pages it is still no answer, the claim kept', show({ r: unbounded.r.step, pages: unbounded.lists.length }))
+  // The key refused on the code list: key_not_allowed (list), its scope named.
+  const listKey = await settling(() => { whop.answer = (req) => (req.path === '/api/v1/promo_codes' ? json(403, { error: { message: 'not authorized for promo_code:basic:read' } }) : null) })
+  ok(listKey.r.reason === 'key_not_allowed' && listKey.r.step === 'list' && r1(listKey.db).promo_code === CLAIM && listKey.made === 0
+       && W.thirtyWords(listKey.r.reason, listKey.r.step, { status: 'pending', ageHours: 1, claimed: true }) === "Whop refused the app's key. It needs promo_code:basic:read. The app tries again.",
+     'Whop refusing the key on the code list: key_not_allowed (list), "It needs promo_code:basic:read.", the claim kept (it read as Whop not answering)', show(listKey.r))
   const noTime = await settling(null, { ...JOB, freshChecks: pass }, { promo_claimed_at: null })
   const rel = writes(noTime.db)[0]
   ok(noTime.r.outcome === 'applied' && rel.filters.includes('promo_claimed_at is null') && noTime.lists[0].params.get('created_after') === new Date(Date.parse(r1(noTime.db).created_at) - 5 * MIN).toISOString(),
@@ -1051,8 +1104,18 @@ console.log('\n=== putThirtyOn: the old name, the status before the attach, the 
   ok(moved.r.outcome === 'unchanged' && moved.r.status === 'rejected' && moved.applies === 0 && writes(moved.db).length === 0, 'the status changed before the attach: unchanged, nothing attached', show(moved.r))
   // The attach's answers.
   const answer = (fn) => () => { whop.answer = (req) => (req.method === 'POST' ? fn(req) : null) }
+  // The build's review of 2026-10-27: the membership read just before held no code, so a 200 naming another code is
+  // Whop attaching another code by this name (two codes can share one): its own write_failed, for the team.
   const otherId = await attach(answer(() => json(200, { id: 'mem_s1', promo_code_id: 'promo_someone' })))
-  ok(otherId.r.reason === 'membership_has_code' && otherId.r.step === 'attach' && writes(otherId.db).length === 0, 'a 200 naming another code: membership_has_code (attach)', show(otherId.r))
+  const sameName = failed(otherId.db)
+  ok(otherId.r.reason === 'write_failed' && otherId.r.step === 'attach_other_code' && otherId.r.outcome === 'waiting' && otherId.r.status === 'approved'
+       && writes(otherId.db).length === 0 && sameName.length === 1 && sameName[0].reason === 'write_failed' && sameName[0].detail.step === 'attach_other_code'
+       && sameName[0].detail.attached === 'promo_someone' && sameName[0].detail.membership === 'mem_s1' && sameName[0].detail.code === 'ECOM30-ABCDEF' && sameName[0].detail.http === 200
+       && otherId.lines.some((l) => l.includes('Whop put another code named ECOM30-ABCDEF (promo_someone) on membership mem_s1')),
+     'a 200 naming another code, the membership read just before holding none: write_failed (attach_other_code), the code Whop attached in its detail, still approved, nothing written', show({ r: otherId.r, event: sameName }))
+  ok(W.thirtyWords('write_failed', 'attach_other_code', { status: 'approved', ageHours: 50, code: 'ECOM30-ABCDEF', failures: 9 })
+       === 'Whop put another code named ECOM30-ABCDEF on their membership. Check it in Whop, then tell the owner so the app records it.',
+     'its Why line: another code of that name is on their membership; check it in Whop and tell the owner; no second line (the job leaves it)')
   const noIdOn = await attach(answer(() => { whop.memberships.get('mem_s1').promo = 'promo_devOurs'; return json(200, { id: 'mem_s1', promo_code_id: null }) }))
   ok(noIdOn.r.outcome === 'applied' && noIdOn.where === 2, 'a 200 naming none: Whop asked where the code is once more; on theirs, applied', show(noIdOn.r))
   const k401 = await attach(answer(() => json(401, { error: { message: 'missing credentials' } })))

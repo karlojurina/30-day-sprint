@@ -1162,18 +1162,23 @@ const CODE_PAGES_MAX = 5;
  * oldest first (GET /api/v1/promo_codes?account_id&created_after&direction=asc
  * &first=100, `after` paging, the probe of 2026-10-26), at most 5 pages. The
  * first whose code is `name` (trimmed, the case not minded) answers with its
- * id; none, null. A page that fails or does not read, or a list still going
- * after the 5th page, is no answer: a code not seen may still be there.
+ * id; none, null. With `createdBeforeIso`, a code made after it ends the read
+ * with none: the list is oldest first, so every code after it is later still
+ * (the 30%'s lost claim: its own code was made within minutes of the claim).
+ * A page that fails or does not read, or a list still going after the 5th
+ * page, is no answer: a code not seen may still be there.
  */
 export async function findThirtyCodeByName(
   name: string,
   createdAfterIso: string,
   ctx: WhopReadContext,
+  createdBeforeIso: string | null = null,
 ): Promise<{ ok: true; id: string | null } | { ok: false; fail: ListReadFail }> {
   if (!ctx.apiKey) return { ok: false, fail: "no_api_key" };
   const company = process.env.WHOP_COMPANY_ID;
   if (!company) return { ok: false, fail: "no_company_id" };
   const wanted = name.trim().toLowerCase();
+  const until = createdBeforeIso === null ? NaN : Date.parse(createdBeforeIso);
   let after: string | null = null;
   for (let page = 1; page <= CODE_PAGES_MAX; page++) {
     const query = new URLSearchParams({ account_id: company, created_after: createdAfterIso, direction: "asc", first: "100" });
@@ -1187,6 +1192,9 @@ export async function findThirtyCodeByName(
       const listed = (c as { code?: unknown }).code;
       const id = idOf((c as { id?: unknown }).id);
       if (typeof listed === "string" && listed.trim().toLowerCase() === wanted && id !== null) return { ok: true, id };
+      const made = (c as { created_at?: unknown }).created_at;
+      const madeAt = typeof made === "string" ? Date.parse(made) : NaN;
+      if (Number.isFinite(until) && Number.isFinite(madeAt) && madeAt > until) return { ok: true, id: null };
     }
     const info = (r.body.page_info ?? null) as { has_next_page?: unknown; end_cursor?: unknown } | null;
     if (info?.has_next_page !== true) return { ok: true, id: null };

@@ -1252,6 +1252,46 @@ on one database, "30% off applied"), `admin-routes` (73 to 76: `paused`,
 `npm run test:client`: 82 suites, 5487 checks, 0 failed (5232 in 80 at
 `afd6bd4`).
 
+The build's review (2026-10-27), its fixes: `apply-thirty-cron` (32 to 36)
+holds the job to every candidate read in full and passed over before
+anything is cut, worked on in its order (the last 48 hours, then never
+tried, then the longest since its last failure: the dry run's plan), with
+the review's own case (200 approved requests on canceled memberships and
+a new request whose Apply failed 12 minutes ago: the new one applied in
+the first run; until the fix it was never read), 200 codes on someone
+else's membership beside a new request, and the stop after 6 failures
+only a person can clear (`stopped`: another code, a canceled membership,
+a code with no Whop id; still tried: 5 failures, past_due, a newest
+failure of Whop silent); its source pin reads the three candidate reads in
+pages, no `CANDIDATES_MAX`. `thirty-apply` (123 to 130): an attach whose
+200 names another code on a membership read with none is `write_failed`,
+`attach_other_code` (it was `membership_has_code`); the key refused on
+the where read and the code list is `key_not_allowed` (where, list) with
+the scope in its words; a claim settled after 600 later codes stops at the
+first page, while 600 codes around the claim still run past 5 pages and
+with no claim time there is no end to look to; the stopped line in 10
+rows and `needsAPerson`/`jobGivesUp`; the two new steps' words.
+`admin-discounts` (70 to 75): a Reject that left the code usable takes the
+name off the row (only as rejected, with the same correlation) and writes
+one `write_failed`, `rejected_usable`, naming the code; the settling claim
+on their membership says what to do while paused; a request with an
+`attach_other_code` is refused before Whop is asked; the review's S1 (Try
+again on an old-name request whose name an unused code also carries, Whop
+attaching that other code: `attach_other_code`, then Reject refused);
+Approve's deadline taken after the checks (a 19-second coupon read, the
+code still put on; `Date.now` moved inside the test); and its em-dash
+scan now covering `thirty-apply.ts`, `thirty-words.ts` and the job.
+`thirty-view` (124 to 128): `lastFailure.count`; the stopped line after 6
+failures, not after 5; an `attach_other_code` and a `rejected_usable` row
+listed with their words; a `check_refused` equal to the verdict said once,
+shown again once the verdict differs. `discount-september` (67 to 68): the
+form path's read after a send takes the data route's four columns (in the
+source). `discount-next-renewal`'s header says the label it keeps is the
+moment's now. Each new check was run against its file as it was at
+`48c1ffd` and failed there (the job, the step, the words, the reject and
+approve routes, the builder, `StudentContext.tsx`, the code list).
+`npm run test:client`: 82 suites, 5508 checks, 0 failed.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

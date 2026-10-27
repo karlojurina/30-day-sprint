@@ -647,6 +647,29 @@ for (const confirmed of [true, false]) {
      'a database failure the step gives no answer for (the claim refused): 500 asking for a refresh, no code made, the real error in the log', show({ body: r.body, lines: r.lines }))
 }
 
+{
+  // The build's review of 2026-10-27: the step's deadline is taken when it starts, after the checks. Here the coupon
+  // check's stored read takes 19 seconds (the clock moved on as it is read): the step still has its time
+  // (min(20 s from its start, 26 s from the route's start)) and the code goes on. Until the review the deadline was
+  // taken before the checks, so 1 second was left and nothing was made (whop_no_answer, deadline).
+  const db = freshDb([{ id: 'r1', status: 'pending' }])
+  const realNow = Date.now
+  let skew = 0
+  Date.now = () => realNow() + skew
+  db.failWhen = (q) => {
+    if (q.table === 'student_membership_discounts' && q.op === 'select') skew = 19_000
+    return null
+  }
+  let r
+  try {
+    r = await press(db, 'r1')
+  } finally {
+    Date.now = realNow
+  }
+  ok(r.status === 200 && r.body.status === 'applied' && r.row.status === 'applied' && attaches().length === 1 && skew === 19_000,
+     'a coupon check that takes 19 s: the step still gets its time (its deadline taken after the checks) and the code goes on', show(r.body))
+}
+
 console.log('\n=== T-137: Approve anyway is recorded as an override event ===')
 for (const [label, body, detail] of [
   ['Approve anyway past the rule (override)', { override: true }, { rule: true, coupon: false }],
@@ -715,6 +738,23 @@ console.log('\n=== T-137: Try again (an approved request): no checks, then where
     ok(r.status === 200 && r.body.success === true && r.body.status === 'approved' && r.body.reason === 'membership_has_code' && attaches().length === 0,
        'Try again, another code on their membership: 200, still approved, with the reason', show(r.body))
   }
+  {
+    // The build's review of 2026-10-27 (its S1): an old-name request whose name an unused code also carries, and Whop
+    // attaching that other code by the name. Recorded as its own write_failed, and Reject then refuses.
+    const old = teamThirtyCodeFor(SID)
+    const db = freshDb([approvedRow(old, 'promo_devOldOurs')])
+    whop.codes.push({ id: 'promo_devOldOurs', code: old, created_at: ago(90 * MIN) })
+    whop.codes.push({ id: 'promo_devOldSibling', code: old, created_at: ago(120 * MIN) })
+    const r = await press(db, 'r1')
+    const ev = events(db).filter((e) => e.event === 'attempt_failed')
+    ok(r.status === 200 && r.body.status === 'approved' && r.body.reason === 'write_failed' && r.body.step === 'attach_other_code' && r.row.status === 'approved'
+         && whop.memberships.get(MEM).promo === 'promo_devOldSibling' && ev.length === 1 && ev[0].detail.attached === 'promo_devOldSibling' && ev[0].detail.code === old,
+       `Try again on ${old}, Whop attaching the other code of that name: 200, still approved, write_failed (attach_other_code) naming the code Whop put on (until the review: membership_has_code, "The app tries again.")`, show(r.body))
+    const rj = await rejectAs(db, 'r1')
+    ok(rj.status === 409 && rj.body.error === `Whop put another code named ${old} on their membership. Check it in Whop, then tell the owner so the app records it.`
+         && rj.row.status === 'approved' && whop.memberships.get(MEM).promo === 'promo_devOldSibling',
+       'then Reject refuses: the 30% on their membership is that other code (until the review the request was rejected, a 30% left on them)', show(rj.body))
+  }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -757,17 +797,27 @@ const rejectedBy = (r, db, member) => r.row.status === 'rejected' && r.row.revie
     const db = freshDb([settling()])
     onWhop()
     const r = await rejectAs(db, 'r1')
+    const [rej, clear] = writes(db)
     ok(r.status === 200 && show(r.body) === show({ success: true, code: LOST, codeState: 'usable' }) && rejectedBy(r, db, 'team-founder')
-         && r.row.whop_promo_id === 'promo_devLost' && r.row.promo_code === LOST && writes(db).length === 1,
-       'settling, its code found and on nobody\'s membership: 200, codeState usable, rejected with the code\'s Whop id stored, in one write', show(r.body))
+         && r.row.whop_promo_id === 'promo_devLost' && writes(db).length === 2 && rej.values.status === 'rejected' && rej.values.whop_promo_id === 'promo_devLost'
+         && rej.filters.includes('whop_promo_id is null') && rej.filters.includes(`promo_code=${LOST}`),
+       'settling, its code found and on nobody\'s membership: 200, codeState usable, rejected with the code\'s Whop id stored in one write, where the claim still has no id', show(r.body))
+    // The build's review of 2026-10-27: the name off the row the student can read, and the request listed for the team.
+    const listed = events(db).filter((e) => e.event === 'attempt_failed')
+    ok(r.row.promo_code === null && clear !== undefined && show(Object.keys(clear.values).sort()) === show(['audit_actor', 'audit_correlation_id', 'audit_team_member_id', 'promo_code'])
+         && clear.values.promo_code === null && show(clear.filters) === show(['id=r1', 'status=rejected', `promo_code=${LOST}`, 'whop_promo_id=promo_devLost'])
+         && listed.length === 1 && listed[0].reason === 'write_failed' && listed[0].detail.step === 'rejected_usable' && listed[0].detail.code === LOST
+         && listed[0].detail.whop_promo_id === 'promo_devLost' && listed[0].actor === 'team' && listed[0].team_member_id === 'team-founder'
+         && listed[0].correlation_id === rej.values.audit_correlation_id,
+       'then the name comes off the rejected row (only as it was rejected, the trigger keeping it in its history) and one write_failed, rejected_usable, names the code: the team\'s list keeps the request for 30 days', show({ clear: clear?.filters ?? null, listed }))
   }
   {
     const db = freshDb([settling()], { whopMember: { promo: 'promo_devLost' } })
     onWhop()
     const r = await rejectAs(db, 'r1')
-    ok(r.status === 409 && r.body.error === 'The code is already on their membership, so the 30% is theirs. The app marks it applied within the hour.'
+    ok(r.status === 409 && r.body.error === 'The code is already on their membership, so the 30% is theirs. The app marks it applied within the hour; while the app is paused, press Approve anyway.'
          && r.row.status === 'pending' && r.row.whop_promo_id === null && writes(db).length === 0,
-       'settling, its code found on their membership: 409, the 30% is theirs, the app marks it applied; the claim left for the job', show(r.body))
+       'settling, its code found on their membership: 409, the 30% is theirs, the app marks it applied, or Approve anyway while it is paused (the review of 2026-10-27); the claim left for the job', show(r.body))
   }
   {
     const db = freshDb([settling()])
@@ -814,9 +864,25 @@ const rejectedBy = (r, db, member) => r.row.status === 'rejected' && r.row.revie
   for (const [shape, make] of [['approved', approvedRow], ['reopened by hand', reopened]]) {
     const db = freshDb([make()])
     const r = await rejectAs(db, 'r1')
+    const listed = events(db).filter((e) => e.event === 'attempt_failed')
     ok(r.status === 200 && show(r.body) === show({ success: true, code: CODE, codeState: 'usable' }) && rejectedBy(r, db, 'team-founder')
-         && writes(db)[0].filters.includes('whop_promo_id=promo_devOurs') && writes(db)[0].filters.includes(`status=${make().status}`),
-       `${shape}, its code on nobody's membership: 200, codeState usable, rejected where the row still holds that code`, show(r.body))
+         && writes(db)[0].filters.includes('whop_promo_id=promo_devOurs') && writes(db)[0].filters.includes(`status=${make().status}`)
+         && r.row.promo_code === null && r.row.whop_promo_id === 'promo_devOurs' && writes(db).length === 2
+         && listed.length === 1 && listed[0].detail.step === 'rejected_usable' && listed[0].detail.code === CODE,
+       `${shape}, its code on nobody's membership: 200, codeState usable, rejected where the row still holds that code; then its name off the row and the request listed with the code (rejected_usable)`, show({ body: r.body, row: r.row.promo_code, listed: listed.map((e) => e.detail) }))
+  }
+  {
+    // The build's review of 2026-10-27: Whop answered an attach with another code of the request's name (two codes
+    // share one): the 30% on their membership is that code, so Reject refuses, before Whop is asked.
+    const db = freshDb([approvedRow()])
+    db.tables.discount_request_events = [{
+      request_id: 'r1', student_id: SID, event: 'attempt_failed', actor: 'team', correlation_id: '11111111-1111-4111-8111-111111111111', reason: 'write_failed',
+      detail: { step: 'attach_other_code', code: CODE, attached: 'promo_devSibling' }, created_at: ago(30 * MIN),
+    }]
+    const r = await rejectAs(db, 'r1')
+    ok(r.status === 409 && r.body.error === `Whop put another code named ${CODE} on their membership. Check it in Whop, then tell the owner so the app records it.`
+         && r.row.status === 'approved' && writes(db).length === 0 && whop.log.length === 0,
+       'another code of its name on their membership (attach_other_code in its history): 409 in its Why line\'s words, nothing written, Whop not asked', show(r.body))
   }
   {
     const db = freshDb([approvedRow()], { whopMember: { promo: 'promo_devOurs' } })
@@ -896,8 +962,12 @@ function stringsIn(source) {
   return out
 }
 const ROUTE_FILES = ['approve', 'reject'].map((r) => `src/app/api/discounts/${r}/route.ts`)
-const dashed = (src) => ROUTE_FILES.flatMap((f) => stringsIn(src(f)).filter((s) => s.includes('—')))
-ok(dashed(fromSrc).length === 0, 'no string the two routes send or log holds an em dash', show(dashed(fromSrc)))
+// The build's review of 2026-10-27: the sentences Approve answers moved into the step (thirty-apply.ts) and the words
+// (thirty-words.ts), and the job logs its own: each is scanned with the routes.
+const STEP_FILES = ['src/lib/thirty-apply.ts', 'src/lib/thirty-words.ts', 'src/app/api/cron/apply-thirty/route.ts']
+const dashed = (src, files = ROUTE_FILES) => files.flatMap((f) => stringsIn(src(f)).filter((s) => s.includes('—')))
+ok(dashed(fromSrc, [...ROUTE_FILES, ...STEP_FILES]).length === 0 && STEP_FILES.every((f) => stringsIn(fromSrc(f)).length > 20),
+   'no string the two routes, the step, its words or the job send or log holds an em dash', show(dashed(fromSrc, [...ROUTE_FILES, ...STEP_FILES])))
 ok(dashed(fromBase).length === 2, `control: at ${BASE} two did`, show(dashed(fromBase)))
 ok(!fs.existsSync(here('../src/app/api/discounts/mark-applied')), 'POST /api/discounts/mark-applied is gone (T-137): Try again marks a request applied when Whop shows the code on the membership')
 

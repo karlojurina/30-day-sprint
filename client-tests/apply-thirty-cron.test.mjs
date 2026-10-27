@@ -346,8 +346,8 @@ console.log('\n=== ?mode=dry: what a run would do, and nothing stored ===')
   const r = await run('?mode=dry')
   const plan = r.body.planned.map((p) => [p.requestId, p.would, p.reason, p.status]).sort()
   ok(r.status === 200 && r.body.ok === true && r.body.mode === 'dry' && r.body.applied === 0 && r.body.examined === 6 && r.body.planned.length === 6
-       && show(r.body.planned.map((p) => p.requestId)) === show(['approved', 'onTheirs', 'settledFound', 'refused', 'settledAnew', 'fresh']),
-     'a dry run answers 200, mode dry, nothing applied, a plan for each request it took, oldest first', show(r.body))
+       && show(r.body.planned.map((p) => p.requestId)) === show(['refused', 'settledAnew', 'fresh', 'approved', 'onTheirs', 'settledFound']),
+     'a dry run answers 200, mode dry, nothing applied, a plan for each request it took: the last 48 hours\' first, then the ones never tried, each oldest first', show(r.body))
   ok(show(plan) === show([
     ['approved', 'attach', null, 'approved'], ['fresh', 'claim_and_make', null, 'pending'], ['onTheirs', 'mark_applied', null, 'approved'],
     ['refused', null, 'check_refused', 'pending'], ['settledAnew', 'settle_claim', null, 'pending'], ['settledFound', 'settle_claim', null, 'pending'],
@@ -390,6 +390,102 @@ console.log('\n=== The wait after a failure, a code on someone else\'s membershi
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+console.log('\n=== The build\'s review of 2026-10-27: requests that cannot finish never keep a new one waiting ===')
+/** A failure recorded by an earlier run, with the detail the step writes (its step and the membership's status). */
+const failedWith = (requestId, k, at, reason, detail = {}) =>
+  ({ request_id: requestId, student_id: sid(k), event: 'attempt_failed', actor: 'job', correlation_id: SEEDED, reason, detail: { step: 'membership', ...detail }, created_at: at })
+{
+  // The review's own case: 200 approved requests from early October whose memberships were canceled, each tried 3
+  // times (the last 70 minutes ago), and one new student whose Apply could not finish 12 minutes ago (Whop silent).
+  const N = 200
+  const requests = []
+  const events = []
+  for (let k = 1; k <= N; k++) {
+    const made = new Date(RealDate.parse('2026-10-02T08:00:00.000Z') + k * MIN).toISOString()
+    requests.push(req(`old${k}`, k, { status: 'approved', promo_code: `ECOM30-OLD${String(k).padStart(3, '0')}`, whop_promo_id: `promo_old${k}`, created_at: made, reviewed_at: made }))
+    for (let f = 0; f < 3; f++) events.push(failedWith(`old${k}`, k, ago(70 * MIN + f * MIN), 'membership_not_active', { membership_status: 'canceled' }))
+  }
+  requests.push(req('fresh', N + 1, { created_at: ago(15 * MIN) }))
+  events.push(failedWith('fresh', N + 1, ago(12 * MIN), 'whop_no_answer', { step: 'create' }))
+  const db = seed({ students: N + 1, requests, events })
+  for (let k = 1; k <= N; k++) whop.memberships.get(`mem_s${k}`).status = 'canceled'
+  const r = await run()
+  const taken = [...new Set(newEvents(db).map((e) => e.request_id))]
+  ok(r.status === 200 && r.body.examined === N + 1 && row(db, 'fresh').status === 'applied' && r.body.applied === 1 && r.body.skipped === 0 && r.body.stopped === 0
+       && taken.length === 24 && taken.every((id) => id.startsWith('old')) && show(r.body.byReason) === show({ membership_not_active: 24 }),
+     `${N} approved requests on canceled memberships, read in full, and a new request whose Apply failed 12 minutes ago: the new one goes first and is applied in the first run, then 24 of the old ones (until the review, it was never read)`,
+     show({ body: { ...r.body, planned: undefined }, fresh: row(db, 'fresh').status, taken: taken.length }))
+}
+{
+  // 200 approved requests whose codes are on someone else's membership (landed_elsewhere) beside a new request: the
+  // 200 are passed over before anything is cut, so the new one is read and worked on.
+  const N = 200
+  const requests = []
+  const events = []
+  for (let k = 1; k <= N; k++) {
+    requests.push(req(`land${k}`, k, { status: 'approved', promo_code: `ECOM30-L${String(k).padStart(5, '0')}`, whop_promo_id: `promo_land${k}`, created_at: new Date(RealDate.parse('2026-10-02T08:00:00.000Z') + k * MIN).toISOString() }))
+    events.push(failedWith(`land${k}`, k, ago(3 * DAY), 'landed_elsewhere', { step: 'other_person' }))
+  }
+  requests.push(req('fresh', N + 1, { created_at: ago(15 * MIN) }))
+  const db = seed({ students: N + 1, whopless: Array.from({ length: N }, (_, i) => i + 1), requests, events })
+  const r = await run()
+  ok(r.body.examined === N + 1 && r.body.skipped === N && row(db, 'fresh').status === 'applied' && newEvents(db).every((e) => e.request_id === 'fresh'),
+     `${N} codes on someone else's membership: all ${N} passed over, the new request read, taken and applied (until the review the run read those ${N} alone and worked on nothing)`, show({ ...r.body, planned: undefined }))
+}
+{
+  // The job stops trying a request whose newest failure only a person can clear, after 6 failures (jobGivesUp).
+  const OLD = (d) => ago(d * DAY)
+  const at = (h) => ago(h * HOUR)
+  const six = (id, k, reason, detail) => Array.from({ length: 6 }, (_, i) => failedWith(id, k, at(2 + i), reason, detail))
+  const db = seed({
+    students: 7,
+    whopless: [1, 2, 3, 4, 5, 6, 7],
+    requests: [
+      req('code6', 1, { status: 'approved', promo_code: 'ECOM30-CODE6A', whop_promo_id: 'promo_code6', created_at: OLD(9) }),
+      req('code5', 2, { status: 'approved', promo_code: 'ECOM30-CODE5A', whop_promo_id: 'promo_code5', created_at: OLD(9) }),
+      req('canc6', 3, { status: 'approved', promo_code: 'ECOM30-CANC6A', whop_promo_id: 'promo_canc6', created_at: OLD(9) }),
+      req('past6', 4, { status: 'approved', promo_code: 'ECOM30-PAST6A', whop_promo_id: 'promo_past6', created_at: OLD(9) }),
+      req('noid6', 5, { status: 'approved', promo_code: 'ECOM30-NOID6A', whop_promo_id: null, created_at: OLD(9) }),
+      req('same1', 6, { status: 'approved', promo_code: 'ECOM30-SAME1A', whop_promo_id: 'promo_same1', created_at: OLD(9) }),
+      req('mixed7', 7, { status: 'approved', promo_code: 'ECOM30-MIXD7A', whop_promo_id: 'promo_mixed7', created_at: OLD(9) }),
+    ],
+    events: [
+      ...six('code6', 1, 'membership_has_code', { membership_status: 'active' }),
+      ...six('code5', 2, 'membership_has_code', { membership_status: 'active' }).slice(1),
+      ...six('canc6', 3, 'membership_not_active', { membership_status: 'canceled' }),
+      ...six('past6', 4, 'membership_not_active', { membership_status: 'past_due' }),
+      ...six('noid6', 5, 'code_unknown', { step: null }),
+      failedWith('same1', 6, at(2), 'write_failed', { step: 'attach_other_code', membership_status: 'active' }),
+      // Six earlier failures of another code, then Whop silent: the newest decides, so it is still tried.
+      ...six('mixed7', 7, 'membership_has_code', { membership_status: 'active' }).map((e) => ({ ...e, created_at: new Date(RealDate.parse(e.created_at) - HOUR).toISOString() })),
+      failedWith('mixed7', 7, at(2), 'whop_no_answer', { step: 'where' }),
+    ],
+  })
+  const r = await run()
+  const taken = [...new Set(newEvents(db).map((e) => e.request_id))].sort()
+  ok(r.body.examined === 7 && r.body.stopped === 3 && r.body.skipped === 1 && show(taken) === show(['code5', 'mixed7', 'past6']),
+     'stopped: another code on the membership after 6 failures, a canceled membership after 6, a code with no Whop id after 6; skipped: another code of its name Whop put on their membership; still tried: 5 failures, past_due (Whop retries the payment), and a request whose newest failure is Whop being silent',
+     show({ stopped: r.body.stopped, skipped: r.body.skipped, taken }))
+}
+{
+  // The order, as a dry run plans it: the last 48 hours' first, then never tried, then the longest since its last failure.
+  const db = seed({
+    students: 4,
+    whopless: [2, 3, 4],
+    requests: [
+      req('o1', 4, { status: 'approved', promo_code: 'ECOM30-ORDR1A', whop_promo_id: 'promo_o1', created_at: ago(10 * DAY) }),
+      req('o2', 3, { status: 'approved', promo_code: 'ECOM30-ORDR2A', whop_promo_id: 'promo_o2', created_at: ago(5 * DAY) }),
+      req('u1', 2, { status: 'approved', promo_code: 'ECOM30-ORDR3A', whop_promo_id: 'promo_u1', created_at: ago(20 * DAY) }),
+      req('f1', 1, { created_at: ago(HOUR) }),
+    ],
+    events: [failedWith('o1', 4, ago(3 * HOUR), 'whop_no_answer', { step: 'where' }), failedWith('o2', 3, ago(5 * HOUR), 'whop_no_answer', { step: 'where' })],
+  })
+  const r = await run('?mode=dry')
+  ok(show(r.body.planned.map((p) => p.requestId)) === show(['f1', 'u1', 'o2', 'o1']) && db.rows('discount_request_events').every((e) => e.correlation_id === SEEDED),
+     'the order: the request from the last 48 hours, then the one never tried (20 days old), then the one whose last failure was 5 hours ago before the one at 3 hours', show(r.body.planned.map((p) => p.requestId)))
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 console.log('\n=== Requests whose 48 hours just ended; a step that fails; no request started after 240 s ===')
 {
   const db = seed({
@@ -421,11 +517,12 @@ console.log('\n=== Requests whose 48 hours just ended; a step that fails; no req
      'a step that throws (its student unreadable): the run goes on (the next request applied), answers 500 naming the request, cron_runs failed with it', show({ body: r.body, run: lastRun(db) }))
 }
 {
-  // The first request's Whop read takes 241 s: no request is started after 240 s.
+  // The first request's Whop read takes 241 s: no request is started after 240 s. All three older than 48 hours and
+  // never tried, so the oldest goes first.
   const db = seed({
     students: 3,
     whopless: [1, 2, 3],
-    requests: [1, 2, 3].map((k) => req(`slow${k}`, k, { status: 'approved', promo_code: `ECOM30-SLOW${k}A`, whop_promo_id: `promo_devSlow${k}`, created_at: ago((4 - k) * DAY) })),
+    requests: [1, 2, 3].map((k) => req(`slow${k}`, k, { status: 'approved', promo_code: `ECOM30-SLOW${k}A`, whop_promo_id: `promo_devSlow${k}`, created_at: ago((6 - k) * DAY) })),
   })
   let first = true
   whop.answer = (q) => {
@@ -439,9 +536,10 @@ console.log('\n=== Requests whose 48 hours just ended; a step that fails; no req
   ok(r.status === 200 && r.body.examined === 3 && new Set(newEvents(db).map((e) => e.request_id)).size === 1 && newEvents(db)[0].request_id === 'slow1',
      'the first request took the clock past 240 s: it ends, and the other two are not started (read again by the next run)', show({ body: r.body, events: newEvents(db).map((e) => [e.request_id, e.reason, e.detail.step]) }))
   const src = read('../src/app/api/cron/apply-thirty/route.ts')
-  ok(/const START_BY_MS = 240_000;/.test(src) && /const RUN_MS = 270_000;/.test(src) && /const ITEM_MS = 20_000;/.test(src) && /const TAKE_MAX = 25;/.test(src) && /const CANDIDATES_MAX = 200;/.test(src)
+  ok(/const START_BY_MS = 240_000;/.test(src) && /const RUN_MS = 270_000;/.test(src) && /const ITEM_MS = 20_000;/.test(src) && /const TAKE_MAX = 25;/.test(src)
+       && !/CANDIDATES_MAX|\.slice\(0, CANDIDATES/.test(src) && (src.match(/fetchAllRowsPaginated<Candidate>/g) ?? []).length === 3
        && /Math\.min\(Date\.now\(\) \+ ITEM_MS, startedAtMs \+ RUN_MS\)/.test(src) && /export const maxDuration = 300;/.test(src),
-     'in the source: 200 read at most, 25 taken, none started after 240 s, each inside min(20 s from its start, 270 s from the run\'s), maxDuration 300')
+     'in the source: every candidate of the three kinds read in pages, nothing cut before the skips (the build\'s review of 2026-10-27; 200 at most until then), 25 taken, none started after 240 s, each inside min(20 s from its start, 270 s from the run\'s), maxDuration 300')
 }
 
 // ════════════════════════════════════════════════════════════════════════════

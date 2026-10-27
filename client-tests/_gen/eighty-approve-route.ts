@@ -55,11 +55,14 @@ import { putThirtyOn, thirtyApprovalChecks, type ThirtyResult } from "./thirty-a
  * v116 not pasted 503; the request decided already 400. A database failure
  * the step has no answer for is a 500 asking for a refresh.
  *
- * The app never shows the student the code, and /api/student/data doesn't
- * send it. It is no secret from them all the same: a logged-in student can
- * read their own row straight from the database (the policy "Students can
- * read own discount requests"), so what the code can take off is set by
- * WHOP_DISCOUNT_PLAN_IDS (thirty-apply.ts).
+ * The app never shows the student the code: /api/student/data and the
+ * form's read after a send (StudentContext.submitDiscountFeedback) take
+ * four columns, none of them the code. It is no secret from them all the
+ * same: a logged-in student can read their own row straight from the
+ * database (the policy "Students can read own discount requests"), so what
+ * the code can take off is set by WHOP_DISCOUNT_PLAN_IDS (thirty-apply.ts).
+ * A rejected request's code left usable at checkout comes off its row (the
+ * reject route, the build's review of 2026-10-27).
  *
  * Body:
  *   requestId      — id of the discount_requests row (required)
@@ -176,7 +179,9 @@ export async function POST(request: NextRequest) {
   const actor = { kind: "team" as const, teamMemberId };
   // One action: one correlation id on its event and on every write the step makes.
   const correlationId = randomUUID();
-  const deadlineMs = Math.min(Date.now() + 20_000, startedAtMs + 26_000);
+  // The step's Whop calls end 20 s after it starts, and 26 s after the route's start at most: taken when the step
+  // starts, after the checks and their coupon read (the build's review of 2026-10-27).
+  const deadline = () => Math.min(Date.now() + 20_000, startedAtMs + 26_000);
 
   let result: ThirtyResult;
   try {
@@ -204,11 +209,11 @@ export async function POST(request: NextRequest) {
         actor,
         correlationId,
         membershipId: checks.coupon?.membershipId ?? null,
-        deadlineMs,
+        deadlineMs: deadline(),
       });
     } else if (discountReq.status === "approved") {
       // Try again: no checks; the code with the old per-student name is attached too.
-      result = await putThirtyOn(supabase, requestId, { actor, correlationId, deadlineMs, allowOldName: true });
+      result = await putThirtyOn(supabase, requestId, { actor, correlationId, deadlineMs: deadline(), allowOldName: true });
     } else {
       return NextResponse.json({ error: "Request already processed" }, { status: 400 });
     }

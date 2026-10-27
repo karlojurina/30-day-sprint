@@ -1137,7 +1137,10 @@ When adding a new table, append it here. When deleting a field, scan
   (status, `created_at`, `promo_code`, `rejection_reason`) and the map
   reads them through `StudentContext`, which since 2026-10-17 gets only
   `id`, `status`, `created_at` and `rejection_reason` from
-  `/api/student/data`, never the promo code; `discountState()` lets the
+  `/api/student/data`, never the promo code (and since the build's review
+  of 2026-10-27 the same four columns in the form path's own read after a
+  send, `submitDiscountFeedback`, which read `select('*')` while the route
+  had not made the code yet); `discountState()` lets the
   latest request that counts decide what the student sees. With none,
   it is the rule: since the owner's 80% rule (2026-10-26) 80% of the
   videos up to the gate by the deadline, `videosNeeded()` in
@@ -1524,7 +1527,11 @@ When adding a new table, append it here. When deleting a field, scan
   membership; a claim whose create Whop refused is released as read
   (`promo_claimed_at` matched); the reject route rejects (a pending
   unclaimed request, any team role; one whose code may exist, a founder or
-  an admin, once Whop shows the code on nobody's membership). `reviewed_by`
+  an admin, once Whop shows the code on nobody's membership), and after a
+  rejection that left the code usable sets `promo_code` to NULL where the
+  row is rejected with that name and Whop id (the build's review of
+  2026-10-27: the student reads their own rows; `whop_promo_id` stays, and
+  the name stays in the history). `reviewed_by`
   and `applied_by` stay NULL-able: the app writes NULL where no team member
   acted. Mark code applied (`POST /api/discounts/mark-applied`) is
   deleted.
@@ -1552,16 +1559,24 @@ When adding a new table, append it here. When deleting a field, scan
   role, `attempt_failed` (the step and the job: each failed attempt, with
   its `reason` and detail `{step, http, message, membership_status, code,
   product}`; never in a dry run; a failed insert is logged and stops
-  nothing) and `override` (the approve route's Approve anyway: actor
-  `team`, the member, detail `{rule, coupon}`).
+  nothing; since the build's review of 2026-10-27 also the reject route,
+  after a rejection that left the code usable: `write_failed`, step
+  `rejected_usable`, detail `{code, whop_promo_id}`, actor `team`, the
+  member, which lists the request for 30 days; and the step's
+  `write_failed`, step `attach_other_code`, detail `{membership,
+  attached}`, for an attach Whop answered with another code of the
+  request's name) and `override` (the approve route's Approve anyway:
+  actor `team`, the member, detail `{rule, coupon}`).
 - **Depended on by:** `readNeedsHand` (`src/lib/admin/thirty-data.ts`:
   the `write_failed` events of the last 30 days and every event of those
   requests from the same days, to find a request whose newest event is a
   `write_failed`; the newest by `created_at`, the higher `id` on a tie),
   for the 30% page with the service role and for the Dashboard with the
   member's session; `loadThirtyData` (each listed request's newest
-  `attempt_failed`, `FAILURE_EVENT_COLUMNS`); the job (each candidate's
-  `attempt_failed` events: how many, the newest's time and reason);
+  `attempt_failed`, `FAILURE_EVENT_COLUMNS`, and how many it has); the
+  job (each candidate's `attempt_failed` events: how many, the newest's
+  time, reason, step and membership status); the reject route (a
+  request's `write_failed` events, for an `attach_other_code`);
   `supabase/diagnostics/thirty-waiting.sql`.
 - **Stable contract:** `id` (identity), `request_id`, `student_id`,
   `event` (`requested`, `code_made`, `applied`, `rejected`, `reopened`,
@@ -2777,11 +2792,15 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   - **Produces, besides the fields below:** `paused` (boolean) on the
     answer, and on each row `whopPromoId`, `ageHours` (hours since the
     request was made), `lastFailure` (`ThirtyFailure`: `reason`, `step`,
-    `at`, `message`, `membershipStatus`, `code`, `product`, `confirmed`,
-    or null; an event whose reason is not one of v116's 12 counts as
-    none) and `why` (`thirtyWords`: the row's Why line). A request is
-    `claimed` by its own row (pending, a code name, no Whop id), never by
-    an event. `buildThirtyView(data, now, resetAt, live, paused)`.
+    `at`, `message`, `membershipStatus`, `code`, `product`, `confirmed`
+    and since the build's review of 2026-10-27 `count`, how many of the
+    request's attempts failed, or null; an event whose reason is not one
+    of v116's 12 counts as none) and `why` (`thirtyWords`: the row's Why
+    line; the job's stopped line after 6 failures only a person can
+    clear; empty when a `check_refused` says word for word what the
+    row's verdict says). A request is `claimed` by its own row (pending,
+    a code name, no Whop id), never by an event.
+    `buildThirtyView(data, now, resetAt, live, paused)`.
   - **Rules its caller relies on:** the page decides through
     `POST /api/discounts/approve` (Approve, Approve anyway, Try again) and
     `/reject` (each below, under "The 30% that applies itself");
@@ -3134,18 +3153,29 @@ reaches any deployment a person uses. The tables are `discount_requests`
   `key_not_allowed`, the rest `apply_refused`), `unknown` for 409, 429, a
   5xx, any other status, a timeout, no connection or a body that does not
   read (then `whereIsCode` once more); `message` is Whop's `error.message`
-  cut to 300 characters.
+  cut to 300 characters. A 200 naming another code on a membership read
+  just before with none is Whop attaching another code of the same name:
+  `write_failed`, step `attach_other_code`, the detail naming the code
+  Whop put on (`attached`); on a membership that held a code it stays
+  `membership_has_code`, step `attach` (the build's review of
+  2026-10-27).
 - **`readMembershipForApply(membershipId, ctx)`** (pinned membership
   read): `{ ok: true, status, promoCodeId, productId, cancelAtPeriodEnd,
   renewalPrice }` or `{ ok: false, fail }`; `not_found`, `http_4xx` and
   `not_a_membership` pass the candidate over, `http_401_403` is
   `key_not_allowed`, any other failure `whop_no_answer`.
-- **`findThirtyCodeByName(name, createdAfterIso, ctx)`** (pinned
+- **`findThirtyCodeByName(name, createdAfterIso, ctx, createdBeforeIso?)`** (pinned
   `GET /api/v1/promo_codes?account_id=<WHOP_COMPANY_ID>&created_after=
   &direction=asc&first=100`, `after` paging, at most 5 pages; scope
   `promo_code:basic:read`): `{ ok: true, id }` (the first whose name
-  matches, trimmed, the case not minded, or null) or `{ ok: false }` (a
-  page that failed or did not read, or still paging after the 5th).
+  matches, trimmed, the case not minded, or null; with `createdBeforeIso`
+  a code made after it ends the read with null, as every later code is
+  later still) or `{ ok: false }` (a page that failed or did not read, or
+  still paging after the 5th). `settleClaim` passes the claim time plus 5
+  minutes when the claim has one (the build's review of 2026-10-27). A
+  401 or 403 on it, or on `findMembershipsWithCode`, is `key_not_allowed`
+  with step `list` or `where` (the words name `promo_code:basic:read` or
+  `member:basic:read`).
 - **`findMembershipsWithCode(promoId, ctx)`** (pinned
   `GET /api/v1/memberships?promo_code_ids=<id>&company_id=<WHOP_COMPANY_ID>&first=10`;
   scope `member:basic:read`): `{ ok: true, memberships: [{ id, userId,
@@ -3178,7 +3208,8 @@ reaches any deployment a person uses. The tables are `discount_requests`
 - **A pending request:** `thirtyApprovalChecks` (every refusal as the
   route gave it), an `override` event when Approve anyway, then
   `putThirtyOn` (actor `team`, a new correlation, the deadline
-  `min(now + 20 s, route start + 26 s)`). **An approved request:** Try
+  `min(now + 20 s, route start + 26 s)` taken when the step starts, after
+  the checks: the build's review of 2026-10-27 moved it there). **An approved request:** Try
   again, every team role: `putThirtyOn` with `allowOldName`, no checks.
   Anything else: 400 "Request already processed". `maxDuration` 30.
 - **Produces:** 200 `{ success, status, promoCode, whopPromoId, reason,
@@ -3216,7 +3247,8 @@ reaches any deployment a person uses. The tables are `discount_requests`
   made, `whereIsCode`: on nobody's membership, rejected with its Whop id
   stored (200, `usable`); on the student's own, 409 "The code is already
   on their membership, so the 30% is theirs. The app marks it applied
-  within the hour."; elsewhere, 409 with the team's words for it; Whop
+  within the hour; while the app is paused, press Approve anyway.";
+  elsewhere, 409 with the team's words for it; Whop
   not answering, 503 ("Couldn't ask Whop about this code. Try again." for
   the name, "Couldn't ask Whop. Try again." for where it is). Reopened by
   hand, or approved with the app's code id: `whereIsCode`; on nobody's,
@@ -3228,7 +3260,13 @@ reaches any deployment a person uses. The tables are `discount_requests`
   `where_no_ids`), 409 "The app can't tell whose membership <code> is on.
   Check it in Whop."; elsewhere, 409 with its words; no answer, 503.
   Approved with no Whop id (code unknown): rejected (200, `may_exist`).
-  Applied or rejected: 409 "This request was already decided."
+  Applied or rejected: 409 "This request was already decided." A request
+  whose history holds an `attempt_failed` `write_failed`, step
+  `attach_other_code` (another code of its name on their membership), is
+  not rejected: 409 "Whop put another code named <code> on their
+  membership. Check it in Whop, then tell the owner so the app records
+  it." (its events read before Whop is asked; a failed read is 500
+  "Update failed").
 - **Writes:** every write conditional on the row as read (`status`,
   `promo_code`, `whop_promo_id` and for a release `promo_claimed_at`, a
   NULL matched with `.is()`), with `audit_actor` team, the member and one
@@ -3239,7 +3277,14 @@ reaches any deployment a person uses. The tables are `discount_requests`
 - **Produces:** 200 `{ success: true, code, codeState }`, `code` the
   code's name or null, `codeState` `usable` (made and on nobody's
   membership: usable at checkout until someone switches it off in Whop),
-  `may_exist` (code unknown) or null (no code made).
+  `may_exist` (code unknown) or null (no code made). After a `usable`
+  rejection (the build's review of 2026-10-27): `promo_code` set to NULL
+  where the row is rejected with that name and Whop id (the trigger's
+  `code_changed` keeps the name), then one `attempt_failed`
+  `write_failed`, step `rejected_usable`, detail `{ code, whop_promo_id }`,
+  actor team, the member, the press's correlation: the request is listed
+  on the 30% page for 30 days. Neither write changes the answer; a
+  failure is logged.
 
 ### `GET /api/cron/apply-thirty` (the job)
 - **Schedule:** `vercel.json`, `"3,13,23,33,43,53 * * * *"`;
@@ -3251,22 +3296,31 @@ reaches any deployment a person uses. The tables are `discount_requests`
   stored or recorded) or `write` (the default); any other mode 400.
 - **Reads:** `discount_requests` (`id, student_id, status, promo_code,
   promo_claimed_at, whop_promo_id, created_at`) from
-  `DISCOUNT_ELIGIBLE_FROM`, made at least 2 minutes before the run,
-  oldest first, up to 200: pending made in the last 48 hours, pending
-  holding a `promo_code` whatever its age, approved whatever its age;
-  their `attempt_failed` events (100 request ids a read); a head count of
+  `DISCOUNT_ELIGIBLE_FROM`, made at least 2 minutes before the run, each
+  kind read in full in pages (until the build's review of 2026-10-27 the
+  oldest 200 of each, cut to 200 before the skips): pending made in the
+  last 48 hours, pending holding a `promo_code` whatever its age, approved
+  whatever its age; their `attempt_failed` events (`request_id, reason,
+  detail, created_at`, 100 request ids a read); a head count of
   the pending requests with no code whose 48 hours ended in the 10
   minutes before the run (`gaveUp`).
 - **Rules:** a request whose newest failure is under 9 minutes old (1 or
-  2 failures), under 55 minutes (3 or more), or `landed_elsewhere` is
-  skipped; the first 25 left are worked on, none started after 240 s,
-  each within `min(now + 20 s, run start + 270 s)`. An unclaimed request
+  2 failures), under 55 minutes (3 or more), `landed_elsewhere` or
+  `write_failed` `attach_other_code` is skipped; one whose newest failure
+  only a person can clear (`needsAPerson`: `membership_has_code`,
+  `membership_not_active` canceled or expired, `code_unknown`) after 6
+  failures or more (`jobGivesUp`, `JOB_GIVES_UP_AFTER`) is stopped. The
+  rest are ordered: made in the last 48 hours, then never tried, each
+  oldest first, then by their newest failure, the longest ago first; the
+  first 25 are worked on, none started after 240 s, each within
+  `min(now + 20 s, run start + 270 s)`. An unclaimed request
   runs `thirtyApprovalChecks` first (`store` in write mode; a refusal is
   an `attempt_failed` `check_refused` with its sentence, actor `job`); a
   settling claim passes them as `freshChecks`; others go to the step as
   they are. A new code only for a request from the last 48 hours.
 - **Produces:** 200 `{ ok, paused, mode, examined, applied, waiting,
-  skipped, gaveUp, byReason, planned, failed }`, request ids only
+  skipped, stopped, gaveUp, byReason, planned, failed }` (`stopped`: the
+  requests the job no longer tries), request ids only
   (`planned`: `[{ requestId, status, would, reason }]` in a dry run;
   `failed`: the requests whose step threw, which make it a 500 and a
   failed run). Paused: 200 `{ ok: true, paused: true }`, nothing read, the
@@ -3277,12 +3331,14 @@ reaches any deployment a person uses. The tables are `discount_requests`
 
 ### Proven and unproven
 - **Proven** on stand-ins (`client-tests/`, `npm run test:client`):
-  `thirty-apply.test.mjs` (123 checks: every path of the step, its words
-  for every reason and step, the names, the three lists against v116, the
-  approve route's checks held equal to the route at `a031e8a`),
-  `apply-thirty-cron.test.mjs` (32: the job through its own `GET`),
-  `admin-discounts.test.mjs` (70: every row of the approve and reject
-  tables, the override event, Try again), `membership-discount.test.mjs`
+  `thirty-apply.test.mjs` (130 checks: every path of the step, its words
+  for every reason and step and the stopped line, the names, the three
+  lists against v116, the approve route's checks held equal to the route
+  at `a031e8a`), `apply-thirty-cron.test.mjs` (36: the job through its
+  own `GET`, the review's 200 requests that cannot finish beside a new
+  one among them), `admin-discounts.test.mjs` (75: every row of the
+  approve and reject tables, the override event, Try again, the same-name
+  code and the usable rejection), `membership-discount.test.mjs`
   (829: the request routes putting the code on, Whop down after the
   coupon check, a stored coupon answer, the switch's values) and
   `discount-double-submit.test.mjs` (38: a second Apply after the first

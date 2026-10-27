@@ -282,6 +282,8 @@ export interface ThirtyFailure {
   code: string | null;
   product: string | null;
   confirmed: boolean | null;
+  /** How many attempts of the request failed, this one included: the job stops on some after JOB_GIVES_UP_AFTER (jobGivesUp). */
+  count: number;
 }
 
 export interface ThirtyView {
@@ -305,9 +307,10 @@ const textOf = (v: unknown): string | null => (typeof v === "string" && v !== ""
 /**
  * An attempt_failed event as the Why line reads it (ThirtyFailure): its
  * reason, and from its detail the step, Whop's words, the membership's
- * status, the code, the product and `confirmed`. Null for an event whose
- * reason is not one of v116's (THIRTY_REASONS): the line then says nothing
- * that is not so.
+ * status, the code, the product and `confirmed`, with how many of the
+ * request's attempts failed (the event's `count`, which loadThirtyData sets;
+ * 1 when it is not set). Null for an event whose reason is not one of v116's
+ * (THIRTY_REASONS): the line then says nothing that is not so.
  */
 export function failureOf(event: ThirtyFailureEvent | undefined | null): ThirtyFailure | null {
   if (!event || !(THIRTY_REASONS as readonly string[]).includes(event.reason ?? "")) return null;
@@ -321,6 +324,7 @@ export function failureOf(event: ThirtyFailureEvent | undefined | null): ThirtyF
     code: textOf(d.code),
     product: textOf(d.product),
     confirmed: typeof d.confirmed === "boolean" ? d.confirmed : null,
+    count: typeof event.count === "number" && event.count > 0 ? event.count : 1,
   };
 }
 
@@ -328,7 +332,8 @@ export function failureOf(event: ThirtyFailureEvent | undefined | null): ThirtyF
  * A row's Why line (thirtyWords): the newest failure's reason and step, with
  * the row as it is now. `claimed` comes from the row (a pending request
  * holding a code name with no Whop id), never from the failure; the code the
- * sentence names is the failure's, else the row's.
+ * sentence names is the failure's, else the row's; the failures counted say
+ * whether the job stopped trying it (jobGivesUp).
  */
 export function whyLine(
   row: Pick<ThirtyRequestRow, "status" | "ageHours" | "promoCode" | "whopPromoId" | "lastFailure">,
@@ -345,6 +350,7 @@ export function whyLine(
     membershipStatus: f?.membershipStatus ?? null,
     message: f?.message ?? null,
     confirmed: f?.confirmed ?? null,
+    failures: f?.count ?? 0,
   });
 }
 
@@ -825,6 +831,10 @@ export function buildThirtyView(
         ageHours: Number.isFinite(asked) ? (now.getTime() - asked) / 3_600_000 : 0,
         lastFailure: failureOf(data.failures.get(r.id)),
       };
+      const said = whyLine(head, paused);
+      // A check's refusal the verdict already says, word for word (the job refused over the coupon the row shows), is
+      // said once (the build's review of 2026-10-27); once they differ, the Why line shows it again.
+      const why = verdict !== null && head.lastFailure?.reason === "check_refused" && said === verdict.text ? "" : said;
       return {
         id: r.id,
         ...head,
@@ -834,7 +844,7 @@ export function buildThirtyView(
         appliedAt: r.applied_at ?? null,
         appliedBy: ref(r.applied_by ?? null),
         rejectionReason: r.rejection_reason ?? null,
-        why: whyLine(head, paused),
+        why,
         student: brief(s),
         facts,
         verdict,

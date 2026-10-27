@@ -12,11 +12,14 @@
  *     approved 30 minutes after the student applied (NEEDS_HAND_AFTER_MS), and
  *   - any request whose newest event (discount_request_events, v116) is a
  *     write_failed from the last 30 days (WRITE_FAILED_LISTED_MS), whatever
- *     its status: a code Whop made that the app could not record, or one Whop
- *     attached after the request was rejected.
+ *     its status: a code Whop made that the app could not record, one Whop
+ *     attached after the request was rejected, another code of its name Whop
+ *     put on the membership, or a code a Reject left usable at checkout (the
+ *     build's review of 2026-10-27).
  * Applied and rejected requests are otherwise left out, as are requests from
  * before 1 October. loadThirtyData also reads each listed request's newest
- * attempt_failed event (`failures`), the Why line's facts (thirty-view.ts).
+ * attempt_failed event (`failures`, with how many it has), the Why line's
+ * facts (thirty-view.ts).
  * Any of these reads that fails fails the whole load: a missing event would
  * leave a row off the list, or say "The app hasn't tried yet." of a request
  * it tried and could not finish.
@@ -138,6 +141,8 @@ export interface ThirtyFailureEvent {
   reason: string | null;
   detail: Record<string, unknown> | null;
   created_at: string;
+  /** How many attempt_failed events the request has, this one included (loadThirtyData sets it; a row as read has none). */
+  count?: number;
 }
 export const FAILURE_EVENT_COLUMNS = "request_id, reason, detail, created_at, id";
 
@@ -424,9 +429,11 @@ export async function loadThirtyData(db: SupabaseClient, nowMs: number = Date.no
     if (!read.data) return { ok: false, failed: [failure("discount_request_events (attempt_failed)", read)] };
     let byRequest = groupedFailures.get(read);
     if (!byRequest) groupedFailures.set(read, (byRequest = groupBy(read.data, (e) => e.request_id)));
-    const newest = byRequest.get(r.id)?.[0];
+    const mine = byRequest.get(r.id) ?? [];
+    const newest = mine[0];
     if (newest) {
-      failures.set(r.id, { request_id: newest.request_id, reason: newest.reason ?? null, detail: newest.detail ?? null, created_at: newest.created_at });
+      // With how many failed: the job stops on some failures after JOB_GIVES_UP_AFTER, and the Why line says so.
+      failures.set(r.id, { request_id: newest.request_id, reason: newest.reason ?? null, detail: newest.detail ?? null, created_at: newest.created_at, count: mine.length });
     }
   }
 

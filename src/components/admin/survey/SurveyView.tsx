@@ -22,8 +22,9 @@ import type { SurveyData } from "@/lib/admin/survey-data";
 /**
  * /admin/feedback/survey (admin rebuild 2, WI-9), in the brand kit's dark
  * look: what students answered in the 30% application's survey, one card
- * per application, newest first, with the status named as the 30% page
- * names it (Applied, Approved, Rejected, Code Applied).
+ * per application, newest first, with the status named as a student's page
+ * names it (Applied, Approved, Rejected, Code Applied; the 30% page's tabs
+ * until it became one list, T-137).
  *
  * Since the review's fix round: the applications from 1 October, as the 30%
  * page lists them, with one line counting the older ones and a toggle to

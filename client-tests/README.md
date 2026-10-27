@@ -521,9 +521,10 @@ Today, and with it those checks, that suite and their copies in `_gen`
 `admin-frame.test.mjs` (admin rebuild 2, WI-1, 2026-10-20) checks the
 admin's frame and what admin rebuild 2 removed, with no browser. From
 `src/lib/admin/admin-frame.ts` (copied by `build.mjs`): the top bar a
-founder, an admin and a csm get, in order (Dashboard · 30% off · Tasks ·
-Students · Feedback · Templates · Insights · Team, Feedback hidden from a
-csm and Team a founder's only), no "More" and no entry about a plan or a
+founder, an admin and a csm get, in order (Dashboard · Tasks · Students ·
+Feedback · Templates · Insights · Team, Feedback hidden from a csm and Team
+a founder's only; 30% off sat after Dashboard until T-137, and since then
+no role's bar has it), no "More" and no entry about a plan or a
 subscription, each entry a page file that exists, the entry marked for 14
 addresses, and `isRebuiltPage` keeping `/admin` to itself. From the
 source: sign-in, set-password and the lockup go to `ADMIN_HOME` (`/admin`),
@@ -557,8 +558,10 @@ Refresh's line names a step that failed inside a 200. The page's
 `readDashboard` is taken from `page.tsx` with TypeScript's parser and run on
 a client that records every call: the open tasks get the tasks reset's floor
 only when the key exists and are not counted without it, 30% to decide
-counts the pending requests from 1 October, the students read names its 6
-columns and pages by id. 81 checks.
+counts the pending requests from 1 October (until T-137; since then "30%
+needs a hand" is `readNeedsHand`'s list and "30% off applied" a head count
+of the applied requests from 1 October), the students read names its 6
+columns and pages by id. 81 checks (95 since T-137).
 
 `admin-people.test.mjs` (admin rebuild 2, lane WI-5 and WI-6, 2026-10-20)
 runs the rules of Tasks, its insights, All students, a student's page and
@@ -667,7 +670,8 @@ suite compiles with `ui.tsx` and `list-parts.tsx` into `_gen/ar-*.mjs` and
 renders with React's server renderer); Insights' Avg progress from the course
 switch and its gridlines at their own values; Lesson feedback's rated lessons
 first and the rest one line per area; one name and colour per 30% status
-(`discount-status.ts`) on the 30% page, the Survey and a student's page; the
+(`discount-status.ts`) on the 30% page (until T-137 took its tabs away), the
+Survey and a student's page; the
 Survey from 1 October with its summary; the 30% page's coupon check on every
 row, with the Approved rows asked of Whop by `GET /api/admin/thirty` on a
 stand-in `fetch` (live, stored, could not ask), and a stored Whop id that is
@@ -1131,6 +1135,122 @@ floor of answers that are not unpaid is 85 (92 of 140), where it was 40.
 On `night/eighty2` at 96c4095, 52 of the new checks fail, among them every
 refused case above, the past_due payer, the r5-only routes and cron, and the
 closed window.
+
+The 30% that applies itself (T-137, 2026-10-26 and 27, branch
+`night/thirty-auto`; the PRD is `_admin/prds/thirty-automatic/` in the
+owner's workspace). The stand-ins first. `build.mjs` makes `_gen` copies of
+`src/lib/thirty-apply.ts` (its `@/lib/whop` pointed at `stub-admin.ts`),
+`src/lib/thirty-words.ts`, the job's route
+(`src/app/api/cron/apply-thirty/route.ts`, as `_gen/apply-thirty-route.ts`)
+and `src/lib/admin/admin-transport.ts`, and maps `@/lib/thirty-apply` in its
+copies of the request, submit-feedback and approve routes; its
+`insights-data.ts` copy maps `@/lib/world/discount` as its `survey-data.ts`
+copy does. `stub-admin.ts` gains `WhopCallError` and a switch that makes
+`createWhopPromoCode` throw with a given status (or none);
+`stub-server.ts` re-exports its create, `promoCodes` and `WhopCallError`, so
+every copy counts one list of codes, `stub-admin.ts`'s (`admin-owner-review`,
+`discount-september` and `membership-discount` count it there now). `stub-server.ts`'s tables:
+`discount_requests` gains `audit_actor`, `audit_correlation_id`,
+`audit_team_member_id` and `promo_claimed_at`, each defaulting to null; a
+`discount_request_events` table with v116's columns, refusing an event, an
+actor or a reason outside v116's lists as the database's checks do; and
+`cron_runs`, so a run's finish lands on its row. With `STUB_STRICT_NULL=1`
+(set by `thirty-apply.test.mjs` and by the approve and reject blocks of the
+route suites) `eq` with a null value throws "use .is() for null", since
+PostgREST's `eq.null` matches nothing. The stand-in database runs no
+trigger: the client suites prove the audit columns each write sets and the
+app's own `attempt_failed` and `override` rows, and v116's events are
+`supabase/migration-tests/v116.test.mjs`'s.
+
+`thirty-apply.test.mjs` (new, 123 checks, run after `morning-clock`) runs
+the step on those stand-ins: an unclaimed request put on end to end by the
+student's own request (three writes with their audit columns and their
+filters, Approve's body, the deadline's signal, a fresh key, the
+membership read before the claim); an approved request whose code Whop
+shows on the student's membership, elsewhere, nowhere or nobody can tell
+(the filter ignored, another product, no user id matched by a membership
+id on file, nothing to compare); a lost claim on its own membership, found
+and nowhere, made anew, its checks refusing, past 48 hours, beside another
+30%, the list failing or still paging after 5 pages, no claim time; a hand
+reopen whose code is on the student's membership (two writes), nowhere,
+and the team's; the candidates (only a past_due course membership, a
+canceling one, only a free one, a free one on file and a paid one stored,
+the three orders, every failure of the membership read, a trial for the
+app and for the team); every hold; a claim lost to another actor; the
+create refused, unanswered, failing and answering no id; the approved
+write finding its own id, a decided row or a database error; the old name
+for the job and for Try again; the status changed before the attach;
+the attach answering ours, another id, none, 401, 403, 400, 409 and a
+timeout, and a reject landing in between (confirmed and not); a fresh key
+every retry; the deadline; seven dry runs; v116 missing; every
+conditional write on a NULL read through `.is()`; `thirtyWords` over 30
+reasons and steps in 6 situations (under 48 hours, 48 hours and more,
+claimed, approved, paused); `thirtyCodeName` 10,000 times for its shape and
+1,000 for repeats; the three lists against v116's file and the stand-in;
+`holdsAnotherThirty` (and `madeOutsideApply` byte for byte as at
+`afd6bd4`); and `thirtyApprovalChecks` against the approve route as it was
+at `a031e8a` and as it is now, 21 rows on one database, every status, body
+and `[discount approve]` log line equal (the route at `a031e8a` is read
+with `git show` into a copy `client-tests/.gitignore` keeps out of git,
+since one of its comments names a team member). 17 deliberate breaks of
+the step each failed it.
+`apply-thirty-cron.test.mjs` (new, 32 checks, run last) runs the job
+through its own `GET`: a pending request of the last 48 hours applied, an
+approved one of any age attached or marked applied, a settling claim of
+any age settled, an unclaimed one past 48 hours not taken; a refusing
+check recorded as `check_refused`; the waits after 1, 2 and 3 failures and
+after `landed_elsewhere`; a request under 2 minutes old; the 25 after the
+skip; `gaveUp`; a step that throws (`failed`, a 500 and a failed run, the
+others still worked on); no request started after 240 s; paused; dry
+(nothing written, `planned`); another mode 400; no secret 401 with its
+`cron_runs` row; v116 missing and no Whop key, failed runs with Whop never
+asked; and `vercel.json`'s six minutes, which no other cron uses.
+
+The routes (T-137's third work item): `admin-discounts` (29 to 70) runs
+every row of the approve and reject tables on a Whop stand-in, the
+`override` event, Try again and the random name, its copy helper taking
+rewrites that apply to the old route alone, mark-applied gone from its
+copies, pages and `ROUTE_FILES`, and its em-dash control at 2;
+`membership-discount` (816 to 829) the request routes putting the code on,
+Whop down after the coupon check (pending, one `attempt_failed`, never
+applied), a stored coupon answer (`coupon_stored`) and the switch's
+values (`off`, `OFF`, `false`, `0`, `no` and " No " pending with no Whop
+write; unset and "on" applied), its stand-in answering the attach, the
+where read and the code list for the rows that turn them on, its coupon
+check's budget blocks run with the switch off, its Approve anyway rows
+reading "no coupon read; one membership read, no attach, left approved
+with membership_has_code", its `teamThirtyCodeFor` pins moved to the
+old-name guard, its check that the coupon cron's minute is one no other
+cron uses reading a list, a step and a range in the minute field (the new
+cron's `3,13,23,33,43,53`); and
+`discount-double-submit` (33 to 38) a second Apply after the first went
+through (refused by the function, the state's sentence, nothing written)
+and the function called with a JSON array (a stand-in refusing anything
+else). `discount-eighty` (Approve attaches), `discount-september`,
+`student-app-gate` (the mark-applied path dropped) and
+`admin-owner-review` (a made-up `WHOP_PRODUCT_ID`, since the step throws
+without one; its `...RULE` count moved to `thirty-apply.ts`) follow. 22
+deliberate breaks of the routes: 21 failed their suite; the 22nd, Try
+again's `allowOldName`, changes nothing for the team, whose Approve the
+old-name guard never holds.
+
+The student's words (the fourth work item): `discount` (300 to 302) the
+new ready line, `discount-next-renewal` (19 to 21; its lines 66 to 88 byte
+for byte, as the PRD asks, though one label there no longer holds) and
+`discount-celebration` (19 to 20) the moment's new lines and its optional
+`renewalAhead`; `discount-double-submit`'s header comment and one label
+quote the new sentence. The fifth (the team's pages): `thirty-view` (102
+to 124: the one list, 257 rows across pages, each of its reads failing,
+the Why lines, `paused`, the transport's answers through `_gen/admin-transport.ts`),
+`dashboard` (88 to 95: "30% needs a hand" equal to `loadThirtyData`'s list
+on one database, "30% off applied"), `admin-routes` (73 to 76: `paused`,
+`THIRTY_AUTO_APPLY`'s values), `admin-frame` (65 to 66: no role's bar has
+"30% off"), `insights-page` (14 to 18: `loadThirtyApplied`) and
+`admin-review` (100 to 99: its check on the tab row went with the tabs);
+`admin-owner-review`, `admin-render-second`, `admin-render-fixes`,
+`discount-eighty` and `membership-discount` follow the one list. With them
+`npm run test:client`: 82 suites, 5487 checks, 0 failed (5232 in 80 at
+`afd6bd4`).
 
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop

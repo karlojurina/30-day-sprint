@@ -31,7 +31,9 @@ import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/d
  * (discountFeedbackQuestions), and the form sends them with the application
  * through StudentContext.submitDiscountFeedback (/api/discounts/submit-feedback,
  * which on the new course checks the same rule as a plain request). On
- * success the form closes and the state turns to "in review".
+ * success the form closes and the state turns to the request as it stands:
+ * applied once the 30% went on in the same request (the 30% that applies
+ * itself, T-137), else in review.
  *
  * WITH NONE HELD Apply first reads them again
  * (StudentContext.loadDiscountFeedbackQuestions): the visit's own read may
@@ -51,8 +53,10 @@ import type { DiscountFeedbackAnswer, DiscountFeedbackQuestion } from "@/types/d
  * window.alert.
  *
  * EITHER WAY, what went in is kept here (`sent`) until StudentContext brings
- * a request it did not have before, so the panel turns to "in review" at once
- * and a later approval read from StudentContext is never hidden behind it.
+ * a request it did not have before, so the panel turns at once (to the row
+ * the plain request's route answers, applied when the 30% went on; to "in
+ * review" when a form's send could not read its request back) and a later
+ * change read from StudentContext is never hidden behind it.
  *
  * THE DEVELOPMENT PAGE provides DiscountStandInContext (its first payment,
  * its requests, its questions, an Apply and a submit that resolve in memory,

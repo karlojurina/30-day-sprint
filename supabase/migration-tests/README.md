@@ -44,7 +44,8 @@ review of 2026-10-26, that write taken with no source; the `r6` write taken
 after it, the `r5-` row kept), and v113 on a database without
 v111), then `v114.test.mjs` (below), with
 `--experimental-strip-types` because it imports `src/lib/progress.ts`, then
-`eighty-closed-windows.test.mjs` (below, since 2026-10-26). On
+`eighty-closed-windows.test.mjs` (below, since 2026-10-26), then
+`v116.test.mjs` (below, since the 30% that applies itself, T-137). On
 `night/admin2` with the 5 lanes merged:
 `PASS 702 FAIL 0`, then `PASS 22 FAIL 0`. On `night/achievements`: the same
 two, then `PASS 65 FAIL 0`. On `night/admin3` for T-122: `PASS 702 FAIL 0`,
@@ -57,7 +58,53 @@ with `FAIL 0`. On `night/eighty2` (2026-10-26, the owner's paid plan and
 payment): `PASS 702`, `PASS 22`, `PASS 65`, `PASS 41`, `PASS 86`, then
 `PASS 32`, each with `FAIL 0`; after the review of that build (the same
 day): `PASS 702`, `PASS 22`, `PASS 65`, `PASS 42`, `PASS 86`, then
-`PASS 32`, each with `FAIL 0`.
+`PASS 32`, each with `FAIL 0`. On `night/thirty-auto` (2026-10-26 and 27,
+T-137): `PASS 702`, `PASS 22`, `PASS 65`, `PASS 42`, `PASS 86`, `PASS 32`,
+then `PASS 112`, each with `FAIL 0`.
+
+`v116.test.mjs` (2026-10-26, the 30% that applies itself, T-137: the
+history of every 30% request) builds its own database: `base.sql` with the
+API roles' grants and the service role's bypass as Supabase has them (as
+section 25 of `run.mjs` does), `auth.role()` read from the test's own
+setting `test.role`, which stands for the role in the request's token
+(empty: the SQL editor, which sends none), then what production ran on
+`discount_requests`: v21 and v106 as they are, v29's two tables, function
+and grant lifted verbatim, v107 as it is, and the table's row level
+security as production has it after v105 (lifted from `schema.sql` and the
+team policy's fix). It pastes v116 as the owner pastes it, twice (the
+second changes nothing and says so), and checks its shape. Every writer
+the app has then writes requests, with the event and the actor each
+records: a plain insert and the feedback function (`requested`, actor
+`student`, the row's id as the correlation); a claim, the approved write
+and the applied write in one action (`code_changed`, `code_made`,
+`applied`, one correlation, actor `auto`, the three audit columns empty
+after and `promo_claimed_at` kept); `job`; the team by
+`audit_team_member_id` and by `reviewed_by` or `applied_by` alone; a team
+member's own session (recorded as its own `auth.uid()`, even when it sends
+another member's id); the SQL editor (`sql`); the older build's writes
+(`sql`); a member sent with `auto` (not recorded). A misspelled actor is
+refused (four spellings by the service role, one by a team session, one on
+an insert); a write that changes neither status nor code records nothing;
+status and code changed together record one event; an `override` event
+and every value of the three lists are taken and values outside them
+refused; an event that cannot be written (a NOT VALID check) leaves the
+request's write in place with a warning. Who may read and write the
+history: the team reads every row, a student none, a signed-in session
+cannot insert, update, delete or truncate, a visitor sees nothing. A
+request or a student deleted takes its history. Then the hand fix
+(`supabase/hand-fixes/thirty-close-request.sql`), both modes twice and its
+refusals, and the read (`supabase/diagnostics/thirty-waiting.sql`), parts
+a to f on made-up rows, read only and one statement. Then the undo twice
+(the history kept under `discount_request_events_v116_undone`, the second
+run changing nothing), v116 again with every name of its first paste (the
+undo renames the kept table's key, sequence and constraints with it; a
+probe found a table made again beside one renamed alone taking `_pkey1`,
+`_id_seq1` and `_check1`), and the undo again (the history kept under
+`..._2`), the database back to v114's shape but for the kept tables; and
+v116's refusals, each changing nothing. 112 checks. 8
+deliberate breaks of the files each failed it (one, part c of the read
+forgetting `reopened`, passed at first; a request whose `requested` event
+was lost and that was later reopened was added, and it fails now).
 
 `v114.test.mjs` (2026-10-23, Video Ads II's four editing breakdowns,
 `a4l02` to `a4l05`, become action items with a Discord link) builds

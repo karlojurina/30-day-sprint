@@ -27,7 +27,9 @@ When adding a new table, append it here. When deleting a field, scan
   `/api/admin/*` routes, `src/lib/student-app-gate.ts` (T-078: reads
   `id`, only while `STUDENT_APP_CLOSED=true`, to let a team member's
   Whop account through the Whop login); `/api/auth/me` answers the team
-  before it asks the gate
+  before it asks the gate; since v116 (T-137, not pasted)
+  `discount_request_events.team_member_id` (who acted, NULL-able; the
+  trigger records a team session's `auth.uid()` there)
 - **Stable contract:** `id`, `email`, `role` (founder/admin/csm)
 
 ### `students`
@@ -1103,9 +1105,30 @@ When adding a new table, append it here. When deleting a field, scan
   (membership/discount status checks where applicable),
   `src/lib/first-paid-repair.ts` (reads `student_id`, `status`,
   `created_at` of the students whose `first_paid_at` it would move, to
-  count `thirty.requests_change` and `thirty.open_with_old_request`)
+  count `thirty.requests_change` and `thirty.open_with_old_request`);
+  since the 30% applies itself (T-137, branch `night/thirty-auto`, not on
+  production; "The 30% that applies itself" below): the step
+  `putThirtyOn` in `src/lib/thirty-apply.ts` (reads `id, student_id,
+  status, promo_code, promo_claimed_at, whop_promo_id, created_at,
+  audit_actor` and writes the claim, approved and applied), which both
+  request routes, `POST /api/discounts/approve` and the job
+  `GET /api/cron/apply-thirty` call; the reject route (the same columns,
+  by `requestShape`); the job's candidates; `readNeedsHand` in
+  `src/lib/admin/thirty-data.ts` (the 30% page and the Dashboard's "30%
+  needs a hand"); the Dashboard's "30% off applied" (a head count of
+  `status = 'applied'` from `DISCOUNT_ELIGIBLE_FROM`); Insights'
+  `loadThirtyApplied` (`applied_at`, `created_at` of the applied requests
+  from `DISCOUNT_ELIGIBLE_FROM`); the student page (`whop_promo_id` beside
+  `promo_code`, for its Copy button)
 - **Stable contract:** `student_id`, `status`
-  (pending/approved/rejected/applied), `promo_code`, `created_at`
+  (pending/approved/rejected/applied), `promo_code`, `created_at`; since
+  v116 (T-137, not pasted) also `promo_claimed_at` (timestamptz: set with
+  a claim, emptied when the claim is released; a pending row holding a
+  `promo_code` and no `whop_promo_id` is claimed, its claim in progress
+  under 5 minutes old, `CLAIM_IN_PROGRESS_MS`, and lost its answer from
+  then or with no claim time), `whop_promo_id` (a `promo_...` id: the
+  code exists on Whop; an approved row without one is "code unknown"),
+  and the write contract below
 - **Added in v95, unused:** `gate_lesson_id` (text, nullable, no
   foreign key on purpose): the lesson that was the discount gate when
   the request was decided. Nothing in `src/` reads or writes it.
@@ -1154,7 +1177,13 @@ When adding a new table, append it here. When deleting a field, scan
   30% on the old dashboard. `POST /api/discounts/request` on the new
   course grants on `ready` and inserts; the one refusal below it is
   v106's index, which stops only a second pending row (and v106 is not on
-  production, below). Its dry run counts both before anything is written
+  production, below). Since T-137 it writes through
+  `submit_discount_with_feedback` (v29, v107), whose own check refuses a
+  student holding a pending, approved or applied request of any date,
+  counted or not, so an Apply for such a student writes nothing: the
+  answer is the request's state in the map's words when the request
+  counts (`decideDiscountRequest` read again), else `SAVE_FAILED` (500,
+  logged). Its dry run counts both before anything is written
   (`thirty.requests_change`, `thirty.open_with_old_request`).
 - **One pending request per student (v106, built 2026-10-16, not on
   production):** the unique index `discount_requests_one_pending_per_student`
@@ -1173,7 +1202,9 @@ When adding a new table, append it here. When deleting a field, scan
   2026-10-17, not on production):** EXECUTE for `service_role` alone,
   and the function refuses any caller whose token is not the service
   role's (`auth.role()`). `POST /api/discounts/submit-feedback` calls it
-  with its service-role client and the student id from the token, so the
+  with its service-role client and the student id from the token (and
+  since T-137 `POST /api/discounts/request` does on the new course, with
+  `p_answers` an empty JSON array, never the string `'[]'`), so the
   route and v107 go live together (Monday, after the merge into `main`):
   before v107, v29's own check refuses the service role. On the new
   course the approve route also refuses a request no route could have
@@ -1229,10 +1260,11 @@ When adding a new table, append it here. When deleting a field, scan
   one, an add-on, a plan change) never refuses by its price. The
   student's own 30% is the Whop promo id on their own approved or applied
   request, or, since the fourth fix round only while they hold such a
-  request, a code named, the case not minded, as the approve route names
-  theirs (`teamThirtyCodeFor`: `ECOM30-` and the first 6 characters of the
-  student's id, upper-cased; the approve route builds its code with it;
-  two students' ids can share those 6 characters) (`isOwnThirtyCode`;
+  request, a code named, the case not minded, as the approve route named
+  theirs until T-137 (`teamThirtyCodeFor`: `ECOM30-` and the first 6
+  characters of the student's id, upper-cased; the approve route built its
+  code with it until the 30% applied itself, whose codes take a random
+  name; two students' ids can share those 6 characters) (`isOwnThirtyCode`;
   `checkMembershipDiscount` reads `discount_requests.whop_promo_id` for
   them, a read that fails giving none); any other ECOM30 code is a coupon.
   With no coupon the membership the check settled on answers (paid or free
@@ -1473,6 +1505,89 @@ When adding a new table, append it here. When deleting a field, scan
   verified yet..." while the column was false. The column is still set
   from the student page and the journey drawer
   (`POST /api/admin/verify-ad-submissions`) and gates nothing.
+- **The write contract (v116, the 30% that applies itself, T-137; branch
+  `night/thirty-auto`, not pasted):** every app write that changes
+  `status`, `promo_code` or `whop_promo_id` sets `audit_actor` (`auto` in
+  the student's own request, `job`, or `team`) and `audit_correlation_id`
+  (one uuid per action: the request's id for the student's own request,
+  one per press for the team, one per run for the job), and a team write
+  also `audit_team_member_id`; the trigger `discount_request_history`
+  turns them into an event and empties them, so the three are empty at
+  rest and no reader may rely on them. A value read as NULL for a
+  conditional write is matched with `.is(column, null)`, never `.eq`
+  (PostgREST's `eq.null` matches nothing). The four statuses stay; who
+  moves a request: the step (`putThirtyOn`) claims a pending request
+  (`promo_code` and `promo_claimed_at`, where `status` is pending and
+  `promo_code` is null), writes approved with the code's Whop id
+  (`reviewed_by` the team member, or null for the app), and applied
+  (`applied_by` the same) only once Whop names that id on the student's own
+  membership; a claim whose create Whop refused is released as read
+  (`promo_claimed_at` matched); the reject route rejects (a pending
+  unclaimed request, any team role; one whose code may exist, a founder or
+  an admin, once Whop shows the code on nobody's membership). `reviewed_by`
+  and `applied_by` stay NULL-able: the app writes NULL where no team member
+  acted. Mark code applied (`POST /api/discounts/mark-applied`) is
+  deleted.
+
+### `discount_request_events` (v116, T-137, branch `night/thirty-auto`, not pasted)
+- **Depends on:** `discount_requests` (`request_id`, on delete cascade,
+  deferrable), `students` (`student_id`, on delete cascade),
+  `team_members` (`team_member_id`, NULL-able).
+- **Written by:** the trigger `discount_request_history` (before every
+  insert or update of `discount_requests`; security definer):
+  `requested` on an insert, `code_made`, `applied`, `rejected` or
+  `reopened` on a status change (from and to, detail `{promo_code,
+  whop_promo_id}`), `code_changed` on a change of `promo_code` or
+  `whop_promo_id` alone (detail `{from, to}`). The actor: a signed-in
+  session (`authenticated`) is `team` with its own `auth.uid()` as the
+  member, whatever it sends; the service role is `audit_actor`, or with
+  none `student` on an insert and `sql` on an update, and as `team` its
+  member is `audit_team_member_id`, else `applied_by` when the new status
+  is applied, else `reviewed_by`; any other actor names no member; the SQL
+  editor (no token role) is `sql`. It refuses an `audit_actor` other than
+  `student`, `auto`, `job` or `team` ("audit_actor % is not one of
+  student, auto, job, team. Nothing was changed."), never blocks the
+  request's write when its event cannot be written (it raises a warning),
+  and empties the three audit columns. The app inserts, with the service
+  role, `attempt_failed` (the step and the job: each failed attempt, with
+  its `reason` and detail `{step, http, message, membership_status, code,
+  product}`; never in a dry run; a failed insert is logged and stops
+  nothing) and `override` (the approve route's Approve anyway: actor
+  `team`, the member, detail `{rule, coupon}`).
+- **Depended on by:** `readNeedsHand` (`src/lib/admin/thirty-data.ts`:
+  the `write_failed` events of the last 30 days and every event of those
+  requests from the same days, to find a request whose newest event is a
+  `write_failed`; the newest by `created_at`, the higher `id` on a tie),
+  for the 30% page with the service role and for the Dashboard with the
+  member's session; `loadThirtyData` (each listed request's newest
+  `attempt_failed`, `FAILURE_EVENT_COLUMNS`); the job (each candidate's
+  `attempt_failed` events: how many, the newest's time and reason);
+  `supabase/diagnostics/thirty-waiting.sql`.
+- **Stable contract:** `id` (identity), `request_id`, `student_id`,
+  `event` (`requested`, `code_made`, `applied`, `rejected`, `reopened`,
+  `code_changed`, `attempt_failed`, `override`), `from_status`,
+  `to_status`, `actor` (`student`, `auto`, `job`, `team`, `sql`),
+  `team_member_id`, `correlation_id`, `reason` (NULL or one of
+  `check_refused`, `no_membership`, `membership_not_active`,
+  `membership_has_code`, `whop_no_answer`, `key_not_allowed`,
+  `code_not_made`, `apply_refused`, `landed_elsewhere`, `write_failed`,
+  `old_code`, `code_unknown`), `detail` (jsonb), `created_at`; the index
+  `discount_request_events_request_idx (request_id, created_at desc)`.
+  The three lists are checks in v116 and `THIRTY_EVENTS`,
+  `THIRTY_ACTORS` and `THIRTY_REASONS` in `src/lib/thirty-words.ts`;
+  `client-tests/thirty-apply.test.mjs` parses v116 and holds them equal,
+  so a value added to one is added to the other in the same change.
+  Append-only: the app never updates or deletes a row; a row goes only
+  with its request or its student.
+- **Row level security:** the policy "Team can read discount request
+  events" (select, `authenticated`, `current_user_is_team()`);
+  `authenticated` holds select alone (insert, update, delete, truncate,
+  references and trigger revoked) and `anon` nothing, so only the service
+  role and the trigger write.
+- **Undo:** `supabase/undo/2026_v116_undo.sql` keeps the rows under the
+  first free `discount_request_events_v116_undone[_N]`, its index, key,
+  sequence and constraints renamed with it, and drops the trigger, its
+  function and the four columns (redeploy the build from before first).
 
 ### `student_membership_discounts` (v111, admin rebuild 2, D5; on production, written there by the coupon cron of the rule before T-122 every 2 hours since 2026-10-21 11:37)
 - **Depends on:** `students` (`student_id` primary key, on delete
@@ -1524,7 +1639,11 @@ When adding a new table, append it here. When deleting a field, scan
   and `POST /api/discounts/approve` after a live read
   (`checkMembershipDiscount`), and since the same second round
   `POST /api/admin/thirty/check-coupon` ("Check Whop again", the same
-  live read for the student of one pending request). One row per
+  live read for the student of one pending request), and since T-137
+  (branch `night/thirty-auto`, not on production) the job
+  `GET /api/cron/apply-thirty` in write mode (Approve's checks,
+  `thirtyApprovalChecks`, before it makes a new code; its dry run stores
+  nothing, `checkMembershipDiscount`'s `store: false`). One row per
   student, upserted on `student_id`.
 - **Depended on by:** `GET /api/student/data` (`whop_membership_id,
   discounted`, and since 2026-10-26 `promo_code_id` and `renewal_price`
@@ -1551,7 +1670,11 @@ When adding a new table, append it here. When deleting a field, scan
   giving the verdict `unpaid` since the owner's answers of the same day
   (`no-real-payment` from the review until then); on an
   Approved row only when Whop gives no answer to the route's own live
-  read, since the review's fix round).
+  read, since the review's fix round), and since T-137 the step
+  (`readThirtyStudent` in `src/lib/thirty-apply.ts`: `whop_membership_id`,
+  one of the memberships the code may go on and the student's own when
+  Whop's list of a code's memberships names no user; a failed read throws,
+  and the request waits for the job or the team).
 - **Stable contract:** `student_id`, `whop_membership_id` (the membership
   the row was read from: a row counts only while the student holds that
   membership; since T-122, when the student's Whop id on file is not a
@@ -1839,7 +1962,18 @@ fails is shown as "Couldn't load" on every tile it feeds, never as 0.
   admin_config.tasks_reset_at` when that key exists (D7). Without its
   floor the count is not asked for.
 - `discount_requests`: a head count of `status = 'pending'` and
-  `created_at >= DISCOUNT_ELIGIBLE_FROM`, the 30% page's Applied tab.
+  `created_at >= DISCOUNT_ELIGIBLE_FROM`, the 30% page's Applied tab,
+  until the 30% applied itself (T-137, branch `night/thirty-auto`, not on
+  production). Since then "30% needs a hand" is `readNeedsHand` of
+  `src/lib/admin/thirty-data.ts`, the 30% page's own reads run with the
+  member's session: the pending and the approved requests from
+  `DISCOUNT_ELIGIBLE_FROM` made 30 minutes or more before the read, and
+  from `discount_request_events` (v116's team policy) the `write_failed`
+  events of the last 30 days and every event of those requests from the
+  same days, the tile counting the requests whose newest event is that
+  `write_failed` too; it fails ("Couldn't load") until v116 is pasted.
+  "30% off applied" is a head count of `status = 'applied'` and
+  `created_at >= DISCOUNT_ELIGIBLE_FROM`.
 - `daily_progress_snapshots`: the 14 UTC days up to today (the cohort
   columns, their legacy fallbacks and `created_at`, read as when the
   row was built). Avg progress keeps the rows from the UTC date of
@@ -1870,7 +2004,10 @@ fails is shown as "Couldn't load" on every tile it feeds, never as 0.
 - **Stable contract:** `id`, `route_name` (`sync-whop` /
   `snapshot-progress` / `check-engagement` / `check-csm-tasks` /
   `check-na-tasks` / `day28-dm` / `check-lesson-videos`, the last one
-  from the unscheduled lock check, which has never run for real),
+  from the unscheduled lock check, which has never run for real; also
+  `refresh-membership-discounts`, the coupon cron of admin rebuild 2, and
+  since T-137 `apply-thirty`, whose `rows_affected` is the number of
+  requests it applied),
   `started_at`, `finished_at`,
   `auth_status` (`ok` / `no_secret_configured` / `missing_header` /
   `mismatch`), `status` (`running` / `success` / `failed` /
@@ -2620,7 +2757,35 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
 
 ### `GET /api/admin/thirty`
 - **What it is:** the 30% page's whole list in one answer (admin
-  rebuild 2, D4 and D5, branch `night/a2-thirty`).
+  rebuild 2, D4 and D5, branch `night/a2-thirty`). Since the 30% applies
+  itself (T-137, branch `night/thirty-auto`, not on production; R4) the
+  list is the requests that need a hand, and what this section says about
+  every request from 1 October holds for those alone:
+  - **Depends on, besides the reads below:** `readNeedsHand(db, nowMs)`
+    (`src/lib/admin/thirty-data.ts`): the pending, then the approved
+    requests from `DISCOUNT_ELIGIBLE_FROM` made `NEEDS_HAND_AFTER_MS` (30
+    minutes) or more before `nowMs`, and through `discount_request_events`
+    every request whose newest event is a `write_failed` of the last
+    `WRITE_FAILED_LISTED_MS` (30 days), whatever its status or date;
+    then each listed request's newest `attempt_failed` event
+    (`FAILURE_EVENT_COLUMNS`). Any of these reads that fails fails the
+    load (the page's error), never a shorter list or "The app hasn't
+    tried yet." for a request the app tried. Without v116 the events read
+    fails, so the page does. `paused` is `thirtyAutoApplyPaused()`, read
+    when the list is read; the route reads the time once, so the
+    30-minute cut and each row's age use one moment.
+  - **Produces, besides the fields below:** `paused` (boolean) on the
+    answer, and on each row `whopPromoId`, `ageHours` (hours since the
+    request was made), `lastFailure` (`ThirtyFailure`: `reason`, `step`,
+    `at`, `message`, `membershipStatus`, `code`, `product`, `confirmed`,
+    or null; an event whose reason is not one of v116's 12 counts as
+    none) and `why` (`thirtyWords`: the row's Why line). A request is
+    `claimed` by its own row (pending, a code name, no Whop id), never by
+    an event. `buildThirtyView(data, now, resetAt, live, paused)`.
+  - **Rules its caller relies on:** the page decides through
+    `POST /api/discounts/approve` (Approve, Approve anyway, Try again) and
+    `/reject` (each below, under "The 30% that applies itself");
+    `/mark-applied` is deleted.
 - **Called by:** `ThirtyView` (`src/components/admin/thirty/ThirtyView.tsx`)
   on load, on Refresh and after each decision.
 - **Depends on:** `getCurriculumResetAt`, then `loadThirtyData`
@@ -2708,9 +2873,9 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
     is not a failure of the page: that row says there is no verdict.
 - **Writes:** nothing. `maxDuration` 60, `force-dynamic`.
 - **Rules its caller relies on:** the page decides through the existing
-  routes (`POST /api/discounts/approve`, `/reject`, `/mark-applied`),
-  which decide with their own read of the one student; this route only
-  shows. A pending row's coupon is the stored row, so "Check Whop again"
+  routes (`POST /api/discounts/approve`, `/reject`, and `/mark-applied`
+  until T-137 deleted it), which decide with their own read of the one
+  student; this route only shows. A pending row's coupon is the stored row, so "Check Whop again"
   (`POST /api/admin/thirty/check-coupon`, below) stores Whop's answer
   now and the page reads this route again to show it.
 
@@ -2848,7 +3013,12 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   (a count) and `student_progress_counts` with the page's own filters
   (`src/lib/admin/insights-data.ts`), the long reads paged on a unique
   key; a failed read is `{ ok: false }` and its card says so. Writes
-  nothing.
+  nothing. Since the 30% applies itself (T-137, branch
+  `night/thirty-auto`) also `discount_requests` (`applied_at`,
+  `created_at` of the applied requests from `DISCOUNT_ELIGIBLE_FROM`, in
+  pages; `loadThirtyApplied`, `InsightsTransport.loadThirtyApplied()`),
+  each one's moment `applied_at`, else `created_at`, for the "30% off
+  applied" card.
 - **Proven** on stand-ins: `client-tests/templates-page.test.mjs`,
   `survey-page.test.mjs`, `team-page.test.mjs`, `insights-page.test.mjs`
   (the loaders on `stub-server.ts`'s database capped at 1000 rows a read
@@ -2879,7 +3049,257 @@ branch `night/admin2`), with `src/lib/admin/today-data.ts` and
   production's own rows. The owner's read-only spot check
   (`supabase/diagnostics/admin-today-spotcheck.sql`, section 30 of
   `supabase/migration-tests/run.mjs`) compares 5 random members' numbers
-  with the 30% page.
+  with the 30% page. Since T-137 `admin-routes.test.mjs` also holds the
+  route's `paused` to `THIRTY_AUTO_APPLY`'s values (76 checks), and
+  `thirty-view.test.mjs` the one list on 257 rows across pages with each
+  of its reads failing (124).
+---
+
+## The 30% that applies itself (T-137, branch `night/thirty-auto`)
+
+Built 2026-10-26 and 27 from the approved PRD
+(`_admin/prds/thirty-automatic/thirty_automatic_prd.md` in the owner's
+workspace, revision 8, approved by the owner on 2026-10-26: "Run it and
+don't show them the discount. Just say the discount has been approved").
+Local commits only: nothing here has run on a deployment, against a real
+database, or against real Whop through this code (the PRD's probes of
+2026-10-26 are its only live reads). v116 is pasted before the code
+reaches any deployment a person uses. The tables are `discount_requests`
+(its write contract) and `discount_request_events` above.
+
+### The step (`src/lib/thirty-apply.ts`)
+- **Called by:** both request routes (actor `auto`), the approve route
+  (Approve and Try again, actor `team`) and the job (actor `job`). The
+  reject route uses its `requestShape`, `readThirtyStudent`,
+  `settleClaim` and `whereIsCode`.
+- **Interface:** `putThirtyOn(db, requestId, opts)`;
+  `thirtyApprovalChecks(db, request, { override, overrideCoupon, store,
+  teamMemberId })` (`{ ok: true, coupon }`, or `{ ok: false, status, body
+  }` with the approve route's own refusals); `settleClaim(db, row, ctx)`
+  (`{ found: promoId }`, `{ notFound: true }` or `{ failed }`, a read
+  only); `whereIsCode(promoId, student, ctx)` (`on_theirs`, `nowhere`,
+  `elsewhere` with the step `free`, `other_product` or `other_person`,
+  `unknown` with the step `where`, `where_filter` or `where_no_ids`);
+  `requestShape(row, nowMs)` (`unclaimed`, `in_progress`, `settling`,
+  `reopened`, `approved`, `code_unknown`, `decided`); `thirtyCodeName()`;
+  `thirtyAutoApplyPaused(value?)`; `CLAIM_IN_PROGRESS_MS` (5 minutes).
+- **Consumes (`opts`):** `actor` (`{ kind: "auto" }`, `{ kind: "job" }`
+  or `{ kind: "team", teamMemberId }`), `correlationId` (a uuid), the
+  coupon check's `membershipId` and `couponSource` (`live`, `stored` or
+  `none`), `deadlineMs`, `allowOldName` (Try again), `allowNewCode`
+  (default true; the job: made in the last 48 hours, `JOB_NEW_CODE_WINDOW_MS`),
+  `freshChecks` (the job: Approve's checks before a fresh code), `dry`.
+- **Produces:** `{ status, outcome, promoCode, whopPromoId, reason, step,
+  message, membershipStatus }`, plus `would` and `found` in a dry run and
+  `confirmed` for `attach_after_reject`. `outcome`: `applied`, `waiting`,
+  `unchanged`, `claimed_elsewhere`, `decided_meanwhile`, `ended_rejected`,
+  `write_error`, `not_ready` (v116 not pasted: nothing read of Whop) or
+  `planned` (dry: `would` is `mark_applied`, `claim_and_make`, `attach` or
+  `settle_claim`). `reason`: one of v116's 12, or null.
+- **Rules its callers rely on:** a code is made only by the holder of a
+  claim (a pending row with no code, claimed by a conditional write); a
+  claim under 5 minutes old is left alone; an older one is looked up by
+  name before anything new is made and released only as read; a request
+  is marked applied only when Whop names its own non-null `promo_...` id
+  on the student's own membership; every Whop call ends by `deadlineMs`
+  (none starts with under 2 s left, each waits at most the time left less
+  1 s, and 8 s); every attach sends a fresh `Idempotency-Key`; each
+  failure inserts one `attempt_failed` (never in a dry run). The app on
+  its own (`auto`, `job`) makes no fresh code without a live coupon answer
+  and leaves to the team a trial, a hand reopen whose code is on nobody's
+  membership, a code with no Whop id, the old per-student name and a
+  second 30% (`holdsAnotherThirty`). It never throws for Whop; it throws
+  for a database read or write it has no outcome for, and with no course
+  product named, so each caller catches it (the request routes log it and
+  the request waits; Approve answers 500; the job counts the request in
+  `failed`).
+
+### Whop's calls (`src/lib/membership-discount.ts`, `src/lib/whop.ts`)
+- **`createWhopPromoCode(body, { signal })`** (`POST /api/v1/promo_codes`
+  with `company_id` added, the create production has made codes with, no
+  `Api-Version-Date`): Approve's body (`code`,
+  `amount_off` 30, `promo_type` percentage, `base_currency` usd,
+  `new_users_only` false, `one_per_customer` true, `stock` 1,
+  `promo_duration_months` 1, `plan_ids` only when `WHOP_DISCOUNT_PLAN_IDS`
+  is set). A non-2xx throws `WhopCallError(status, message)`; an abort, no
+  connection or a body that does not read, `WhopCallError(null,
+  message)`. A 4xx releases the claim (`code_not_made`); null or a 5xx
+  keeps it (`whop_no_answer`, step `create`); a 2xx naming no `promo_` id
+  keeps it too (step `create_no_id`).
+- **`applyWhopPromoCode(membershipId, code, idempotencyKey, timeoutMs)`**
+  (`POST /api/v1/memberships/{id}/apply_promo_code`, `{ promo_code }` by
+  name, `Api-Version-Date: 2026-10-15-1`, scope `member:manage`): `{ ok:
+  true, promoCodeId }` on 200; `{ ok: false, http, message, outcome }`,
+  `refused` for 400, 401, 403, 404 and 422 (401 and 403 are
+  `key_not_allowed`, the rest `apply_refused`), `unknown` for 409, 429, a
+  5xx, any other status, a timeout, no connection or a body that does not
+  read (then `whereIsCode` once more); `message` is Whop's `error.message`
+  cut to 300 characters.
+- **`readMembershipForApply(membershipId, ctx)`** (pinned membership
+  read): `{ ok: true, status, promoCodeId, productId, cancelAtPeriodEnd,
+  renewalPrice }` or `{ ok: false, fail }`; `not_found`, `http_4xx` and
+  `not_a_membership` pass the candidate over, `http_401_403` is
+  `key_not_allowed`, any other failure `whop_no_answer`.
+- **`findThirtyCodeByName(name, createdAfterIso, ctx)`** (pinned
+  `GET /api/v1/promo_codes?account_id=<WHOP_COMPANY_ID>&created_after=
+  &direction=asc&first=100`, `after` paging, at most 5 pages; scope
+  `promo_code:basic:read`): `{ ok: true, id }` (the first whose name
+  matches, trimmed, the case not minded, or null) or `{ ok: false }` (a
+  page that failed or did not read, or still paging after the 5th).
+- **`findMembershipsWithCode(promoId, ctx)`** (pinned
+  `GET /api/v1/memberships?promo_code_ids=<id>&company_id=<WHOP_COMPANY_ID>&first=10`;
+  scope `member:basic:read`): `{ ok: true, memberships: [{ id, userId,
+  status, productId, productTitle, promoCodeId, renewalPrice }] }`
+  (`userId` null for a business buyer) or `{ ok: false, fail }`.
+- **`checkMembershipDiscount`:** its answer carries `membershipId` (a live
+  answer: the stored row's `mem_` id; a stored answer: the stored row's;
+  `none`: null) and its options take `store` (`false`: nothing upserted).
+
+### `POST /api/discounts/request` and `POST /api/discounts/submit-feedback`
+- **After the write, on the new course and unless `THIRTY_AUTO_APPLY`
+  pauses it:** `putThirtyOn` with actor `auto`, the request's id as the
+  correlation, the coupon check's membership and source, and the deadline
+  `min(now + 12 s, route start + 26 s)`; a throw is logged and the request
+  waits for the job. `maxDuration` 30 each.
+- **Produces:** `request`: 200 the row read again (`id, student_id,
+  status, reviewed_by, reviewed_at, rejection_reason, applied_at,
+  applied_by, created_at, gate_lesson_id`), never `promo_code`,
+  `whop_promo_id`, `promo_claimed_at` or the audit columns (a failed read
+  back answers `{ id, status }`); `submit-feedback`: 200 `{ request_id,
+  status }`. On the new course `request` writes through
+  `submit_discount_with_feedback` with `p_answers: []`, and that
+  function's refusal (a request held) answers 400 with the request's state
+  in the map's words, or `SAVE_FAILED` (500) when no counted request is
+  found. Every refusal before the write is as before.
+
+### `POST /api/discounts/approve` (Approve, Approve anyway, Try again)
+- **Auth:** `requireTeam` (founder, admin, csm); `override` or
+  `overrideCoupon` from a csm 403 before anything is read.
+- **A pending request:** `thirtyApprovalChecks` (every refusal as the
+  route gave it), an `override` event when Approve anyway, then
+  `putThirtyOn` (actor `team`, a new correlation, the deadline
+  `min(now + 20 s, route start + 26 s)`). **An approved request:** Try
+  again, every team role: `putThirtyOn` with `allowOldName`, no checks.
+  Anything else: 400 "Request already processed". `maxDuration` 30.
+- **Produces:** 200 `{ success, status, promoCode, whopPromoId, reason,
+  step, membershipStatus, message }`: `success` true when the request
+  ended applied, or approved with the code made but not on the membership
+  yet; false when it is still pending (no code made yet, with the reason;
+  `promoCode` the claimed name when Whop did not answer while making it).
+  502 `{ error: "Couldn't create the promo code on Whop. The request is
+  still pending. Details: <Whop's words>" }` when Whop refused the create.
+  409 "The app is making this code right now. Refresh in a few minutes."
+  (claimed elsewhere); 409 "The Whop code <code> was created, but this
+  request had already been decided, so the code must be deleted in Whop.";
+  409 "Whop attached <code> after the request was rejected. It can only
+  come off in Whop." ("Whop may have attached <code> ... Check their
+  membership in Whop." when Whop did not confirm it). 500 "Whop made
+  <code>, but saving it failed. The app picks it up on its next try; leave
+  it in Whop."; 500 "Something failed while putting the 30% on. Refresh
+  the list to see where the request stands." (the step threw). 503 "The
+  30% update isn't finished on the database (v116). Nothing was made."
+  400 "Request already processed" (decided before the step read it). The
+  page's notices
+  for each are in `ThirtyView.tsx` (`approveNotice`).
+
+### `POST /api/discounts/reject`
+- **Auth:** `requireTeam` (founder, admin, csm); a csm only on a pending
+  request with no code (403 "Only a founder or an admin can reject this
+  request." on any other request not yet decided). Body `{ requestId,
+  reason }`. `maxDuration` 30;
+  Whop asked at most twice inside `min(now + 15 s, route start + 26 s)`.
+- **By the row as read (`requestShape`):** pending with no code: rejected
+  where it is still pending with no code. Claimed under 5 minutes ago:
+  409 "The app is making this code right now. Try again in a few
+  minutes." Claimed 5 minutes ago or more: `settleClaim` first; not made,
+  rejected and the claim released in one write (200, `codeState` null);
+  made, `whereIsCode`: on nobody's membership, rejected with its Whop id
+  stored (200, `usable`); on the student's own, 409 "The code is already
+  on their membership, so the 30% is theirs. The app marks it applied
+  within the hour."; elsewhere, 409 with the team's words for it; Whop
+  not answering, 503 ("Couldn't ask Whop about this code. Try again." for
+  the name, "Couldn't ask Whop. Try again." for where it is). Reopened by
+  hand, or approved with the app's code id: `whereIsCode`; on nobody's,
+  rejected (200, `usable`); on the student's own, 409 "The code is already
+  on their membership, so the 30% is theirs." and, for an approved row,
+  "Press Try again to mark it applied.", for a hand reopen "The app marks
+  it applied within the hour; while the app is paused, press Approve
+  anyway."; where it cannot be told (steps `where_filter`,
+  `where_no_ids`), 409 "The app can't tell whose membership <code> is on.
+  Check it in Whop."; elsewhere, 409 with its words; no answer, 503.
+  Approved with no Whop id (code unknown): rejected (200, `may_exist`).
+  Applied or rejected: 409 "This request was already decided."
+- **Writes:** every write conditional on the row as read (`status`,
+  `promo_code`, `whop_promo_id` and for a release `promo_claimed_at`, a
+  NULL matched with `.is()`), with `audit_actor` team, the member and one
+  correlation per press; a write that changes nothing answers 409 "This
+  request changed meanwhile. Refresh the list.", a database error 500
+  "Update failed". 503 "The 30% update isn't finished on the database
+  (v116). Nothing was changed." without v116; 404 "Request not found".
+- **Produces:** 200 `{ success: true, code, codeState }`, `code` the
+  code's name or null, `codeState` `usable` (made and on nobody's
+  membership: usable at checkout until someone switches it off in Whop),
+  `may_exist` (code unknown) or null (no code made).
+
+### `GET /api/cron/apply-thirty` (the job)
+- **Schedule:** `vercel.json`, `"3,13,23,33,43,53 * * * *"`;
+  `maxDuration` 300; not pinned (`dub1`). Vercel runs crons on production
+  only.
+- **Auth:** `verifyCronAuth` (`Authorization: Bearer CRON_SECRET`), a
+  `cron_runs` row (`route_name` `apply-thirty`, `rows_affected` = applied).
+- **Consumes:** `?mode=dry` (reads only: nothing claimed, made, attached,
+  stored or recorded) or `write` (the default); any other mode 400.
+- **Reads:** `discount_requests` (`id, student_id, status, promo_code,
+  promo_claimed_at, whop_promo_id, created_at`) from
+  `DISCOUNT_ELIGIBLE_FROM`, made at least 2 minutes before the run,
+  oldest first, up to 200: pending made in the last 48 hours, pending
+  holding a `promo_code` whatever its age, approved whatever its age;
+  their `attempt_failed` events (100 request ids a read); a head count of
+  the pending requests with no code whose 48 hours ended in the 10
+  minutes before the run (`gaveUp`).
+- **Rules:** a request whose newest failure is under 9 minutes old (1 or
+  2 failures), under 55 minutes (3 or more), or `landed_elsewhere` is
+  skipped; the first 25 left are worked on, none started after 240 s,
+  each within `min(now + 20 s, run start + 270 s)`. An unclaimed request
+  runs `thirtyApprovalChecks` first (`store` in write mode; a refusal is
+  an `attempt_failed` `check_refused` with its sentence, actor `job`); a
+  settling claim passes them as `freshChecks`; others go to the step as
+  they are. A new code only for a request from the last 48 hours.
+- **Produces:** 200 `{ ok, paused, mode, examined, applied, waiting,
+  skipped, gaveUp, byReason, planned, failed }`, request ids only
+  (`planned`: `[{ requestId, status, would, reason }]` in a dry run;
+  `failed`: the requests whose step threw, which make it a 500 and a
+  failed run). Paused: 200 `{ ok: true, paused: true }`, nothing read, the
+  run a success with 0 rows. A failed run (500, `failed` in `cron_runs`,
+  Whop never asked): v116 not pasted ("v116 is not pasted"), no
+  `WHOP_API_KEY`, a read of the requests, their events or the count that
+  failed.
+
+### Proven and unproven
+- **Proven** on stand-ins (`client-tests/`, `npm run test:client`):
+  `thirty-apply.test.mjs` (123 checks: every path of the step, its words
+  for every reason and step, the names, the three lists against v116, the
+  approve route's checks held equal to the route at `a031e8a`),
+  `apply-thirty-cron.test.mjs` (32: the job through its own `GET`),
+  `admin-discounts.test.mjs` (70: every row of the approve and reject
+  tables, the override event, Try again), `membership-discount.test.mjs`
+  (829: the request routes putting the code on, Whop down after the
+  coupon check, a stored coupon answer, the switch's values) and
+  `discount-double-submit.test.mjs` (38: a second Apply after the first
+  went through, the JSON array). The stand-in database runs no trigger, so
+  the client suites prove the audit columns each write sets and the app's
+  own events; the trigger's events are `supabase/migration-tests/v116.test.mjs`'s
+  (112 checks, on PGlite). The team's pages and the map's words:
+  `world-tests/admin-pages.mjs`, `v6-discount.mjs` and
+  `v6-celebrate-applied.mjs` on the dev pages.
+- **Unproven:** the attach, the code list and the where read through this
+  code against real Whop (the PRD's probes of 2026-10-26 met them once
+  each by hand); whether production's `WHOP_API_KEY` holds `member:manage`
+  (the owner's word of 2026-10-26, V8 of the PRD; without it every attach
+  is `key_not_allowed` and every request waits on the 30% page); the
+  job's first run on production (its dry run is step 4 of the PRD's ship
+  order); the trigger on Supabase's own Postgres; the reads' time on
+  Vercel with the database in another region.
 ---
 
 ## Lesson ratings (admin rebuild 2, WI-7, branch `night/a2-feedback`)

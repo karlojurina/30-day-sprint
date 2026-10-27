@@ -23,8 +23,10 @@ import f from "./discount-form.module.css";
  * panel seems to turn into it, the cache still in view; on phones it is a
  * full sheet. Esc and Cancel close it and leave the checkpoint open under it,
  * with nothing sent; a click on the world beside it does the same. While it
- * sends, neither does. Sent, it closes, and the checkpoint's panel says
- * "In review": that is the confirmation, so there is no screen of its own.
+ * sends, neither does. Sent, it closes, and the checkpoint's panel shows the
+ * request as it stands, "The discount has been approved." once the 30% went
+ * on in the same request (T-137), else in review: that is the confirmation,
+ * so there is no screen of its own.
  * Refused, it stays on the last question with the answers kept and says why.
  *
  * WorldMap.tsx mounts it beside the map. Under a lesson page (`paused`) it is

@@ -83,8 +83,9 @@ export function RowSplit({ main, actions }: { main: React.ReactNode; actions?: R
 }
 
 /**
- * A pill that is pressed or not: the 30% page's tabs. Raised surface and
- * hairline; pressed in Airy Blue.
+ * A pill that is pressed or not: the admin pages' tabs, filters, sorts and
+ * ranges (the 30% page's tabs among them until T-137 made it one list).
+ * Raised surface and hairline; pressed in Airy Blue.
  */
 export function pressPill(pressed: boolean): React.CSSProperties {
   return {

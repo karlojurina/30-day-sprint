@@ -1,7 +1,8 @@
 /**
  * A 30% request's status as every admin page names and colours it (admin
- * rebuild 2, D4; one map since the review's fix round): the 30% page's tabs,
- * the Survey's cards and counts, a student's page and the journey's drawer.
+ * rebuild 2, D4; one map since the review's fix round): the Survey's cards
+ * and counts, a student's page and the journey's drawer, and the 30% page's
+ * tabs until the 30% applied itself (T-137) made that page one list.
  * They used to name the same request "Code applied" on one page and "Code
  * Applied" on another, and colour "Applied" amber on one and blue on another.
  *
@@ -10,8 +11,8 @@
  *   rejected  Rejected
  *   applied   Code Applied   the code is on the student's membership in Whop
  *
- * DISCOUNT_STATUS_ORDER is the 30% page's tab order, and every list of the
- * statuses follows it. No imports: client-tests/admin-review.test.mjs runs it
+ * DISCOUNT_STATUS_ORDER is the 30% page's tab order of before T-137, and
+ * every list of the statuses follows it. No imports: client-tests/admin-review.test.mjs runs it
  * as it is.
  */
 

@@ -61,8 +61,9 @@ export function RowSplit({ main, actions }) {
     return (_jsxs("div", { "data-row-split": "", className: "grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] md:items-start", style: { gap: "10px 24px" }, children: [_jsx("div", { style: { minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }, children: main }), actions ? (_jsx("div", { "data-row-actions": "", className: "flex flex-wrap items-center md:justify-end", style: { gap: 8 }, children: actions })) : null] }));
 }
 /**
- * A pill that is pressed or not: the 30% page's tabs. Raised surface and
- * hairline; pressed in Airy Blue.
+ * A pill that is pressed or not: the admin pages' tabs, filters, sorts and
+ * ranges (the 30% page's tabs among them until T-137 made it one list).
+ * Raised surface and hairline; pressed in Airy Blue.
  */
 export function pressPill(pressed) {
     return {

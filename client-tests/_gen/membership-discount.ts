@@ -56,9 +56,9 @@
  * THIS STUDENT'S OWN 30% CODE is never a coupon (isOwnThirtyCode): the Whop
  * promo id stored on their own approved or applied request; or, only beside
  * such a request, a code named, the case not minded, exactly as the approve
- * route names this student's (teamThirtyCodeFor: ECOM30- and the first 6
- * characters of their id, upper-cased), since two students' ids can share
- * their first 6 characters. Any other ECOM30 code is a coupon: a public code
+ * route named this student's until T-137 (teamThirtyCodeFor: ECOM30- and the
+ * first 6 characters of their id, upper-cased; its codes take a random name
+ * since), since two students' ids can share their first 6 characters. Any other ECOM30 code is a coupon: a public code
  * named ECOM30, one named Ecom30Friends, another student's ECOM30-ABC123 or
  * ECOM30-5A1B2C used at checkout. The 30% page still reads every ECOM30 code
  * as the team's, for its display (isThirtyCode in thirty-view.ts).
@@ -790,10 +790,12 @@ export function discountWithoutCode(
 }
 
 /**
- * The code Approve makes for a student (POST /api/discounts/approve): ECOM30-
- * and the first 6 characters of the student's id, upper-cased. The approve
- * route names its code with this, so the coupon check knows it as the
- * student's own (isOwnThirtyCode).
+ * The code Approve made for a student (POST /api/discounts/approve) until the
+ * 30% applied itself (T-137), whose codes take a random name
+ * (thirtyCodeName, src/lib/thirty-apply.ts): ECOM30- and the first 6
+ * characters of the student's id, upper-cased. The coupon check still knows
+ * a code by this name as the student's own (isOwnThirtyCode), and the step's
+ * old-name guard leaves a code by it to the team.
  */
 export function teamThirtyCodeFor(studentId: string): string {
   return `ECOM30-${studentId.slice(0, 6).toUpperCase()}`;

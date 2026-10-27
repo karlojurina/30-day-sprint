@@ -35,7 +35,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  * THE TEAM IS OUTSIDE IT. Team members sign in with email and password at
  * /admin/login, an account separate from any Whop login, and nothing on that
  * path asks this file: /admin, /api/admin/*, /api/auth/team, the crons, the
- * webhooks and the team's discount routes (approve, reject, mark-applied). The
+ * webhooks and the team's discount routes (approve and reject; mark-applied
+ * until the 30% that applies itself, T-137, deleted it). The
  * one door a team member could meet is the Whop login, if a team_members row
  * ever pointed at a Whop account; whopLoginMayProceed lets that one through.
  *

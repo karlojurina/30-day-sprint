@@ -173,7 +173,7 @@ export const STATUS_WORDS = DISCOUNT_STATUS;
 
 export const statusWords = discountStatusWords;
 
-/** How many applications are in each status, in the 30% page's tab order. */
+/** How many applications are in each status, in DISCOUNT_STATUS_ORDER (the 30% page's tab order until T-137). */
 export function statusCounts(applications: SurveyApplication[]): Array<{ label: string; count: number }> {
   return DISCOUNT_STATUS_ORDER.map((s) => ({ label: DISCOUNT_STATUS[s].label, count: applications.filter((a) => a.status === s).length })).filter(
     (c) => c.count > 0,

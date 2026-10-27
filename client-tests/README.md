@@ -1292,6 +1292,8 @@ moment's now. Each new check was run against its file as it was at
 approve routes, the builder, `StudentContext.tsx`, the code list).
 `npm run test:client`: 82 suites, 5508 checks, 0 failed.
 
+The ship review (2026-10-27): `apply-thirty-cron` (36 to 39) holds a dry run to reading and planning while `THIRTY_AUTO_APPLY` is off, its answer saying `paused: true`, with nothing claimed, made, attached, stored or recorded and no Whop write, and a write run to `{ ok: true, paused: true }` with nothing read. With the route as it was at `819685a`, 1 of them fails. `npm run test:client`: 82 suites, 5511 checks (the fixes' round's 5508 and these 3), 0 failed.
+
 `first-payment.test.mjs` (the first-paid fix, 2026-10-20) proves where
 `students.first_paid_at` comes from now: the student's first real Whop
 payment (`src/lib/first-payment.ts`), not a membership date. The rule runs on

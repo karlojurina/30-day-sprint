@@ -54,8 +54,11 @@
  *
  * Auth: CRON_SECRET as a bearer, like every cron (src/lib/cron-auth.ts), with
  * a cron_runs row whose rows_affected is the number applied. THIRTY_AUTO_APPLY
- * set to off, false, 0 or no pauses it: { ok: true, paused: true }, nothing
- * read. A failed run, nothing asked of Whop: a mode other than dry or write
+ * set to off, false, 0 or no pauses it: a write run answers { ok: true,
+ * paused: true } with nothing read. A dry run still reads and plans while it
+ * is paused (its answer says paused: true), so the team can see what the
+ * first run will do before switching it on (the ship review, 2026-10-27:
+ * deploy with it off, ?mode=dry, then on). A failed run, nothing asked of Whop: a mode other than dry or write
  * (400), v116 not pasted ("v116 is not pasted"), no WHOP_API_KEY on the
  * deployment, a read of the requests or their events that failed (500).
  */
@@ -124,7 +127,9 @@ export async function GET(request: NextRequest) {
   const mode = asked === "dry" ? "dry" : "write";
   const dry = mode === "dry";
 
-  if (thirtyAutoApplyPaused()) {
+  // Paused: a write run stops here; a dry run, which writes nothing, still plans.
+  const paused = thirtyAutoApplyPaused();
+  if (paused && !dry) {
     await logCronFinish(runId, "success", { rowsAffected: 0 });
     return NextResponse.json({ ok: true, paused: true });
   }
@@ -133,7 +138,7 @@ export async function GET(request: NextRequest) {
   const failedRun = async (error: string) => {
     await logCronFinish(runId, "failed", { error });
     console.error(`[${ROUTE_NAME}] ${error}`);
-    return NextResponse.json({ ok: false, paused: false, mode, error }, { status: 500 });
+    return NextResponse.json({ ok: false, paused, mode, error }, { status: 500 });
   };
 
   const db = createServiceClient();
@@ -300,7 +305,7 @@ export async function GET(request: NextRequest) {
     console.error(`[${ROUTE_NAME}] ${error}`);
   }
   return NextResponse.json(
-    { ok, paused: false, mode, examined: candidates.length, applied, waiting, skipped, stopped, gaveUp, byReason, planned, failed },
+    { ok, paused, mode, examined: candidates.length, applied, waiting, skipped, stopped, gaveUp, byReason, planned, failed },
     { status: ok ? 200 : 500 },
   );
 }

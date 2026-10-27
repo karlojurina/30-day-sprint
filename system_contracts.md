@@ -3323,8 +3323,10 @@ reaches any deployment a person uses. The tables are `discount_requests`
   requests the job no longer tries), request ids only
   (`planned`: `[{ requestId, status, would, reason }]` in a dry run;
   `failed`: the requests whose step threw, which make it a 500 and a
-  failed run). Paused: 200 `{ ok: true, paused: true }`, nothing read, the
-  run a success with 0 rows. A failed run (500, `failed` in `cron_runs`,
+  failed run). Paused: a write run answers 200 `{ ok: true, paused: true }`,
+  nothing read, the run a success with 0 rows; a dry run still reads and
+  plans, its answer saying `paused: true` (the ship review, 2026-10-27, so
+  the team can see what the first run will do before switching it on). A failed run (500, `failed` in `cron_runs`,
   Whop never asked): v116 not pasted ("v116 is not pasted"), no
   `WHOP_API_KEY`, a read of the requests, their events or the count that
   failed.
@@ -3334,7 +3336,7 @@ reaches any deployment a person uses. The tables are `discount_requests`
   `thirty-apply.test.mjs` (130 checks: every path of the step, its words
   for every reason and step and the stopped line, the names, the three
   lists against v116, the approve route's checks held equal to the route
-  at `a031e8a`), `apply-thirty-cron.test.mjs` (36: the job through its
+  at `a031e8a`), `apply-thirty-cron.test.mjs` (39: the job through its
   own `GET`, the review's 200 requests that cannot finish beside a new
   one among them), `admin-discounts.test.mjs` (75: every row of the
   approve and reject tables, the override event, Try again, the same-name

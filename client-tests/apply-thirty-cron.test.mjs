@@ -556,6 +556,28 @@ console.log('\n=== The doors: the switch, the mode, the secret, v116, the key ==
   }
 }
 {
+  // The ship review (2026-10-27): deploy with the switch off, read what the first run would do, then switch it on.
+  const db = seed({ students: 1, requests: [req('fresh', 1)] })
+  const before = show(db.rows('discount_requests'))
+  const codes = promoCodes.length
+  process.env.THIRTY_AUTO_APPLY = 'off'
+  const r = await run('?mode=dry')
+  delete process.env.THIRTY_AUTO_APPLY
+  ok(r.status === 200 && r.body.ok === true && r.body.paused === true && r.body.mode === 'dry' && r.body.applied === 0 && r.body.examined === 1
+       && r.body.planned.length === 1 && r.body.planned[0].requestId === 'fresh' && r.body.planned[0].would === 'claim_and_make',
+     'THIRTY_AUTO_APPLY=off and ?mode=dry: it still reads and plans, its answer saying paused true and what the first run would do', show(r.body))
+  ok(show(db.rows('discount_requests')) === before && db.calls('discount_requests', 'update').length === 0 && db.rows('discount_request_events').length === 0
+       && db.rows('student_membership_discounts').length === 0 && posts().length === 0 && promoCodes.length === codes
+       && lastRun(db).status === 'success' && lastRun(db).rows_affected === 0,
+     'paused and dry: nothing claimed, made, attached, stored or recorded; no Whop write; its run row success, 0 rows', show({ posts: posts().length, events: db.rows('discount_request_events').length }))
+  const db2 = seed({ students: 1, requests: [req('fresh', 1)] })
+  process.env.THIRTY_AUTO_APPLY = 'off'
+  const w = await run('?mode=write')
+  delete process.env.THIRTY_AUTO_APPLY
+  ok(w.status === 200 && show(w.body) === show({ ok: true, paused: true }) && whop.log.length === 0 && row(db2, 'fresh').status === 'pending',
+     'paused and ?mode=write: still { ok: true, paused: true }, nothing read, Whop not asked', show(w.body))
+}
+{
   const db = seed({ students: 1, requests: [req('fresh', 1)] })
   const r = await run('?mode=everything')
   ok(r.status === 400 && r.body.ok === false && r.body.error === 'mode must be "dry" or "write" (left out, it is "write"). Nothing ran.' && whop.log.length === 0

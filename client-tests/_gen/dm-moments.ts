@@ -63,6 +63,15 @@ export const STOPPED_DAYS_EARLY = 3;
 /** Days without a lesson that make a break on course days after EARLY_LAST_DAY, to MONTH_ONE_LAST_DAY. */
 export const STOPPED_DAYS_LATE = 5;
 export const EARLY_LAST_DAY = 14;
+/**
+ * How many days past the break's first day the stopped-watching DM can still
+ * go: only a NEW break gets it (the owner, 2026-10-30: "Only new ones from 3
+ * days ago"). A student quiet longer than that gets nothing, so the first run
+ * after go-live sends nothing to the backlog, and "the last few days" stays
+ * true. A day of slack covers a missed cron run and the hold before the 30%
+ * closing (closingAhead).
+ */
+export const STOPPED_NEW_DAYS = 1;
 /** The stopped-watching DM goes on course days 1 to 30 only, month 1. */
 export const MONTH_ONE_LAST_DAY = 30;
 /** The 30% closing DM goes this close to the end of the student's 2 weeks, or closer. */
@@ -157,7 +166,7 @@ export function stoppedWatchingBreak(m: MomentStudent, nowMs: number): number | 
   // Counted from course day 1 at the earliest (above).
   const quietDays = Math.min(Math.floor((nowMs - last) / DAY_MS), m.daysSinceCourseStart);
   const breakDays = m.dayOnCourse <= EARLY_LAST_DAY ? STOPPED_DAYS_EARLY : STOPPED_DAYS_LATE;
-  return quietDays >= breakDays ? quietDays : null;
+  return quietDays >= breakDays && quietDays <= breakDays + STOPPED_NEW_DAYS ? quietDays : null;
 }
 
 /**

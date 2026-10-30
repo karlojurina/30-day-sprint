@@ -338,6 +338,21 @@ await rule('the same not in reach (30-minute videos: 39 x 30 minutes over 8.5 da
   return { pass: show(tasksOf(a)) === show(['lapse.plain:open']) && t?.behavior_summary.endsWith('(out of reach at about 2 hours a day).'),
     detail: show({ tasks: tasksOf(a), summary: t?.behavior_summary }) }
 })
+await rule('only a NEW break (the owner, 2026-10-30: "Only new ones from 3 days ago"): quiet 3 or 4 days in the first 2 weeks, 5 or 6 after; longer: nothing, so go-live sends nothing to the backlog', async (R) => {
+  const ids = { q3: sid('n3'), q4: sid('n4'), q5e: sid('n5'), q10e: sid('na'), q5l: sid('l5'), q6l: sid('l6'), q7l: sid('l7'), q20l: sid('lt') }
+  db = world({ students: [student(ids.q3, 9), student(ids.q4, 9), student(ids.q5e, 9), student(ids.q10e, 12), student(ids.q5l, 20), student(ids.q6l, 20), student(ids.q7l, 20), student(ids.q20l, 25)],
+    completions: [...watched(ids.q3, 10, NOW - 3 * D - H), ...watched(ids.q4, 10, NOW - 4 * D - H), ...watched(ids.q5e, 10, NOW - 5 * D - H), ...watched(ids.q10e, 10, NOW - 10 * D - H),
+      ...watched(ids.q5l, 10, NOW - 5 * D - H), ...watched(ids.q6l, 10, NOW - 6 * D - H), ...watched(ids.q7l, 10, NOW - 7 * D - H), ...watched(ids.q20l, 10, NOW - 20 * D - H)] })
+  await run(R)
+  const got = Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, tasksOf(id).length]))
+  return { pass: got.q3 === 1 && got.q4 === 1 && got.q5e === 0 && got.q10e === 0 && got.q5l === 1 && got.q6l === 1 && got.q7l === 0 && got.q20l === 0, detail: show(got) }
+})
+await rule('a long-quiet student who watches again and then stops for 3 days: a new break, so the DM goes', async (R) => {
+  const a = sid('nb')
+  db = world({ students: [student(a, 13)], completions: [...watched(a, 6, NOW - 10 * D), ...watched(a, 1, NOW - 3 * D - H, 6)] })
+  await run(R)
+  return { pass: tasksOf(a).length === 1 && tasksOf(a)[0].startsWith('lapse.'), detail: show(tasksOf(a)) }
+})
 await rule('2 days without a lesson, never signed in, or canceling: nothing', async (R) => {
   const two = sid('l2'), never = sid('ln'), cancel = sid('lx')
   db = world({
@@ -566,13 +581,13 @@ await rule('one counted video with no length (the gate): day 6 with 10 videos st
       && taskOf(b, 'thirty.closing')?.behavior_summary.endsWith('the 4 shortest left take about 40 minutes.'),
     detail: show({ a: tasksOf(a), b: tasksOf(b), summary: taskOf(b, 'thirty.closing')?.behavior_summary }) }
 })
-await rule('lessons only skipped (5, skipped 6 days ago, day 9): lapse.30; a lesson skipped yesterday after 4 days without a video: no break; BEFORE the first never got a DM', async (R) => {
+await rule('lessons only skipped (5, skipped 4 days ago, day 9): lapse.30; a lesson skipped yesterday after 4 days without a video: no break; BEFORE the first never got a DM', async (R) => {
   const a = sid('rb'), b = sid('rc')
   const skipped = (student_id, ids, ms) => ids.map((lesson_id) => ({ student_id, lesson_id, completed_at: null, action_completed_at: null, skipped_at: iso(ms) }))
   db = world({ students: [student(a, 9), student(b, 9)],
-    completions: [...skipped(a, COUNTED.slice(0, 5), NOW - 6 * D), ...watched(b, 10, NOW - 4 * D), ...skipped(b, ['v11'], NOW - D)] })
+    completions: [...skipped(a, COUNTED.slice(0, 5), NOW - 4 * D), ...watched(b, 10, NOW - 4 * D), ...skipped(b, ['v11'], NOW - D)] })
   await run(R)
-  return { pass: show(tasksOf(a)) === show(['lapse.30:open']) && taskOf(a, 'lapse.30')?.behavior_summary.startsWith('Day 9 · no lesson finished in 6 days · 0 of 49 videos')
+  return { pass: show(tasksOf(a)) === show(['lapse.30:open']) && taskOf(a, 'lapse.30')?.behavior_summary.startsWith('Day 9 · no lesson finished in 4 days · 0 of 49 videos')
       && tasksOf(b).length === 0,
     detail: show({ a: tasksOf(a), summary: taskOf(a, 'lapse.30')?.behavior_summary, b: tasksOf(b) }) }
 })

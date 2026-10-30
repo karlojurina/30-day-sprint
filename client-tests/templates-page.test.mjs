@@ -245,13 +245,15 @@ const W_PROGRAM = 'The program link is not on sprint.ecomuniversity.com. 9 messa
   ok(show(DATA.settingsWarnings(spaces, ALL(), LIVE).map((w) => w.text)) === show([W_DISCORD]), 'a Discord link of spaces is empty too')
 
   // A template that is off where its switch works sends nothing; one whose tasks are made whatever the switch says still sends.
+  // Since 2026-10-30 (T-106) the switch works for nolessons.* too.
   const someOff = ALL().map((t) => (t.scenario_id === 'stalled.whop.day3' ? { ...t, is_active: false } : t))
   ok(show(DATA.settingsWarnings(LIVE_SETTINGS, someOff, LIVE).map((w) => w.text))
        === show(['3 messages send an empty Discord link.', 'The program link is not on sprint.ecomuniversity.com. 8 messages send it.']),
      'stalled.whop.day3 turned off (its switch works): 3 and 8 messages', show(DATA.settingsWarnings(LIVE_SETTINGS, someOff, LIVE)))
   const nolessons = ALL().map((t) => (t.scenario_id === 'nolessons.day3' ? { ...t, is_active: false, body: 'Hey {firstName}: {programLink}' } : t))
-  ok(DATA.messagesUsing(nolessons, LIVE, 'programLink').length === 10,
-     'nolessons.day3 with {programLink}, off: still counted, as the task check makes its tasks on or off (template-on-off.ts)')
+  ok(DATA.messagesUsing(nolessons, LIVE, 'programLink').length === 9
+       && DATA.messagesUsing(nolessons.map((t) => (t.scenario_id === 'nolessons.day3' ? { ...t, is_active: true } : t)), LIVE, 'programLink').length === 10,
+     'nolessons.day3 with {programLink}: counted while on, not while off, as off now stops its tasks (template-on-off.ts, T-106)')
   ok(show(DATA.settingsWarnings({ ...fixed, discord_invite_link: '' }, ALL().filter((t) => !t.body.includes('{discordInvite}')), LIVE).map((w) => w.text))
        === show(['The Discord link is empty. No message uses it now.']),
      'with no message using it, the empty Discord link is still named, and says no message uses it')
@@ -472,8 +474,9 @@ console.log('\n=== The row: Off where the switch works, and what it says when op
   const nolessons = builtIns().find((t) => t.scenario_id === 'nolessons.day3')
   const closed = render(TemplateRow, rowProps({ ...nolessons, is_active: false }))
   const opened = words(render(TemplateRow, rowProps({ ...nolessons, is_active: false }, true)))
-  ok(!closed.includes('>Off</span>') && opened.includes(ONOFF.TASK_CHECK_LINE) && !opened.includes('Turn on'),
-     'nolessons.day3 off: no Off badge (the task check makes its tasks either way), and opened, the line saying so and no switch')
+  ok(closed.includes('pill-tone-warning">Off</span>') && opened.includes('This template is off.') && opened.includes('Turn on')
+       && !opened.includes('whether it is on or off'),
+     'nolessons.day3 off: an Off badge (off stops its tasks since T-106), and opened, "This template is off." and Turn on')
   const stats = { created: 40, open: 4, sent: 32, dismissed: 4, replied: 6, no_reply: 20, success: 9, success_eligible: 22, success_label: 'x', graded_on_old_course: 8 }
   const line = words(render(TemplateRow, { ...rowProps(builtIns()[1]), stat: stats }))
   ok(line.includes('Cancel path · 32 sent · 41% success · 8 graded on the old course · 6 replied'),

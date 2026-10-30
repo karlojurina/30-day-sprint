@@ -12,6 +12,12 @@
 //   shipped" is true for every student, so the next run makes its task for
 //   each of them.
 //
+// Since 2026-10-30 (T-106, the DM queue fix, dm-queue.test.mjs) the crons read
+// the switch for the built-in rules too: check-csm-tasks' steps 1 and 2a make
+// no task for a template that is off (nolessons.day14 was turned off that day
+// and kept coming). So every template but csm-events.ts's three shows the
+// switch, and this test holds the page to the crons as they are now.
+//
 // No browser runs here (the repo has no DOM harness), so the fix is checked
 // on the real source in the ways that need none:
 //   - the module that decides, src/lib/template-on-off.ts, copied with its
@@ -68,7 +74,6 @@ const iso = (ms) => new Date(ms).toISOString()
 
 const MODULE = 'src/lib/template-on-off.ts'
 write(fromSrc(MODULE), MODULE, './_gen/template-on-off.ts', [
-  ['from "@/lib/csm-triggers"', 'from "./csm-triggers.ts"'],
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   // Only a TYPE, which --experimental-strip-types erases; the file does not exist.
   ['from "@/types/database"', 'from "./types-erased.ts"'],
@@ -95,8 +100,9 @@ const plainJs = (text) => ts.transpileModule(text, { compilerOptions: { target: 
 
 // check-csm-tasks: its alert labels, then everything from the region totals
 // to the end of step 2 (the template choice, the snapshots, step 1's alerts,
-// step 2a's built-in rules and step 2b's conditions), verbatim. What the route
-// read from the database before that point is handed in.
+// step 2a's built-in rules and step 2b's conditions), verbatim, up to step 2c
+// (a message already had, which dm-queue.test.mjs runs through the route).
+// What the route read from the database before that point is handed in.
 const CSM_ROUTE = 'src/app/api/cron/check-csm-tasks/route.ts'
 const csmRoute = fromSrc(CSM_ROUTE)
 const CRON_INPUTS = ['students', 'lessons', 'templates', 'existingTasks', 'milestonesRes', 'completionsByStudent',
@@ -104,18 +110,18 @@ const CRON_INPUTS = ['students', 'lessons', 'templates', 'existingTasks', 'miles
   'evaluateCustomTrigger']
 const cronSteps1And2 = new Function(...CRON_INPUTS, `${plainJs([
   between(csmRoute, 'const ALERT_LABEL', '\ninterface AlertRow', CSM_ROUTE),
-  between(csmRoute, '  const regionTotals: Record<string, number> = {};', '  // ─── 3. Per-student priority cap', CSM_ROUTE),
+  between(csmRoute, '  const regionTotals: Record<string, number> = {};', '  // ─── 2c. A message the student already had', CSM_ROUTE),
 ].join('\n'))}\nreturn toInsert;`)
 
 // check-na-tasks: its tiers, then its template read, verbatim, run on the
 // stand-in database. It hands back the scenario -> template id map the route
-// makes its tasks from.
+// makes its tasks from, and the scenarios it found switched off.
 const NA_ROUTE = 'src/app/api/cron/check-na-tasks/route.ts'
 const naRoute = fromSrc(NA_ROUTE)
-const naTemplateRead = new Function('supabase', `return (async () => {${plainJs([
+const naTemplateRead = new Function('supabase', 'WHOP_WATCHER', `return (async () => {${plainJs([
   between(naRoute, 'const TIER_DAYS = ', '\ntype Tier', NA_ROUTE),
-  between(naRoute, '  const allNaIds = ', '  const created: Array<{', NA_ROUTE),
-].join('\n'))}\nreturn templateIdByScenario;})()`)
+  between(naRoute, '  const allNaIds = ', "  // The pool's tasks of every message this cron sends", NA_ROUTE),
+].join('\n'))}\nreturn { templateIdByScenario, offScenarios };})()`)
 
 // ── The two courses ─────────────────────────────────────────────────────────
 
@@ -256,11 +262,14 @@ for (const courseName of ['old', 'new']) {
 {
   // The cron's own words, for the record: what it does while the template is off.
   const o = madeWhileOff.old, n = madeWhileOff.new
-  ok(o.get('nolessons.day3').off > 0 && n.get('nolessons.day3').off > 0 && n.get('nolessons.day3 (with conditions)').off > 0,
-     'nolessons.day3 turned off: the cron still makes its tasks, on both courses, with or without conditions (step 2a\'s built-in rule, step 1\'s alerts)',
-     show({ old: o.get('nolessons.day3').off, new: n.get('nolessons.day3').off }))
-  ok(o.get('noship.r1.day7').off > 0 && o.get('noship.r1.day7 (with conditions)').off > 0 && o.get('pace.day14').off > 0,
-     'on the old course noship.r1.day7 and pace.day14 turned off still get tasks: with conditions, off sends it back to its built-in rule',
+  ok(o.get('nolessons.day3').off === 0 && n.get('nolessons.day3').off === 0 && n.get('nolessons.day3 (with conditions)').off === 0
+       && o.get('nolessons.day3').on > 0 && n.get('nolessons.day3').on > 0 && n.get('nolessons.day3 (with conditions)').on > 0
+       && n.get('nolessons.day14').off === 0 && n.get('nolessons.day14').on > 0,
+     'nolessons.day3 and nolessons.day14 turned off: the cron makes none of their tasks, on both courses, with or without conditions (T-106; it made them whether on or off until 2026-10-30), and turned on it does',
+     show({ old: [o.get('nolessons.day3').on, o.get('nolessons.day3').off], new: [n.get('nolessons.day3').on, n.get('nolessons.day3').off] }))
+  ok(o.get('noship.r1.day7').off === 0 && o.get('noship.r1.day7 (with conditions)').off === 0 && o.get('pace.day14').off === 0
+       && o.get('noship.r1.day7').on > 0 && o.get('pace.day14').on > 0,
+     'on the old course noship.r1.day7 and pace.day14 turned off make nothing either, with or without conditions (off no longer sends a built-in back to its rule)',
      show({ noship: o.get('noship.r1.day7 (with conditions)').off, pace: o.get('pace.day14').off }))
   ok(n.get('noship.r1.day7').off === 0 && n.get('noship.r1.day7 (with conditions)').off === 0
        && n.get('noship.r1.day7 (with conditions)').on > 0 && n.get('pace.day7 (with conditions)').on > 0,
@@ -271,17 +280,20 @@ for (const courseName of ['old', 'new']) {
      'a custom template, welcome.day1 and stalled.whop.day3 with conditions: made while on, nothing while off (step 2b reads the switch)')
 }
 {
-  // check-na-tasks reads only templates that are on.
+  // check-na-tasks makes tasks only from templates that are on.
   const db = new FakeDb({ templates: [
     { id: 'tpl-sd3', scenario_id: 'stalled.discord.day3', is_active: true },
     { id: 'tpl-sw3', scenario_id: 'stalled.whop.day3', is_active: false },
     { id: 'tpl-sw5', scenario_id: 'stalled.whop.day5', is_active: true },
+    { id: 'tpl-ww', scenario_id: 'whop.watcher', is_active: false },
   ] })
-  const map = await naTemplateRead(fakeClient(db))
-  ok(show([...map.entries()].sort()) === show([['stalled.discord.day3', 'tpl-sd3'], ['stalled.whop.day5', 'tpl-sw5']]),
-     'check-na-tasks\' own template read (lifted from the route, on the stand-in database) leaves out stalled.whop.day3, which is off', show([...map.entries()]))
-  ok(/const templateId = templateIdByScenario\.get\(scenarioId\);\s*if \(!templateId\) \{\s*errors\.push\([^;]*\);\s*continue;\s*\}/.test(naRoute),
-     'and the route makes no task for a scenario missing from that map')
+  const { templateIdByScenario: map, offScenarios } = await naTemplateRead(fakeClient(db), 'whop.watcher')
+  ok(show([...map.entries()].sort()) === show([['stalled.discord.day3', 'tpl-sd3'], ['stalled.whop.day5', 'tpl-sw5']])
+       && show([...offScenarios].sort()) === show(['stalled.whop.day3', 'whop.watcher']),
+     'check-na-tasks\' own template read (lifted from the route, on the stand-in database) leaves out stalled.whop.day3 and whop.watcher, which are off, and knows them as off', show([...map.entries()]))
+  ok(/const templateId = templateIdByScenario\.get\(scenarioId\);\s*if \(!templateId\) \{\s*(\/\/[^\n]*\s*)?if \(offScenarios\.has\(scenarioId\)\) continue;\s*errors\.push\([^;]*\);\s*continue;\s*\}/.test(naRoute)
+       && /watcherTemplateId !== null &&\s*watcherNoteDue\.has\(s\.id\)/.test(naRoute),
+     'and the route makes no task for a scenario missing from that map: one that is off is skipped quietly, one with no template is an error; whop.watcher needs its template on too')
 }
 {
   // csm-events.ts finds its three templates by scenario alone: off, they still make tasks.
@@ -321,7 +333,7 @@ for (const courseName of ['old', 'new']) {
     if (view.kind === 'switch') shown++
     // admin-3's page: "Off" and Turn on / Turn off on every template.
     if (!switchWorks) wrongBefore.push(key)
-    if (view.kind === 'none' && view.line !== (m.t.scenario_id.startsWith('W') || m.t.scenario_id === 'X.1' ? ONOFF.STUDENT_ACTION_LINE : ONOFF.TASK_CHECK_LINE)) {
+    if (view.kind === 'none' && view.line !== ONOFF.STUDENT_ACTION_LINE) {
       wrongNow.push(`${key}: says ${view.line}`)
     }
   }
@@ -333,17 +345,22 @@ for (const courseName of ['old', 'new']) {
      wrongBefore.join(', '))
 }
 {
-  const n = (id) => ONOFF.onOffView({ scenario_id: id, is_active: false, trigger_config: null }, LIVE.new, false)
-  ok(n('nolessons.day3').kind === 'none' && n('nolessons.day3').line === 'The task check that runs every 2 hours makes this template\'s tasks whether it is on or off, so it has no on/off switch here.',
-     'Karlo\'s case: nolessons.day3 has no switch, and its line says the task check makes its tasks whether it is on or off', n('nolessons.day3').line)
+  const n = (id, live = LIVE.new) => ONOFF.onOffView({ scenario_id: id, is_active: false, trigger_config: null }, live, false)
+  ok(['nolessons.day3', 'nolessons.day7', 'nolessons.day14'].every((id) => n(id).kind === 'switch' && n(id).line === 'This template is off.' && n(id).turnOnWaits === null),
+     'the team\'s case (nolessons.day14, turned off on 2026-10-30, kept making tasks): nolessons.* show the switch, "This template is off." and Turn on', show(n('nolessons.day14')))
+  ok(['nolessons.day3', 'noship.r1.day7', 'pace.day7'].every((id) => n(id, LIVE.old).kind === 'switch')
+       && ['W2.2', 'W2.6', 'X.1'].every((id) => n(id).kind === 'none' && n(id).line === ONOFF.STUDENT_ACTION_LINE),
+     'on the old course the built-ins show it too; W2.2, W2.6 and X.1 (csm-events.ts, left as they were) keep their one line')
   const u = (id) => ONOFF.onOffView({ scenario_id: id, is_active: false, trigger_config: null }, LIVE.unread, false)
-  ok(u('pace.day7').kind === 'none' && u('pace.day7').line === `This template's on/off switch is hidden because the course could not be read (${UNREAD}).`
-       && u('nolessons.day3').kind === 'none' && u('C-a1b2c3').kind === 'switch' && u('stalled.whop.day3').kind === 'switch',
-     'the course unread: pace.* and noship.* (whose switch depends on it) show no switch and say why; the others are as before', u('pace.day7').line)
+  ok(['pace.day7', 'nolessons.day3', 'C-a1b2c3', 'stalled.whop.day3'].every((id) => u(id).kind === 'switch'),
+     'the course unread: every template but those three still shows its switch (whether it works no longer depends on the course)', show(u('pace.day7')))
 }
 
-console.log('\n=== Finding 1: the list of rules that stop on the new course matches the code ===')
+console.log('\n=== The built-in rules that stop on the new course ===')
 {
+  // Since 2026-10-30 the page no longer needs this list (every built-in's
+  // switch works), so it is the test's own record of the cutover (C5).
+  const OLD_COURSE_ONLY_RULES = new Set(['noship.r1.day7', 'noship.r2.day14', 'pace.day7', 'pace.day14', 'pace.day21'])
   // Every built-in rule and every alert, on a grid of students: tenure days 1
   // to 45, switches 1 to 30 days ago (new course), six ways through the course.
   const fired = { old: new Set(), new: new Set() }
@@ -373,12 +390,12 @@ console.log('\n=== Finding 1: the list of rules that stop on the new course matc
     }
   }
   const rules = Object.keys(CSM.triggers)
-  const oldOnly = [...ONOFF.OLD_COURSE_ONLY_RULES]
+  const oldOnly = [...OLD_COURSE_ONLY_RULES]
   ok(rules.every((id) => fired.old.has(id)) && oldOnly.every((id) => rules.includes(id)),
      'on the old course every built-in rule fires for some student, and every rule on the list is one of them', show([...fired.old].sort()))
   ok(oldOnly.every((id) => !fired.new.has(id)),
      'on the new course no rule on the list fires, and no alert maps to one', show([...fired.new].sort()))
-  ok(rules.filter((id) => !ONOFF.OLD_COURSE_ONLY_RULES.has(id)).every((id) => fired.new.has(id)),
+  ok(rules.filter((id) => !OLD_COURSE_ONLY_RULES.has(id)).every((id) => fired.new.has(id)),
      'and every rule left off the list (nolessons.*) does fire on the new course, so the list is exactly the rules that stop')
 }
 
@@ -386,11 +403,14 @@ console.log('\n=== Finding 1: the row, rendered ===')
 {
   const off = { kind: 'switch', on: false, line: 'This template is off.', turnOnWaits: null }
   const on = { kind: 'switch', on: true, line: 'This template is on.', turnOnWaits: null }
-  const none = ONOFF.onOffView({ scenario_id: 'nolessons.day3', is_active: false, trigger_config: null }, LIVE.new, false)
+  const none = ONOFF.onOffView({ scenario_id: 'W2.2', is_active: false, trigger_config: null }, LIVE.new, false)
   const render = (view, extra = {}) => renderToString(TemplateOnOff({ view, canEdit: true, busy: false, onToggle: () => {}, ...extra }))
   const noSwitch = render(none)
-  ok(noSwitch.includes(ONOFF.TASK_CHECK_LINE.replace(/'/g, '&#x27;')) && !noSwitch.includes('<button') && !noSwitch.includes('This template is off'),
-     'nolessons.day3 renders its one line, with no button and no "off"', noSwitch)
+  ok(noSwitch.includes(ONOFF.STUDENT_ACTION_LINE.replace(/'/g, '&#x27;')) && !noSwitch.includes('<button') && !noSwitch.includes('This template is off'),
+     'W2.2 renders its one line, with no button and no "off"', noSwitch)
+  const nolessons = render(ONOFF.onOffView({ scenario_id: 'nolessons.day14', is_active: false, trigger_config: null }, LIVE.new, false))
+  ok(nolessons.includes('This template is off.') && /<button type="button"[^>]*>Turn on<\/button>/.test(nolessons),
+     'nolessons.day14 off renders "This template is off." and Turn on', nolessons)
   const offHtml = render(off)
   ok(offHtml.includes('This template is off.') && /<button type="button"[^>]*>Turn on<\/button>/.test(offHtml) && !/<button[^>]*disabled/.test(offHtml),
      'a template whose switch works, off: "This template is off." and Turn on, pressable', offHtml)

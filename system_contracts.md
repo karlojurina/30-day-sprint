@@ -750,7 +750,10 @@ When adding a new table, append it here. When deleting a field, scan
   v57: `welcome.day1`, `stalled.discord.day{3|5|7|10}`,
   `stalled.whop.day{3|5|7|10}`, `nolessons.day{3|7|14}`,
   `noship.r1.day7`, `noship.r2.day14`, `pace.day{7|14|21}`,
-  `month2.entry`. Legacy W-series + X.1 deleted in v57.
+  `month2.entry`. Legacy W-series + X.1 deleted in v57. Since
+  2026-10-30 also `whop.watcher` (built-in, no `trigger_config`, bucket
+  `on_track`), added by hand with the team's message texts (no
+  migration), which `check-na-tasks` queues since the DM queue fix.
 - **At the course switch (v104):** every active template whose
   `trigger_config -> 'all'` has an element naming `lesson_id` or
   `region`, or the metric `progress_ratio`, `progress_label` or
@@ -760,7 +763,12 @@ When adding a new table, append it here. When deleting a field, scan
   template off does not stop a built-in: the built-ins fire whenever a
   template row exists for their scenario (`check-csm-tasks`), which is
   why the clock built-ins are stopped in code (`courseIsNew`) and not
-  here. After the switch the trigger editor offers areas from
+  here. Since the DM queue fix (2026-10-30, T-106, branch `fix/dm-queue`,
+  not on production) turning one off does stop it: `check-csm-tasks`'
+  steps 1 and 2a find the template among those that are on, and
+  `check-na-tasks` skips a day whose template is off without an error.
+  `csm-events.ts` (W2.2, W2.6, X.1) still finds its templates by
+  scenario alone. After the switch the trigger editor offers areas from
   `regions` and no clock metric.
 - **From the admin (admin rebuild 2, WI-8, branch `night/a2-templates`):**
   a built-in row (`is_custom = false`) is never deleted:
@@ -891,7 +899,10 @@ When adding a new table, append it here. When deleting a field, scan
   `actionShippedLessonIds`), `src/lib/csm-triggers.ts`
   (`region_completion_pct`, `lesson_shipped`, `lesson_watched`,
   `progress_ratio`), `src/lib/streak.ts`, discount eligibility,
-  CSM cron snapshot builder. Added by v92 and v93:
+  CSM cron snapshot builder, and since the DM queue fix (2026-10-30)
+  `check-na-tasks` (`student_id` of the rows with `completed_at` or
+  `skipped_at` set, of students who never signed in, 100 ids at a time in
+  pages: one such row makes the student a Whop watcher). Added by v92 and v93:
   `POST /api/student/lesson-watched` (stamps `completed_at` through
   `stampWatchCompletion` in `src/lib/complete-lesson.ts`), and the SQL
   function `lesson_is_complete`, through which the views
@@ -1119,7 +1130,11 @@ When adding a new table, append it here. When deleting a field, scan
   `status = 'applied'` from `DISCOUNT_ELIGIBLE_FROM`); Insights'
   `loadThirtyApplied` (`applied_at`, `created_at` of the applied requests
   from `DISCOUNT_ELIGIBLE_FROM`); the student page (`whop_promo_id` beside
-  `promo_code`, for its Copy button)
+  `promo_code`, for its Copy button); since the DM queue fix (2026-10-30,
+  branch `fix/dm-queue`): `check-na-tasks` (`student_id` of the pending,
+  approved and applied requests of the Whop watchers its one note may go
+  to, which holds the note back) and `check-csm-tasks` (the same of the
+  students holding an open `whop.watcher`, whose note 3c then dismisses)
 - **Stable contract:** `student_id`, `status`
   (pending/approved/rejected/applied), `promo_code`, `created_at`; since
   v116 (T-137, not pasted) also `promo_claimed_at` (timestamptz: set with
@@ -1664,7 +1679,12 @@ When adding a new table, append it here. When deleting a field, scan
   discounted`, and since 2026-10-26 `promo_code_id` and `renewal_price`
   for `rowShowsUnpaid`; answers `membershipDiscounted` and since then
   `membershipUnpaid`, never the code or the prices, and a failed read is
-  `false` for both, never a 500), the request and
+  `false` for both, never a 500), `check-na-tasks` (since the DM queue
+  fix, 2026-10-30, branch `fix/dm-queue`: `student_id, whop_membership_id,
+  discounted, promo_code_id, renewal_price` of the Whop watchers its one
+  note may go to, read as `/api/student/data` reads them, by
+  `storedRowApplies` and `rowShowsUnpaid`; a row that closes the 30% holds
+  the note back, no row does not, and a failed read stops the run), the request and
   approve routes (their fallback when Whop does not answer: `whop_membership_id,
   promo_code_id, promo_code, renewal_price, discounted, checked_at, source,
   source_checked_at`, `renewal_price` since 2026-10-26, read again without
@@ -1800,8 +1820,11 @@ When adding a new table, append it here. When deleting a field, scan
   admin rebuild 2's render review, second round: this list left it out
   and then said nothing else reads `tasks`); the
   Dashboard's Open tasks tile (`src/app/admin/(authenticated)/page.tsx`,
-  a count); the crons `check-csm-tasks` (reads and writes it) and
-  `check-na-tasks` (writes it); `src/lib/csm-events.ts` (the event tasks: it writes them, and reads
+  a count); the crons `check-csm-tasks` (reads and writes it; since the
+  DM queue fix of 2026-10-30 its read also returns the tasks a team member
+  dismissed) and `check-na-tasks` (writes it, and since that fix reads its
+  pool's tasks of the messages it sends, in any status: `id, student_id,
+  scenario_id, status, dismissed_by`); `src/lib/csm-events.ts` (the event tasks: it writes them, and reads
   and closes a student's open ones when an event comes);
   `src/lib/csm-task-evaluation.ts` (`reEvaluateStudentOpenTasks`, which
   dismisses a student's open tasks whose rule no longer holds). Nothing
@@ -1837,6 +1860,18 @@ When adding a new table, append it here. When deleting a field, scan
   `notes`, `outcome` (v85 — replied/no_reply/NULL, written only by
   `POST /api/admin/tasks/[id]/outcome`, read by
   `GET /api/admin/templates/stats` for per-template reply rates)
+- **No message twice (the DM queue fix, 2026-10-30, branch
+  `fix/dm-queue`, not on production):** both crons make no task for a
+  message the student already had (`src/lib/dm-queue.ts`): a task of the
+  same message that is open, `completed` (sent), or `dismissed` with
+  `dismissed_by` set. The day-3 texts of `stalled.discord`,
+  `stalled.whop` and `nolessons` are one message, and so are the day-7
+  ones. So `dismissed_by` is read as who dismissed: set, a team member
+  decided it and it blocks; null, the app (a cron's auto-dismiss, a
+  supersession, a Whop watcher's stalled task) or a bulk reset (v109)
+  did, and the rule holds again. A writer that dismisses for the team
+  must set it, and a bulk dismissal meant to let the queue refill must
+  leave it null. `whop.watcher` goes to a student once, in any status.
 - **CSM cron filters (v75.15+; `first_paid_at` since v75.18):**
   `check-csm-tasks`, `check-engagement`, `check-na-tasks` all gate on
   `first_paid_at >= csmSprintWindowCutoffIso()` (= `now() - 30d`) AND
@@ -1864,7 +1899,10 @@ When adding a new table, append it here. When deleting a field, scan
   nothing. Sent and dismissed tasks are not touched; the crons are not
   changed, so the queue refills where a rule still holds (check-na-tasks
   reads no tasks; check-csm-tasks dedupes on open or sent only), with
-  new `created_at`s. The undo (`supabase/undo/2026_v109_undo.sql`)
+  new `created_at`s. Since the DM queue fix (2026-10-30) both crons skip
+  a message already had, and the reset's dismissals (`dismissed_by`
+  null) do not count, so the refill still holds; a message sent before
+  the reset is not sent again. The undo (`supabase/undo/2026_v109_undo.sql`)
   reopens a reset task only while it is exactly as the reset left it and
   no open task of the same student and scenario exists.
 - **The reset's line (`tasks_reset_at`), as its readers draw it:**

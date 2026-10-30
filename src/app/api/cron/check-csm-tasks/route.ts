@@ -23,10 +23,15 @@
  *      W2.2, W2.6, X.1 fire inline from the lesson-completion / discount /
  *      reactivation hooks — NOT in this cron.
  *
- * Dedupe: insert relies on the partial unique index
+ * On/off: steps 1 and 2a make a task only for a template that is on
+ * (2026-10-30, T-106); step 2b already read only templates that are on.
+ *
+ * Dedupe: a student never gets a task for a message they already had (open,
+ * sent, or dismissed by a team member), the rule of src/lib/dm-queue.ts that
+ * check-na-tasks obeys too, applied to every candidate (alert, 2a, 2b) in
+ * step 2c. The partial unique index
  *   idx_tasks_unique_open ON tasks(student_id, scenario_id) WHERE status = 'open'
- * so re-running the cron is a no-op for open tasks. Errors with code
- * 23505 are swallowed.
+ * still refuses a second open task; errors with code 23505 are swallowed.
  *
  * Notify: posts a single summary embed to the team Discord webhook at the end.
  */
@@ -57,6 +62,14 @@ import {
 } from "@/lib/constants";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
+import { discountWindowOpen } from "@/lib/world/discount";
+import {
+  HAD_TASKS_FILTER,
+  THIRTY_APPLIED_STATUSES,
+  WHOP_WATCHER,
+  messagesHad,
+  type QueueTask,
+} from "@/lib/dm-queue";
 import type { Student, TriggerConfig } from "@/types/database";
 
 // v75.32: raised from Vercel's 60s default. The per-student
@@ -171,15 +184,14 @@ export async function GET(request: NextRequest) {
     // Truncated tasks lose supersession/dedup context; truncated
     // milestones make students past row 1000 look like they never
     // logged in. fetchAllRowsPaginated pages past the cap.
-    fetchAllRowsPaginated<{
-      student_id: string;
-      scenario_id: string;
-      status: string;
-    }>(() =>
+    // 2026-10-30: also the tasks a team member dismissed (dismissed_by
+    // set), for the rule of step 2c; the snapshots still get only the open
+    // and sent ones (existingTasks below).
+    fetchAllRowsPaginated<QueueTask>(() =>
       supabase
         .from("tasks")
-        .select("student_id, scenario_id, status")
-        .in("status", ["open", "completed"])
+        .select("student_id, scenario_id, status, dismissed_by")
+        .or(HAD_TASKS_FILTER)
         // Stable order is REQUIRED for .range() pagination — without
         // ORDER BY, Postgres gives no row-order guarantee and rows can
         // be skipped/duplicated across page boundaries under
@@ -253,7 +265,13 @@ export async function GET(request: NextRequest) {
 
   const students = (studentsRes.data ?? []) as Student[];
   const lessons = lessonsRes.data ?? [];
-  const existingTasks = tasksRes.data ?? [];
+  // Every task that means a message was had (src/lib/dm-queue.ts), and of
+  // them the open and sent ones, which is all the snapshots' recentTaskScenarios
+  // held before: the triggers' own checks read exactly what they read.
+  const hadTasks = tasksRes.data ?? [];
+  const existingTasks = hadTasks.filter(
+    (t) => t.status === "open" || t.status === "completed",
+  );
   const templates = templatesRes.data ?? [];
   const alerts = (alertsRes.data ?? []) as AlertRow[];
 
@@ -338,8 +356,14 @@ export async function GET(request: NextRequest) {
     is_active: boolean;
     trigger_config: TriggerConfig | null;
   };
+  // Scenario -> template, for templates that are on: steps 1 and 2a make no
+  // task for a template switched off on /admin/templates (T-106; they found
+  // it by scenario, on or off, so nolessons.day14 kept coming after it was
+  // turned off on 2026-10-30). Step 2b reads only templates that are on too.
   const templateBy = new Map<string, string>(
-    (templates as TemplateRow[]).map((t) => [t.scenario_id, t.id]),
+    (templates as TemplateRow[])
+      .filter((t) => t.is_active)
+      .map((t) => [t.scenario_id, t.id]),
   );
   /** Templates the cron evaluates via trigger_config. Includes
    *  custom templates (always) and built-in templates that have
@@ -367,8 +391,9 @@ export async function GET(request: NextRequest) {
       .map((t) => t.scenario_id),
   );
 
-  // Allow scenarios to fire even if a recently-COMPLETED task exists, but
-  // dedupe against OPEN tasks (handled by the partial unique index). The
+  // A message already had (open, sent, or dismissed by a team member) is
+  // dropped for every path in step 2c; a second open task of a scenario is
+  // also refused by the partial unique index. The
   // "recentTaskScenarios" set passed into snapshots lets a trigger be more
   // conservative when it doesn't want to spam celebrations (it ignores
   // both open and completed). Build that set per-student inline.
@@ -518,6 +543,22 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  // ─── 2c. A message the student already had ───────────────
+  //
+  // No task for a message the student already had: a task of the same
+  // message open, sent, or dismissed by a team member (src/lib/dm-queue.ts).
+  // Every candidate passes here: from the alerts (step 1, which read no
+  // tasks), the built-in rules (2a) and the templates' conditions (2b). It
+  // runs before the cap and the supersession below, so a candidate dropped
+  // here never dismisses another task on its way out. A candidate kept is
+  // recorded, so a second one of the same message in this run is dropped too.
+  const had = messagesHad(hadTasks);
+  const candidates = toInsert.filter((c) => {
+    if (had.has(c.student_id, c.scenario_id)) return false;
+    had.add(c.student_id, c.scenario_id);
+    return true;
+  });
+
   // ─── 3. Per-student priority cap ──────────────────────────
   //
   // One open negative task per student. cancel_path beats at_risk;
@@ -590,6 +631,34 @@ export async function GET(request: NextRequest) {
     ((pastDueCancelingRows ?? []) as Array<{ id: string }>).map((r) => r.id),
   );
 
+  // The students holding an open whop.watcher task (check-na-tasks queues
+  // it) who applied for the 30%: 3c dismisses that task once they applied or
+  // their window closed. Read here, before section 3 writes anything; a failed
+  // read stops the run. 100 ids at a time, as check-na-tasks reads them.
+  const watcherIds = [
+    ...new Set(
+      ((openTasksWithBucket ?? []) as unknown as OpenTaskRow[])
+        .filter((t) => t.scenario_id === WHOP_WATCHER)
+        .map((t) => t.student_id),
+    ),
+  ];
+  const appliedForThirty = new Set<string>();
+  for (let i = 0; i < watcherIds.length; i += 100) {
+    const { data: appliedRows, error: appliedErr } = await supabase
+      .from("discount_requests")
+      .select("student_id")
+      .in("student_id", watcherIds.slice(i, i + 100))
+      .in("status", [...THIRTY_APPLIED_STATUSES]);
+    if (appliedErr) {
+      const message = `Discount requests fetch failed: ${appliedErr.message}`;
+      await logCronFinish(runId, "failed", { error: message });
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+    for (const r of (appliedRows ?? []) as Array<{ student_id: string }>) {
+      appliedForThirty.add(r.student_id);
+    }
+  }
+
   type OpenSlot = { id: string; bucket: string };
   const negativeSlot = new Map<string, OpenSlot>();
   for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
@@ -608,7 +677,7 @@ export async function GET(request: NextRequest) {
 
   // Sort candidates so highest priority is processed first per student.
   // Within the same priority, keep insertion order.
-  toInsert.sort((a, b) => {
+  candidates.sort((a, b) => {
     const pa = priorityFor(bucketByScenario.get(a.scenario_id) ?? "");
     const pb = priorityFor(bucketByScenario.get(b.scenario_id) ?? "");
     return pa - pb;
@@ -617,7 +686,7 @@ export async function GET(request: NextRequest) {
   const finalToInsert: typeof toInsert = [];
   const toDismiss: string[] = [];
 
-  for (const c of toInsert) {
+  for (const c of candidates) {
     const bucket = bucketByScenario.get(c.scenario_id) ?? "";
     if (bucket !== "cancel_path" && bucket !== "at_risk") {
       // Celebrations / events / admin always pass.
@@ -731,12 +800,15 @@ export async function GET(request: NextRequest) {
   //   * Tasks for students no longer in the eligible pool (out of
   //     cohort, past day 30, on free plan, etc.)
   //
-  // Three evaluation paths, in order:
+  // Four evaluation paths, in order:
   //   1. Built-in trigger function in `triggers` map → re-run with
   //      a clean recentTaskScenarios set (so the dedup gate inside
   //      the trigger doesn't false-skip itself)
   //   2. Custom trigger_config on template → evaluateCustomTrigger
-  //   3. Day-tolerance fallback for *.dayN scenarios (catches
+  //   3. whop.watcher (2026-10-30): its note is about the 30%, so it is
+  //      dismissed once the student's 30% window has closed or they
+  //      applied (appliedForThirty, read above)
+  //   4. Day-tolerance fallback for *.dayN scenarios (catches
   //      stalled.*.dayN which is alert-based, not in triggers map):
   //      if current day > scenario_day + STALE_DAYS, dismiss.
 
@@ -832,7 +904,23 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Path 3: day-tolerance fallback for *.dayN scenarios.
+    // Path 3: whop.watcher, while the 30% is still open to the student.
+    if (stillMatches === null && t.scenario_id === WHOP_WATCHER) {
+      if (!discountWindowOpen(student.first_paid_at ?? null, Date.now())) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: whop.watcher, the student's 30% window has closed.",
+        );
+      } else if (appliedForThirty.has(student.id)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: whop.watcher, the student applied for the 30%.",
+        );
+      }
+      continue;
+    }
+
+    // Path 4: day-tolerance fallback for *.dayN scenarios.
     if (stillMatches === null) {
       const m = t.scenario_id.match(/\.day(\d+)$/);
       if (m) {
@@ -932,6 +1020,8 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     checked: students.length,
     candidates: toInsert.length,
+    // 2026-10-30: candidates dropped in step 2c, a message already had.
+    already_had: toInsert.length - candidates.length,
     tasks_created: createdCount,
     // v75.25: surface auto-dismiss counts so a manual cron run shows
     // whether section 3 (bucket-cap), 3b (family-supersede), and

@@ -8,7 +8,8 @@
 //   https://db.test/rest/v1/...  a stand-in PostgREST over rows in plain
 //     arrays, answering the requests these crons send the way PostgREST
 //     answers them: a select with filters (eq, neq, gt, gte, lt, lte, in,
-//     is, and not. before any of them), order, limit and offset (.range()),
+//     is, and not. before any of them, and or=(...) of those, as .or()
+//     sends it), order, limit and offset (.range()),
 //     and one embedded to-one table (template:templates(bucket) reads
 //     tasks.template_id); insert and update, with the rows back under
 //     Prefer: return=representation; the object Accept header of .single()
@@ -122,6 +123,16 @@ function filterFor(col: string, raw: string): (r: Row) => boolean {
   return op === "is" ? (r) => !test(r[col]) : (r) => r[col] !== null && r[col] !== undefined && !test(r[col]);
 }
 
+/** or=(a.op.x,b.op.y): a row matching any of the filters, each written column.filter as above. */
+function orFilterFor(raw: string): (r: Row) => boolean {
+  const parts = splitTop(raw.replace(/^\(/, "").replace(/\)$/, ""));
+  const tests = parts.map((part) => {
+    const dot = part.indexOf(".");
+    return filterFor(part.slice(0, dot), part.slice(dot + 1));
+  });
+  return (r) => tests.some((t) => t(r));
+}
+
 export class StandInDb {
   tables: Record<string, Row[]> = {};
   log: Logged[] = [];
@@ -198,7 +209,7 @@ export class StandInDb {
     if (forced) return answer(forced.status, forced.body);
 
     const preds: Array<(r: Row) => boolean> = [];
-    for (const [k, v] of url.searchParams) if (!RESERVED.has(k)) preds.push(filterFor(k, v));
+    for (const [k, v] of url.searchParams) if (!RESERVED.has(k)) preds.push(k === "or" ? orFilterFor(v) : filterFor(k, v));
     const matching = () => this.rows(table).filter((r) => preds.every((p) => p(r)));
     const wantsObject = (headers.get("accept") ?? "").includes("application/vnd.pgrst.object+json");
     const representation = (headers.get("prefer") ?? "").includes("return=representation");

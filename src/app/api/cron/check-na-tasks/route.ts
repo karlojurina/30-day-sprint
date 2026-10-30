@@ -31,9 +31,29 @@
  * Cohort is re-evaluated every pass - if a Cohort B student joins
  * Discord between triggers, the next tier fires stalled.discord.x.
  *
- * Dedupe relies on the partial unique index
+ * A tier whose template is switched off on /admin/templates (days 5 and 10
+ * as of 2026-10-30) is skipped quietly; only a scenario with no template at
+ * all is an entry in the run's errors.
+ *
+ * Whop watchers (the owner, 29 Oct 2026: "if they never signed in but they
+ * watched some lessons in whop we can send them only 1 message to remind
+ * them that there's 30% off in the sprint. That's it."). A student here who
+ * has finished any lesson, counted as the nolessons.* rules count one, gets
+ * no stalled.* task, and their open stalled.* tasks are dismissed. Instead
+ * they get ONE whop.watcher task, from day 3, while their 30% window is open
+ * (discountWindowOpen), when they have not applied (a pending, approved or
+ * applied discount request), when the stored coupon answer does not close
+ * the 30% to them (as the map reads it: a discount already on their renewal,
+ * or no paid plan and payment; no stored answer queues it), while the
+ * template is on, and only if they never had a whop.watcher task in any
+ * status. check-csm-tasks 3c dismisses an open one once the window closes
+ * or they apply.
+ *
+ * Dedupe: a student never gets a task for a message they already had (open,
+ * sent, or dismissed by a team member), the rule of src/lib/dm-queue.ts that
+ * check-csm-tasks obeys too. The partial unique index
  *   idx_tasks_unique_open ON tasks(student_id, scenario_id) WHERE status='open'
- * so re-running the cron is a no-op.
+ * still refuses a second open task (23505, skipped).
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -42,6 +62,20 @@ import { postTeamAlert } from "@/lib/discord";
 import { isDmEnabled } from "@/lib/dm-toggles";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
 import { csmSprintWindowCutoffIso, sprintDayNumber } from "@/lib/constants";
+import { fetchAllRowsPaginated } from "@/lib/supabase-pagination";
+import { discountWindowOpen } from "@/lib/world/discount";
+import {
+  MEMBERSHIP_DISCOUNTS_TABLE,
+  rowShowsUnpaid,
+  storedRowApplies,
+} from "@/lib/membership-discount";
+import {
+  THIRTY_APPLIED_STATUSES,
+  WHOP_WATCHER,
+  messagesHad,
+  sameMessage,
+  type QueueTask,
+} from "@/lib/dm-queue";
 import {
   verifyCronAuth,
   cronUnauthorizedResponse,
@@ -67,6 +101,7 @@ interface NotActivatedRow {
   joined_at: string | null;
   high_churn_risk: boolean;
   cancel_scheduled_at: string | null;
+  whop_membership_id: string | null;
 }
 
 const TIER_DAYS = [3, 5, 7, 10] as const;
@@ -112,7 +147,7 @@ export async function GET(request: NextRequest) {
   const { data: studentsRaw, error: studentsErr } = await supabase
     .from("students")
     .select(
-      "id, name, email, discord_username, created_at, first_paid_at, joined_at, high_churn_risk, cancel_scheduled_at",
+      "id, name, email, discord_username, created_at, first_paid_at, joined_at, high_churn_risk, cancel_scheduled_at, whop_membership_id",
     )
     .eq("membership_status", "active")
     .eq("high_churn_risk", false)
@@ -163,33 +198,198 @@ export async function GET(request: NextRequest) {
     (s) => !activatedIds.has(s.id as string),
   ) as NotActivatedRow[];
 
-  // Resolve template ids for all 8 NA scenarios in one query.
+  // Resolve template ids for all 8 NA scenarios and whop.watcher in one
+  // query, on or off: a tier that is off is skipped quietly, and only a
+  // scenario with no template is an error. A failed read stops the run: read
+  // as "no templates", every tier would look missing and nothing would be
+  // made.
   // v57 - new scenario id slugs (was NA-A.1 / NA-B.1 etc.)
   const allNaIds = TIER_DAYS.flatMap((t) => [
     `stalled.discord.day${t}`,
     `stalled.whop.day${t}`,
   ]);
-  const { data: templates } = await supabase
+  const { data: templates, error: templatesErr } = await supabase
     .from("templates")
-    .select("id, scenario_id")
-    .in("scenario_id", allNaIds)
-    .eq("is_active", true);
+    .select("id, scenario_id, is_active")
+    .in("scenario_id", [...allNaIds, WHOP_WATCHER]);
+  if (templatesErr) {
+    console.error("[check-na-tasks] templates query failed:", templatesErr);
+    await logCronFinish(runId, "failed", { error: templatesErr.message });
+    return NextResponse.json({ error: templatesErr.message }, { status: 500 });
+  }
 
   const templateIdByScenario = new Map<string, string>();
+  const offScenarios = new Set<string>();
   for (const t of (templates ?? []) as Array<{
     id: string;
     scenario_id: string;
+    is_active: boolean;
   }>) {
-    templateIdByScenario.set(t.scenario_id, t.id);
+    if (t.is_active) templateIdByScenario.set(t.scenario_id, t.id);
+    else offScenarios.add(t.scenario_id);
   }
 
+  // The pool's tasks of every message this cron sends, in any status, and
+  // their finished lessons, 100 ids at a time as the milestones, each in
+  // pages past PostgREST's 1000-row cap. A failed read stops the run before
+  // anything is written: read as "no tasks", a message already sent would go
+  // again; read as "no lessons", a student watching on Whop would get the
+  // stalled DM again.
+  //
+  // A finished lesson counts as the nolessons.* rules count one
+  // (buildStudentSnapshot's watchedComplete, read by their "0 lessons"):
+  // completed_at or skipped_at set. The snapshot also looks the lesson and
+  // its area up in the live course; the database's foreign keys (v104:
+  // completions to lessons, lessons to regions) make every row's lesson and
+  // area part of it, so those lookups always find them. Each row is one
+  // lesson (unique student_id, lesson_id).
+  const queueScenarios = [
+    ...new Set([...allNaIds, WHOP_WATCHER].flatMap(sameMessage)),
+  ];
+  type PoolTask = QueueTask & { id: string };
+  const tasksByStudent = new Map<string, PoolTask[]>();
+  const lessonsWatched = new Map<string, number>();
+  const poolIds = pool.map((s) => s.id);
+  for (let i = 0; i < poolIds.length; i += ID_BATCH) {
+    const ids = poolIds.slice(i, i + ID_BATCH);
+    const [tasksRes, completionsRes] = await Promise.all([
+      fetchAllRowsPaginated<PoolTask>(() =>
+        supabase
+          .from("tasks")
+          .select("id, student_id, scenario_id, status, dismissed_by")
+          .in("student_id", ids)
+          .in("scenario_id", queueScenarios)
+          .order("id"),
+      ),
+      fetchAllRowsPaginated<{ student_id: string }>(() =>
+        supabase
+          .from("student_lesson_completions")
+          .select("student_id")
+          .in("student_id", ids)
+          .or("completed_at.not.is.null,skipped_at.not.is.null")
+          .order("student_id")
+          .order("lesson_id"),
+      ),
+    ]);
+    const readErr = tasksRes.error ?? completionsRes.error;
+    if (readErr) {
+      console.error("[check-na-tasks] tasks or completions query failed:", readErr);
+      await logCronFinish(runId, "failed", { error: readErr.message });
+      return NextResponse.json({ error: readErr.message }, { status: 500 });
+    }
+    for (const t of tasksRes.data) {
+      const arr = tasksByStudent.get(t.student_id) ?? [];
+      arr.push(t);
+      tasksByStudent.set(t.student_id, arr);
+    }
+    for (const c of completionsRes.data) {
+      lessonsWatched.set(c.student_id, (lessonsWatched.get(c.student_id) ?? 0) + 1);
+    }
+  }
+  const had = messagesHad([...tasksByStudent.values()].flat());
+
+  const dayOf = (s: NotActivatedRow) =>
+    sprintDayNumber(s.first_paid_at ?? s.joined_at ?? s.created_at);
+  const nowMs = Date.now();
+
+  // The Whop watchers whose one note may be due, then whether they applied
+  // for the 30% or their stored coupon answer closes it, read for them alone
+  // (100 ids at a time). The coupon answer is read as the map reads it
+  // (/api/student/data): a row counts only for the membership on file
+  // (storedRowApplies), and it closes the 30% when it holds a discount on
+  // the next renewal or is the unpaid answer (rowShowsUnpaid). No row, or one
+  // that does not apply, closes nothing. A failed read stops the run.
+  const watcherTemplateId = templateIdByScenario.get(WHOP_WATCHER) ?? null;
+  const watcherMayGet = pool.filter(
+    (s) =>
+      watcherTemplateId !== null &&
+      !s.cancel_scheduled_at &&
+      (lessonsWatched.get(s.id) ?? 0) > 0 &&
+      dayOf(s) >= 3 &&
+      discountWindowOpen(s.first_paid_at, nowMs) &&
+      !(tasksByStudent.get(s.id) ?? []).some((t) => t.scenario_id === WHOP_WATCHER),
+  );
+  const thirtyClosed = new Set<string>();
+  for (let i = 0; i < watcherMayGet.length; i += ID_BATCH) {
+    const batch = watcherMayGet.slice(i, i + ID_BATCH);
+    const ids = batch.map((s) => s.id);
+    const [requestsRes, couponsRes] = await Promise.all([
+      supabase
+        .from("discount_requests")
+        .select("student_id")
+        .in("student_id", ids)
+        .in("status", [...THIRTY_APPLIED_STATUSES]),
+      supabase
+        .from(MEMBERSHIP_DISCOUNTS_TABLE)
+        .select("student_id, whop_membership_id, discounted, promo_code_id, renewal_price")
+        .in("student_id", ids),
+    ]);
+    const readErr = requestsRes.error ?? couponsRes.error;
+    if (readErr) {
+      console.error("[check-na-tasks] 30% read failed:", readErr);
+      await logCronFinish(runId, "failed", { error: readErr.message });
+      return NextResponse.json({ error: readErr.message }, { status: 500 });
+    }
+    for (const r of (requestsRes.data ?? []) as Array<{ student_id: string }>) {
+      thirtyClosed.add(r.student_id);
+    }
+    const membershipOf = new Map(batch.map((s) => [s.id, s.whop_membership_id]));
+    for (const row of (couponsRes.data ?? []) as Array<{
+      student_id: string;
+      whop_membership_id: string | null;
+      discounted: boolean;
+      promo_code_id: string | null;
+      renewal_price: number | string | null;
+    }>) {
+      if (
+        storedRowApplies(row, membershipOf.get(row.student_id)) &&
+        (row.discounted === true || rowShowsUnpaid(row))
+      ) {
+        thirtyClosed.add(row.student_id);
+      }
+    }
+  }
+  const watcherNoteDue = new Set(
+    watcherMayGet.filter((s) => !thirtyClosed.has(s.id)).map((s) => s.id),
+  );
+
+  /** Inserts one open task: true when made, false when an open one already exists (23505), else the error's message. */
+  const insertTask = async (row: {
+    student_id: string;
+    scenario_id: string;
+    template_id: string;
+    behavior_summary: string;
+  }): Promise<boolean | string> => {
+    const { error: insertErr } = await supabase.from("tasks").insert({
+      ...row,
+      status: "open",
+    });
+    if (!insertErr) {
+      had.add(row.student_id, row.scenario_id);
+      return true;
+    }
+    // 23505 = unique violation on the partial open-task index -
+    // means we already have an open task of this scenario for this
+    // student. Safe to skip.
+    if (
+      insertErr.code === "23505" ||
+      insertErr.message?.includes("duplicate key")
+    ) {
+      return false;
+    }
+    return insertErr.message;
+  };
+
+  // Every task made, both kinds: a whop.watcher note has no tier or cohort.
   const created: Array<{
     student_id: string;
     scenario_id: string;
-    tier: Tier;
-    cohort: "A" | "B";
+    tier: Tier | null;
+    cohort: "A" | "B" | null;
   }> = [];
   const errors: string[] = [];
+  let watcherNotes = 0;
+  let stalledDismissed = 0;
 
   for (const s of pool) {
     // v85.1 — canceling students get the save-the-sale flow, not an
@@ -202,9 +402,49 @@ export async function GET(request: NextRequest) {
     // stale-dismissal check. Anchoring creation on created_at while
     // dismissal ran on first_paid_at made stalled tasks for backfilled
     // students appear and auto-dismiss within one cron window.
-    const rawDays = sprintDayNumber(
-      s.first_paid_at ?? s.joined_at ?? s.created_at,
-    );
+    const rawDays = dayOf(s);
+
+    // A Whop watcher: no stalled DM, their open ones dismissed, and the one
+    // note when it is due (above).
+    const watched = lessonsWatched.get(s.id) ?? 0;
+    if (watched > 0) {
+      for (const t of tasksByStudent.get(s.id) ?? []) {
+        if (t.status !== "open" || !allNaIds.includes(t.scenario_id)) continue;
+        const { error: dismissErr } = await supabase
+          .from("tasks")
+          .update({
+            status: "dismissed",
+            dismissed_at: new Date().toISOString(),
+            dismissed_by: null,
+            notes:
+              "Auto-dismissed: the student has watched lessons on Whop, so no stalled message goes to them.",
+          })
+          .eq("id", t.id)
+          .eq("status", "open");
+        if (dismissErr) errors.push(`${s.id}/${t.scenario_id}: ${dismissErr.message}`);
+        else stalledDismissed++;
+      }
+      if (
+        watcherTemplateId !== null &&
+        watcherNoteDue.has(s.id) &&
+        !had.has(s.id, WHOP_WATCHER)
+      ) {
+        const made = await insertTask({
+          student_id: s.id,
+          scenario_id: WHOP_WATCHER,
+          template_id: watcherTemplateId,
+          behavior_summary: `Day ${rawDays}. Never signed in to the app, ${watched} ${watched === 1 ? "lesson" : "lessons"} watched on Whop.`,
+        });
+        if (made === true) {
+          watcherNotes++;
+          created.push({ student_id: s.id, scenario_id: WHOP_WATCHER, tier: null, cohort: null });
+        } else if (made !== false) {
+          errors.push(`${s.id}/${WHOP_WATCHER}: ${made}`);
+        }
+      }
+      continue;
+    }
+
     // Terminal-tier catch-up: a student whose first_paid_at fills LATE
     // (sync recovery / backfill) can enter the pool past day 10 and
     // would otherwise skip every tier — never getting the day-10 touch
@@ -224,11 +464,13 @@ export async function GET(request: NextRequest) {
     const templateId = templateIdByScenario.get(scenarioId);
 
     if (!templateId) {
-      errors.push(
-        `${s.id}: template ${scenarioId} not found in active templates`,
-      );
+      // Switched off on /admin/templates: a quiet skip.
+      if (offScenarios.has(scenarioId)) continue;
+      errors.push(`${s.id}: template ${scenarioId} not found`);
       continue;
     }
+    // A message this student already had (src/lib/dm-queue.ts).
+    if (had.has(s.id, scenarioId)) continue;
 
     // The channel is derivable from scenario_id (NA-A.* = Discord,
     // NA-B.* = Whop) so we don't add a tasks column for it. Encode
@@ -236,25 +478,15 @@ export async function GET(request: NextRequest) {
     // task views without a schema change.
     const summary = `Day ${tier} - Cohort ${cohort} (${suggestedChannel(cohort)}). No dashboard login since signup.`;
 
-    const { error: insertErr } = await supabase.from("tasks").insert({
+    const made = await insertTask({
       student_id: s.id,
       scenario_id: scenarioId,
       template_id: templateId,
       behavior_summary: summary,
-      status: "open",
     });
-
-    if (insertErr) {
-      // 23505 = unique violation on the partial open-task index -
-      // means we already have an open NA task for this student.
-      // Safe to skip.
-      if (
-        insertErr.code === "23505" ||
-        insertErr.message?.includes("duplicate key")
-      ) {
-        continue;
-      }
-      errors.push(`${s.id}/${scenarioId}: ${insertErr.message}`);
+    if (made === false) continue;
+    if (made !== true) {
+      errors.push(`${s.id}/${scenarioId}: ${made}`);
       continue;
     }
 
@@ -285,10 +517,15 @@ export async function GET(request: NextRequest) {
   // Discord summary (best-effort).
   if (created.length > 0) {
     const byTier = new Map<Tier, number>();
-    for (const c of created) byTier.set(c.tier, (byTier.get(c.tier) ?? 0) + 1);
-    const summary = TIER_DAYS.map((t) =>
-      byTier.has(t) ? `Day ${t}: ${byTier.get(t)}` : null,
-    )
+    for (const c of created) {
+      if (c.tier !== null) byTier.set(c.tier, (byTier.get(c.tier) ?? 0) + 1);
+    }
+    const summary = [
+      ...TIER_DAYS.map((t) =>
+        byTier.has(t) ? `Day ${t}: ${byTier.get(t)}` : null,
+      ),
+      watcherNotes > 0 ? `Watching on Whop: ${watcherNotes}` : null,
+    ]
       .filter(Boolean)
       .join(" · ");
     // v75.32: gate on the same Discord pause toggle every other cron
@@ -316,6 +553,8 @@ export async function GET(request: NextRequest) {
     ok: true,
     pool_size: pool.length,
     created: created.length,
+    whop_watcher: watcherNotes,
+    stalled_dismissed: stalledDismissed,
     errors: errors.length > 0 ? errors : undefined,
     duration_ms: Date.now() - started,
   });

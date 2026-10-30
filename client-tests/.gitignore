@@ -14,3 +14,6 @@ _gen/light-d0ebe76.ts
 _gen/light-eab2330.ts
 # The approve route as it was before T-137's work item 3 (thirty-apply.test.mjs takes it from git on every run):
 _gen/discount-approve-route.a031e8a.ts
+# The two task crons as they stood at production before the DM queue fix (dm-queue.test.mjs takes them from git on every run):
+_gen/check-na-tasks-route.6c07e7a.ts
+_gen/check-csm-tasks-route.6c07e7a.ts

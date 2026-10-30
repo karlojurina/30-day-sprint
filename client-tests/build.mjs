@@ -655,7 +655,6 @@ gen('../src/app/api/admin/lesson-feedback/route.ts', './_gen/admin-lesson-feedba
 // suites also run alone. The type-only imports point at a file that does not
 // exist, as csm-triggers.ts's do.
 gen('../src/lib/template-on-off.ts', './_gen/template-on-off.ts', [
-  ['from "@/lib/csm-triggers"', 'from "./csm-triggers.ts"'],
   ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ['from "@/types/database"', 'from "./types-erased.ts"'],
 ])

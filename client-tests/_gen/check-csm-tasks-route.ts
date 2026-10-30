@@ -25,6 +25,14 @@ import {
 } from "./constants.ts";
 import { getCurriculumResetAt } from "./curriculum-reset.ts";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "./metrics-definitions.ts";
+import { discountWindowOpen } from "./discount.ts";
+import {
+  HAD_TASKS_FILTER,
+  THIRTY_APPLIED_STATUSES,
+  WHOP_WATCHER,
+  messagesHad,
+  type QueueTask,
+} from "./dm-queue.ts";
 import type { Student, TriggerConfig } from "./types-erased.ts";
 
 export const maxDuration = 300;
@@ -94,15 +102,11 @@ export async function GET(request: NextRequest) {
     supabase
       .from("lessons")
       .select("id, region_id, requires_action, counts_toward_progress"),
-    fetchAllRowsPaginated<{
-      student_id: string;
-      scenario_id: string;
-      status: string;
-    }>(() =>
+    fetchAllRowsPaginated<QueueTask>(() =>
       supabase
         .from("tasks")
-        .select("student_id, scenario_id, status")
-        .in("status", ["open", "completed"])
+        .select("student_id, scenario_id, status, dismissed_by")
+        .or(HAD_TASKS_FILTER)
         .order("id"),
     ),
     supabase
@@ -156,7 +160,10 @@ export async function GET(request: NextRequest) {
 
   const students = (studentsRes.data ?? []) as Student[];
   const lessons = lessonsRes.data ?? [];
-  const existingTasks = tasksRes.data ?? [];
+  const hadTasks = tasksRes.data ?? [];
+  const existingTasks = hadTasks.filter(
+    (t) => t.status === "open" || t.status === "completed",
+  );
   const templates = templatesRes.data ?? [];
   const alerts = (alertsRes.data ?? []) as AlertRow[];
 
@@ -220,7 +227,9 @@ export async function GET(request: NextRequest) {
     trigger_config: TriggerConfig | null;
   };
   const templateBy = new Map<string, string>(
-    (templates as TemplateRow[]).map((t) => [t.scenario_id, t.id]),
+    (templates as TemplateRow[])
+      .filter((t) => t.is_active)
+      .map((t) => [t.scenario_id, t.id]),
   );
   const triggerConfigTemplates = (templates as TemplateRow[]).filter(
     (t) =>
@@ -344,6 +353,13 @@ export async function GET(request: NextRequest) {
     }
   }
 
+  const had = messagesHad(hadTasks);
+  const candidates = toInsert.filter((c) => {
+    if (had.has(c.student_id, c.scenario_id)) return false;
+    had.add(c.student_id, c.scenario_id);
+    return true;
+  });
+
 
   type OpenTaskRow = {
     id: string;
@@ -386,6 +402,30 @@ export async function GET(request: NextRequest) {
     ((pastDueCancelingRows ?? []) as Array<{ id: string }>).map((r) => r.id),
   );
 
+  const watcherIds = [
+    ...new Set(
+      ((openTasksWithBucket ?? []) as unknown as OpenTaskRow[])
+        .filter((t) => t.scenario_id === WHOP_WATCHER)
+        .map((t) => t.student_id),
+    ),
+  ];
+  const appliedForThirty = new Set<string>();
+  for (let i = 0; i < watcherIds.length; i += 100) {
+    const { data: appliedRows, error: appliedErr } = await supabase
+      .from("discount_requests")
+      .select("student_id")
+      .in("student_id", watcherIds.slice(i, i + 100))
+      .in("status", [...THIRTY_APPLIED_STATUSES]);
+    if (appliedErr) {
+      const message = `Discount requests fetch failed: ${appliedErr.message}`;
+      await logCronFinish(runId, "failed", { error: message });
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+    for (const r of (appliedRows ?? []) as Array<{ student_id: string }>) {
+      appliedForThirty.add(r.student_id);
+    }
+  }
+
   type OpenSlot = { id: string; bucket: string };
   const negativeSlot = new Map<string, OpenSlot>();
   for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
@@ -399,7 +439,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  toInsert.sort((a, b) => {
+  candidates.sort((a, b) => {
     const pa = priorityFor(bucketByScenario.get(a.scenario_id) ?? "");
     const pb = priorityFor(bucketByScenario.get(b.scenario_id) ?? "");
     return pa - pb;
@@ -408,7 +448,7 @@ export async function GET(request: NextRequest) {
   const finalToInsert: typeof toInsert = [];
   const toDismiss: string[] = [];
 
-  for (const c of toInsert) {
+  for (const c of candidates) {
     const bucket = bucketByScenario.get(c.scenario_id) ?? "";
     if (bucket !== "cancel_path" && bucket !== "at_risk") {
       finalToInsert.push(c);
@@ -554,6 +594,21 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    if (stillMatches === null && t.scenario_id === WHOP_WATCHER) {
+      if (!discountWindowOpen(student.first_paid_at ?? null, Date.now())) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: whop.watcher, the student's 30% window has closed.",
+        );
+      } else if (appliedForThirty.has(student.id)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: whop.watcher, the student applied for the 30%.",
+        );
+      }
+      continue;
+    }
+
     if (stillMatches === null) {
       const m = t.scenario_id.match(/\.day(\d+)$/);
       if (m) {
@@ -642,6 +697,7 @@ export async function GET(request: NextRequest) {
   return NextResponse.json({
     checked: students.length,
     candidates: toInsert.length,
+    already_had: toInsert.length - candidates.length,
     tasks_created: createdCount,
     bucket_dismissed: toDismiss.length,
     family_dismissed: familySupersedeNotes.size,

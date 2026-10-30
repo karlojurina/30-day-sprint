@@ -61,7 +61,11 @@ function write(text, label, outRel, rewrites = [], { dropComments = false } = {}
 // The same library copies engagement-alerts.test.mjs, build.mjs and
 // outreach-cutover.test.mjs make, so this file runs on its own. The copies of
 // dm-toggles.ts and of check-na-tasks and check-csm-tasks (now and at BASE)
-// have no comment lines (dropComments, above).
+// have no comment lines (dropComments, above). Since the DM queue fix
+// (2026-10-30, dm-queue.test.mjs) both crons also import dm-queue.ts and the
+// 30%'s dates (discount.ts), and check-na-tasks the stored coupon answer's
+// reading (membership-discount.ts, with what it imports), copied as build.mjs
+// copies them.
 const LIBS = [
   ['src/lib/constants.ts', './_gen/constants.ts', []],
   ['src/lib/curriculum-reset.ts', './_gen/curriculum-reset.ts', []],
@@ -76,6 +80,18 @@ const LIBS = [
     ['from "@/lib/constants"', 'from "./constants.ts"'],
     ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
   ]],
+  ['src/lib/dm-queue.ts', './_gen/dm-queue.ts', []],
+  ['src/lib/world/discount.ts', './_gen/discount.ts', [['from "@/lib/constants"', 'from "./constants.ts"']]],
+  ['src/lib/whop-members.ts', './_gen/whop-members.ts', [], { dropComments: true }],
+  ['src/lib/whop-products.ts', './_gen/whop-products.ts', []],
+  ['src/lib/first-payment.ts', './_gen/first-payment.ts', [['from "@/lib/whop-members"', 'from "./whop-members.ts"']]],
+  ['src/lib/membership-discount.ts', './_gen/membership-discount.ts', [
+    ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+    ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+    ['from "@/lib/first-payment"', 'from "./first-payment.ts"'],
+    ['from "@/lib/whop-members"', 'from "./whop-members.ts"'],
+    ['from "@/lib/whop-products"', 'from "./whop-products.ts"'],
+  ]],
 ]
 for (const [src, out, rw, opts] of LIBS) write(fromSrc(src), src, out, rw, opts)
 write(fromBase('src/lib/discord.ts'), `src/lib/discord.ts@${BASE}`, './_gen/discord.old.ts')
@@ -89,19 +105,32 @@ const rewrites = (discord) => [
   ['from "@/lib/cron-auth"', 'from "./cron-auth.ts"'],
 ]
 // check-engagement's copies are engagement-alerts.test.mjs's too, written
-// there the same way, comments and all.
+// there the same way, comments and all. The last list of a route is the
+// imports only its copy of now has (dm-queue.test.mjs writes the same copies).
+const NOW_ONLY = {
+  na: [
+    ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
+    ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+    ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+    ['from "@/lib/dm-queue"', 'from "./dm-queue.ts"'],
+  ],
+  csm: [
+    ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+    ['from "@/lib/dm-queue"', 'from "./dm-queue.ts"'],
+  ],
+}
 const ROUTES = {
-  na: ['src/app/api/cron/check-na-tasks/route.ts', 'check-na-tasks-route', [], { dropComments: true }],
+  na: ['src/app/api/cron/check-na-tasks/route.ts', 'check-na-tasks-route', [], { dropComments: true }, NOW_ONLY.na],
   engagement: ['src/app/api/cron/check-engagement/route.ts', 'check-engagement-route', [
     ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"']]],
   csm: ['src/app/api/cron/check-csm-tasks/route.ts', 'check-csm-tasks-route', [
     ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
     ['from "@/lib/supabase-pagination"', 'from "./supabase-pagination.ts"'],
     ['from "@/lib/csm-triggers"', 'from "./csm-triggers.ts"'],
-    ['"@/types/database"', '"./types-erased.ts"']], { dropComments: true }],
+    ['"@/types/database"', '"./types-erased.ts"']], { dropComments: true }, NOW_ONLY.csm],
 }
-for (const [src, out, extra, opts] of Object.values(ROUTES)) {
-  write(fromSrc(src), src, `./_gen/${out}.ts`, [...rewrites('./discord.ts'), ...extra], opts)
+for (const [src, out, extra, opts, nowOnly = []] of Object.values(ROUTES)) {
+  write(fromSrc(src), src, `./_gen/${out}.ts`, [...rewrites('./discord.ts'), ...extra, ...nowOnly], opts)
   write(fromBase(src), `${src}@${BASE}`, `./_gen/${out}.old.ts`, [...rewrites('./discord.old.ts'), ...extra], opts)
 }
 

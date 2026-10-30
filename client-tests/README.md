@@ -417,6 +417,53 @@ members and this repository is public; the code is checked unchanged on
 every run (TypeScript prints the source and the copy without comments, and a
 difference stops the test).
 
+`dm-queue.test.mjs` (the DM queue fix, 2026-10-30, branch `fix/dm-queue`,
+61 checks) runs check-na-tasks and check-csm-tasks the same way, through
+their own `GET` on the stand-in network, for the three things the fix
+changed. Whop watchers: a student who never signed in and has a finished
+lesson (`completed_at` or `skipped_at`) gets no stalled task, their open one
+is dismissed with `dismissed_by` null and a note, and one `whop.watcher`
+task from day 3 (a second and third run add nothing; sent, dismissed by a
+team member or by the app, never again), held back by a closed 30% window
+(day 16), a pending, approved or applied request (a rejected one does not),
+a stored coupon answer that closes it on the membership on file (a discount
+or the unpaid answer; none, another membership's row, or a no coupon with a
+price do not), canceling, or the template off; 100 watchers with 11 lessons
+each (1,100 rows read in 2 pages) all get it. On/off (T-106):
+`nolessons.day14` off makes no task from its rule (day 14) nor from an alert
+(day 12), and on it does; `nolessons.day3` off with conditions saved makes
+none; days 5 and 10 off are skipped with no entry in `errors`, while a
+scenario with no template is still one. No message twice: marked sent, then
+the next runs that day add nothing; day 3 sent on Whop is not sent again on
+Discord nor as `nolessons.day3` after they sign in; the alert path no longer
+queues a `nolessons.day3` already sent; a task dismissed by a team member is
+not queued again (stalled, nolessons, and a template's own conditions), one
+dismissed by the app or by the v109 reset is; a team dismissal past row
+1,000 of check-csm-tasks' tasks read still counts (the read's filter
+`or=(status.in.(open,completed),dismissed_by.not.is.null)`, in pages); and a
+week of both crons, each task marked sent as it comes, gives day 3 once and
+day 7 once. 3c dismisses an open `whop.watcher` once the window closed or
+they applied, keeps it while open, and dismisses it for a canceling student.
+Every new read failing stops the run with a 500 and nothing written. Both
+routes as they were at production (6c07e7a) are taken from git and run on
+the same databases: 14 of the checks show the rule failing there. Since the
+fix both crons import `dm-queue.ts` and `discount.ts`, and check-na-tasks
+`membership-discount.ts` (with `whop-members.ts`, `whop-products.ts` and
+`first-payment.ts`), so `cron-failed-reads.test.mjs` copies those as
+`build.mjs` does and rewrites the new imports in its copies of now only.
+`_gen/stub-cron.ts` answers `or=(...)` of its filters, as `.or()` sends it.
+Each rule was also broken in a copy (no step 2c, no check in check-na-tasks,
+a skipped lesson not counted, every template found on or off, every
+dismissal counted, the read without team dismissals, the note not once
+ever): each break fails the suite. `template-on-off` (57 to 59) follows:
+the crons make no task of a built-in that is off on either course, every
+template but W2.2, W2.6 and X.1 shows the switch (the course unread too),
+and the list of the rules that stop on the new course is now the test's own
+record. `templates-page` (73) rewrites its 2 checks of `nolessons.day3`:
+counted for the panel's warning only while on, an Off badge and Turn on.
+`npm run test:client`: 83 suites, 5574 checks (the ship review's 5511, these
+61 and `template-on-off`'s 2), 0 failed.
+
 `phones-input-zoom.test.mjs` (phones-2) is a source check, since no harness
 renders the action item or the 30% form without the dev server: it parses
 `world-ui.module.css` and `discount-form.module.css` into their rules and runs

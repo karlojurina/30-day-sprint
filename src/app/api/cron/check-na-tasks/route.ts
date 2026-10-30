@@ -408,9 +408,14 @@ export async function GET(request: NextRequest) {
     // note when it is due (above).
     const watched = lessonsWatched.get(s.id) ?? 0;
     if (watched > 0) {
+      // A dismissal that fails leaves the stalled task on To do, so no note
+      // goes beside it this run: the team would have both to send. The next
+      // run tries both again. The update returns the row it dismissed, so a
+      // task the team marked sent since the read counts as nothing.
+      let stalledLeftOpen = false;
       for (const t of tasksByStudent.get(s.id) ?? []) {
         if (t.status !== "open" || !allNaIds.includes(t.scenario_id)) continue;
-        const { error: dismissErr } = await supabase
+        const { data: dismissed, error: dismissErr } = await supabase
           .from("tasks")
           .update({
             status: "dismissed",
@@ -420,11 +425,17 @@ export async function GET(request: NextRequest) {
               "Auto-dismissed: the student has watched lessons on Whop, so no stalled message goes to them.",
           })
           .eq("id", t.id)
-          .eq("status", "open");
-        if (dismissErr) errors.push(`${s.id}/${t.scenario_id}: ${dismissErr.message}`);
-        else stalledDismissed++;
+          .eq("status", "open")
+          .select("id");
+        if (dismissErr) {
+          errors.push(`${s.id}/${t.scenario_id}: ${dismissErr.message}`);
+          stalledLeftOpen = true;
+        } else if ((dismissed ?? []).length > 0) {
+          stalledDismissed++;
+        }
       }
       if (
+        !stalledLeftOpen &&
         watcherTemplateId !== null &&
         watcherNoteDue.has(s.id) &&
         !had.has(s.id, WHOP_WATCHER)

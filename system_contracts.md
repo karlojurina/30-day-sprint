@@ -1868,10 +1868,15 @@ When adding a new table, append it here. When deleting a field, scan
   `stalled.whop` and `nolessons` are one message, and so are the day-7
   ones. So `dismissed_by` is read as who dismissed: set, a team member
   decided it and it blocks; null, the app (a cron's auto-dismiss, a
-  supersession, a Whop watcher's stalled task) or a bulk reset (v109)
-  did, and the rule holds again. A writer that dismisses for the team
-  must set it, and a bulk dismissal meant to let the queue refill must
-  leave it null. `whop.watcher` goes to a student once, in any status.
+  supersession, a Whop watcher's stalled task, a stalled task once the
+  student signed in) or a bulk reset (v109) did, and the rule holds
+  again. A writer that dismisses for the team must set it, and a bulk
+  dismissal meant to let the queue refill must leave it null.
+  `whop.watcher` goes to a student once, in any status. The crons'
+  dismissals (`check-na-tasks`' and sections 3, 3b and 3c of
+  `check-csm-tasks`) touch a task only while it is open
+  (`status=eq.open` on the update), so a task the team marked sent or
+  dismissed after the cron read it keeps what they did.
 - **CSM cron filters (v75.15+; `first_paid_at` since v75.18):**
   `check-csm-tasks`, `check-engagement`, `check-na-tasks` all gate on
   `first_paid_at >= csmSprintWindowCutoffIso()` (= `now() - 30d`) AND

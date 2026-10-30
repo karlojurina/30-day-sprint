@@ -475,7 +475,8 @@ export async function GET(request: NextRequest) {
         dismissed_at: new Date().toISOString(),
         notes: "Superseded by a higher-priority CSM task.",
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "open");
   }
 
 
@@ -518,7 +519,8 @@ export async function GET(request: NextRequest) {
         dismissed_at: new Date().toISOString(),
         notes: note,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "open");
   }
 
 
@@ -570,6 +572,17 @@ export async function GET(request: NextRequest) {
         );
         continue;
       }
+    }
+
+    if (
+      t.scenario_id.startsWith("stalled.") &&
+      snap.student.first_sprint_login_at
+    ) {
+      autoDismissals.set(
+        t.id,
+        "Auto-dismissed: the student signed in to the app, so a never-signed-in message no longer fits.",
+      );
+      continue;
     }
 
     const cleanSnap = {
@@ -643,7 +656,8 @@ export async function GET(request: NextRequest) {
         dismissed_at: new Date().toISOString(),
         notes: note,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "open");
   }
 
 

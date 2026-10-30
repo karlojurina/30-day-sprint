@@ -418,7 +418,7 @@ every run (TypeScript prints the source and the copy without comments, and a
 difference stops the test).
 
 `dm-queue.test.mjs` (the DM queue fix, 2026-10-30, branch `fix/dm-queue`,
-61 checks) runs check-na-tasks and check-csm-tasks the same way, through
+67 checks) runs check-na-tasks and check-csm-tasks the same way, through
 their own `GET` on the stand-in network, for the three things the fix
 changed. Whop watchers: a student who never signed in and has a finished
 lesson (`completed_at` or `skipped_at`) gets no stalled task, their open one
@@ -429,7 +429,11 @@ team member or by the app, never again), held back by a closed 30% window
 a stored coupon answer that closes it on the membership on file (a discount
 or the unpaid answer; none, another membership's row, or a no coupon with a
 price do not), canceling, or the template off; 100 watchers with 11 lessons
-each (1,100 rows read in 2 pages) all get it. On/off (T-106):
+each (1,100 rows read in 2 pages) all get it. When the stalled task's
+dismissal fails, that run writes an entry in `errors` and no note beside the
+still open stalled task (the next run does both), and a stalled task the
+team marks sent while the run is going stays sent and is not counted in
+`stalled_dismissed`. On/off (T-106):
 `nolessons.day14` off makes no task from its rule (day 14) nor from an alert
 (day 12), and on it does; `nolessons.day3` off with conditions saved makes
 none; days 5 and 10 off are skipped with no entry in `errors`, while a
@@ -444,9 +448,18 @@ dismissed by the app or by the v109 reset is; a team dismissal past row
 week of both crons, each task marked sent as it comes, gives day 3 once and
 day 7 once. 3c dismisses an open `whop.watcher` once the window closed or
 they applied, keeps it while open, and dismisses it for a canceling student.
+3c also dismisses an open stalled task once the student has signed in (by
+the app, `dismissed_by` null), so `nolessons.day3` or `.day7`, the same
+text, comes at the next run where they still have 0 lessons, and nothing
+where they have lessons; a student not signed in keeps theirs. The
+dismissals of the cap (3), the family (3b) and 3c leave a task the team
+marks sent while the run is going as sent (`status=eq.open` on the update).
 Every new read failing stops the run with a 500 and nothing written. Both
 routes as they were at production (6c07e7a) are taken from git and run on
-the same databases: 14 of the checks show the rule failing there. Since the
+the same databases: 16 of the checks show the rule failing there. The 4
+checks added after the build's review (the failed dismissal, the race in
+each cron, the sign-in) failed on the routes at the build's own commit
+(adf434b) before the fix. Since the
 fix both crons import `dm-queue.ts` and `discount.ts`, and check-na-tasks
 `membership-discount.ts` (with `whop-members.ts`, `whop-products.ts` and
 `first-payment.ts`), so `cron-failed-reads.test.mjs` copies those as
@@ -461,8 +474,8 @@ template but W2.2, W2.6 and X.1 shows the switch (the course unread too),
 and the list of the rules that stop on the new course is now the test's own
 record. `templates-page` (73) rewrites its 2 checks of `nolessons.day3`:
 counted for the panel's warning only while on, an Off badge and Turn on.
-`npm run test:client`: 83 suites, 5574 checks (the ship review's 5511, these
-61 and `template-on-off`'s 2), 0 failed.
+`npm run test:client`: 83 suites, 5580 checks (the ship review's 5511, these
+67 and `template-on-off`'s 2), 0 failed.
 
 `phones-input-zoom.test.mjs` (phones-2) is a source check, since no harness
 renders the action item or the 30% form without the dev server: it parses

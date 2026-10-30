@@ -708,7 +708,10 @@ export async function GET(request: NextRequest) {
     // else: slot taken by equal or higher priority — drop this candidate.
   }
 
-  // Dismiss superseded tasks.
+  // Dismiss superseded tasks. Each dismissal here, in 3b and in 3c touches
+  // a task only while it is still open: one the team marked sent or
+  // dismissed since the read above keeps what they did (a sent task
+  // dismissed here would drop off the Sent tab with its sender still on it).
   for (const id of toDismiss) {
     await supabase
       .from("tasks")
@@ -717,7 +720,8 @@ export async function GET(request: NextRequest) {
         dismissed_at: new Date().toISOString(),
         notes: "Superseded by a higher-priority CSM task.",
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "open");
   }
 
   // ─── 3b. Family-level supersession (v75.17) ──────────────
@@ -782,7 +786,8 @@ export async function GET(request: NextRequest) {
         dismissed_at: new Date().toISOString(),
         notes: note,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "open");
   }
 
   // ─── 3c. Auto-dismiss orphan tasks (v75.19) ───────────────
@@ -800,7 +805,8 @@ export async function GET(request: NextRequest) {
   //   * Tasks for students no longer in the eligible pool (out of
   //     cohort, past day 30, on free plan, etc.)
   //
-  // Four evaluation paths, in order:
+  // First, a stalled.* task of a student who has signed in to the app since
+  // (2026-10-30): dismissed, see below. Then four evaluation paths, in order:
   //   1. Built-in trigger function in `triggers` map → re-run with
   //      a clean recentTaskScenarios set (so the dedup gate inside
   //      the trigger doesn't false-skip itself)
@@ -875,6 +881,24 @@ export async function GET(request: NextRequest) {
         );
         continue;
       }
+    }
+
+    // A never-signed-in message (stalled.*, check-na-tasks) once the student
+    // has signed in to the app: it no longer fits (2026-10-30). Dismissed by
+    // the app, so it does not count as a message had (src/lib/dm-queue.ts),
+    // and where the student still has 0 lessons nolessons.day3 or .day7, the
+    // same text, comes at the next run once this task has left the slot. Left
+    // on To do, the team dismissed it by hand, which counts as had and kept
+    // that text from the student for good.
+    if (
+      t.scenario_id.startsWith("stalled.") &&
+      snap.student.first_sprint_login_at
+    ) {
+      autoDismissals.set(
+        t.id,
+        "Auto-dismissed: the student signed in to the app, so a never-signed-in message no longer fits.",
+      );
+      continue;
     }
 
     // Re-evaluate with a fresh recentTaskScenarios so a trigger's
@@ -959,7 +983,8 @@ export async function GET(request: NextRequest) {
         dismissed_at: new Date().toISOString(),
         notes: note,
       })
-      .eq("id", id);
+      .eq("id", id)
+      .eq("status", "open");
   }
 
   // ─── 4. Insert (idempotent via partial unique index) ──────

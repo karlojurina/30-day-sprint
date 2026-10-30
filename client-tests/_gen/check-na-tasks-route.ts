@@ -278,9 +278,10 @@ export async function GET(request: NextRequest) {
 
     const watched = lessonsWatched.get(s.id) ?? 0;
     if (watched > 0) {
+      let stalledLeftOpen = false;
       for (const t of tasksByStudent.get(s.id) ?? []) {
         if (t.status !== "open" || !allNaIds.includes(t.scenario_id)) continue;
-        const { error: dismissErr } = await supabase
+        const { data: dismissed, error: dismissErr } = await supabase
           .from("tasks")
           .update({
             status: "dismissed",
@@ -290,11 +291,17 @@ export async function GET(request: NextRequest) {
               "Auto-dismissed: the student has watched lessons on Whop, so no stalled message goes to them.",
           })
           .eq("id", t.id)
-          .eq("status", "open");
-        if (dismissErr) errors.push(`${s.id}/${t.scenario_id}: ${dismissErr.message}`);
-        else stalledDismissed++;
+          .eq("status", "open")
+          .select("id");
+        if (dismissErr) {
+          errors.push(`${s.id}/${t.scenario_id}: ${dismissErr.message}`);
+          stalledLeftOpen = true;
+        } else if ((dismissed ?? []).length > 0) {
+          stalledDismissed++;
+        }
       }
       if (
+        !stalledLeftOpen &&
         watcherTemplateId !== null &&
         watcherNoteDue.has(s.id) &&
         !had.has(s.id, WHOP_WATCHER)

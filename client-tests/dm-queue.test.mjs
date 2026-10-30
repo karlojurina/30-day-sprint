@@ -245,6 +245,19 @@ function markSent(id, scenario) {
 }
 const FAILED_READ = 'stand-in: the read failed'
 const failing = (match) => (r) => (r.method === 'GET' && match(r) ? { status: 500, body: JSON.stringify({ code: 'XX000', details: null, hint: null, message: FAILED_READ }) } : null)
+/**
+ * A team member marks these tasks sent at the moment a cron's update of them
+ * arrives: the race between the cron's read and its write. The update then
+ * goes on as sent.
+ */
+const sentMidRun = (ids) => (r) => {
+  if (r.method === 'PATCH' && r.table === 'tasks') {
+    const id = (r.url.searchParams.get('id') ?? '').replace(/^eq\./, '')
+    const t = db.rows('tasks').find((k) => k.id === id && ids.includes(k.id) && k.status === 'open')
+    if (t) Object.assign(t, { status: 'completed', completed_at: iso(Date.now()), completed_by: TEAM })
+  }
+  return null
+}
 
 // ═══════════════════════════ the rule itself ═══════════════════════════
 console.log('\n=== src/lib/dm-queue.ts: what counts as a message already had ===')
@@ -341,6 +354,28 @@ await rule('day 3, 2 lessons, an open stalled task: the stalled task dismissed, 
     detail: show({ after1, after3: tasksOf(a), summary: note?.behavior_summary, answer: [first.body.whop_watcher, first.body.stalled_dismissed] }),
   }
 }, { failsAtBase: true })
+await rule('the stalled task\'s dismissal fails: an entry in errors and no note beside the stalled task that run; the next run dismisses it and queues the note', async (R) => {
+  const a = sid('df')
+  db = world({ students: [student(a, 3)], lessons: { [a]: ['a1l01'] }, tasks: [task(a, 'stalled.whop.day3', 'open')] })
+  db.failWhen = (r) => (r.method === 'PATCH' && r.table === 'tasks'
+    ? { status: 500, body: JSON.stringify({ code: 'XX000', details: null, hint: null, message: 'stand-in: the write failed' }) } : null)
+  const first = await run(R, 'na')
+  const after1 = tasksOf(a)
+  db.failWhen = null
+  await run(R, 'na')
+  return { pass: show(after1) === show(['stalled.whop.day3:open']) && first.body.errors?.length === 1 && first.body.whop_watcher === 0
+      && show(tasksOf(a)) === show(['stalled.whop.day3:dismissed', 'whop.watcher:open']),
+    detail: show({ after1, errors: first.body.errors, after2: tasksOf(a) }) }
+})
+await rule('the team marks the stalled task sent while the run is going: it stays sent, and stalled_dismissed counts only a task the run dismissed', async (R) => {
+  const a = sid('rs')
+  db = world({ students: [student(a, 3)], lessons: { [a]: ['a1l01'] }, tasks: [task(a, 'stalled.whop.day3', 'open', { id: 'task-raced-na' })] })
+  db.failWhen = sentMidRun(['task-raced-na'])
+  const r = await run(R, 'na')
+  const stalled = db.rows('tasks').find((t) => t.id === 'task-raced-na')
+  return { pass: stalled.status === 'completed' && stalled.dismissed_at === null && r.body.stalled_dismissed === 0,
+    detail: show({ stalled: `${stalled.status}, dismissed_at ${stalled.dismissed_at}`, stalled_dismissed: r.body.stalled_dismissed }) }
+})
 await rule('day 5 (a day that is off), 1 lesson: the note, and no error', async (R) => {
   const a = sid('w5')
   db = world({ students: [student(a, 5)], lessons: { [a]: ['a2l01'] } })
@@ -557,6 +592,61 @@ await rule('canceling: dismissed, as every task of a canceling student but the s
      'the discount requests read failing (an open note to judge): a 500, cron_runs failed, and nothing written',
      show({ status: r.status, error: r.body.error, writes: db.writes().map((w) => `${w.method} ${w.table}`) }))
 }
+
+console.log('\n=== check-csm-tasks 3c: a stalled task still open when the student signs in ===')
+await rule('signed in on day 3 with 0 lessons, and on day 7 with 0 lessons: the stalled task dismissed by the app, then nolessons.day3 / nolessons.day7 (the same text) at the next run; signed in with lessons: dismissed and nothing after; not signed in: kept', async (R) => {
+  const d3 = sid('s3'), d7 = sid('s7'), withLessons = sid('sl'), notYet = sid('sn')
+  db = world({
+    students: [student(d3, 3), student(d7, 7, { discord_username: 'x' }), student(withLessons, 3), student(notYet, 3)],
+    loggedIn: [d3, d7, withLessons],
+    lessons: { [withLessons]: ['a1l01'] },
+    tasks: [task(d3, 'stalled.whop.day3', 'open'), task(d7, 'stalled.discord.day7', 'open'), task(withLessons, 'stalled.whop.day3', 'open'), task(notYet, 'stalled.whop.day3', 'open')],
+  })
+  await run(R, 'csm')
+  const first = db.rows('tasks').filter((t) => t.status === 'dismissed').map((t) => `${t.scenario_id}|${t.dismissed_by}|${t.notes}`)
+  await run(R, 'csm')
+  const got = [d3, d7, withLessons, notYet].map((id) => tasksOf(id).join(','))
+  const note = 'Auto-dismissed: the student signed in to the app, so a never-signed-in message no longer fits.'
+  return { pass: show(got) === show([
+      'stalled.whop.day3:dismissed,nolessons.day3:open',
+      'stalled.discord.day7:dismissed,nolessons.day7:open',
+      'stalled.whop.day3:dismissed',
+      'stalled.whop.day3:open'])
+      && show(first) === show([`stalled.whop.day3|null|${note}`, `stalled.discord.day7|null|${note}`, `stalled.whop.day3|null|${note}`]),
+    detail: show({ got, first }) }
+}, { failsAtBase: true })
+
+console.log('\n=== check-csm-tasks: a task the team marks sent while the run is going stays sent ===')
+await rule('the dismissals of the cap (3), the family (3b) and 3c (a stale stalled task, a whop.watcher past its window) leave a task sent mid-run as sent', async (R) => {
+  // The cap: a canceling student's save task takes the slot of an open nolessons.day3.
+  const capped = sid('r3')
+  db = world({ students: [student(capped, 3, { cancel_scheduled_at: iso(NOW - H) })], loggedIn: [capped], templates: [...TEMPLATES, SAVE],
+    tasks: [task(capped, 'nolessons.day3', 'open', { id: 'task-raced-cap' })] })
+  db.failWhen = sentMidRun(['task-raced-cap'])
+  await run(R, 'csm')
+  const cap = db.rows('tasks').find((t) => t.id === 'task-raced-cap')
+  // The family: a later stage of a template's own conditions (bucket event, so the cap lets it through) supersedes the open earlier one.
+  const fam = sid('rf')
+  const stage = (day) => ({ id: `tpl-C-1f2e3d.day${day}`, scenario_id: `C-1f2e3d.day${day}`, bucket: 'event', is_custom: true, is_active: true, is_admin_only: false,
+    trigger_config: { all: [{ metric: 'is_canceling', op: 'is' }] } })
+  db = world({ students: [student(fam, 5, { cancel_scheduled_at: iso(NOW - H) })], loggedIn: [fam], templates: [...TEMPLATES, stage(3), stage(7)],
+    tasks: [task(fam, 'C-1f2e3d.day3', 'open', { id: 'task-raced-family' })] })
+  db.failWhen = sentMidRun(['task-raced-family'])
+  await run(R, 'csm')
+  const family = db.rows('tasks').find((t) => t.id === 'task-raced-family')
+  const familyStaged = tasksOf(fam)
+  // 3c: a stalled task gone stale (day 8) and a whop.watcher whose window closed (day 16).
+  const stale = sid('rc'), late = sid('rw')
+  db = world({ students: [student(stale, 8), student(late, 16)], lessons: { [late]: ['a1l01'] },
+    tasks: [task(stale, 'stalled.whop.day3', 'open', { id: 'task-raced-stale' }), task(late, 'whop.watcher', 'open', { id: 'task-raced-note' })] })
+  db.failWhen = sentMidRun(['task-raced-stale', 'task-raced-note'])
+  await run(R, 'csm')
+  const raced = [cap, family, ...['task-raced-stale', 'task-raced-note'].map((id) => db.rows('tasks').find((t) => t.id === id))]
+  const got = raced.map((t) => `${t.scenario_id}:${t.status}${t.dismissed_at ? ' (dismissed_at set)' : ''}`)
+  return { pass: raced.every((t) => t.status === 'completed' && t.dismissed_at === null && t.completed_by === TEAM)
+      && show(familyStaged) === show(['C-1f2e3d.day3:completed', 'C-1f2e3d.day7:open']),
+    detail: show({ got, familyStaged }) }
+}, { failsAtBase: true })
 
 console.log('\n=== Both crons, one after the other, as Vercel runs them (:15 then :20) ===')
 await rule('a student who never signed in and has not started: day 3 once, day 7 once, whichever cron, through a week of runs with each task marked sent', async (R) => {

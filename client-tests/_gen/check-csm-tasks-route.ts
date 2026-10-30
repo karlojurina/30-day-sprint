@@ -16,6 +16,7 @@ import {
   evaluateCustomTrigger,
   snapshotIsCanceling,
   alertTask,
+  totalCompletedAcrossRegions,
   SCENARIO_BUCKET,
 } from "./csm-triggers.ts";
 import {
@@ -25,17 +26,42 @@ import {
 } from "./constants.ts";
 import { getCurriculumResetAt } from "./curriculum-reset.ts";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "./metrics-definitions.ts";
-import { discountWindowOpen } from "./discount.ts";
+import { discountWindowOpen, type DiscountRequestRow } from "./discount.ts";
+import {
+  toDiscountLessons,
+  videoDoneIds,
+  type CatalogLessonRow,
+} from "./discount-server.ts";
+import {
+  MEMBERSHIP_DISCOUNTS_TABLE,
+  rowShowsUnpaid,
+  storedRowApplies,
+} from "./membership-discount.ts";
 import {
   HAD_TASKS_FILTER,
+  LAPSE_THIRTY,
+  STOPPED_WATCHING,
   THIRTY_APPLIED_STATUSES,
+  THIRTY_CLOSING,
   WHOP_WATCHER,
   messagesHad,
   type QueueTask,
 } from "./dm-queue.ts";
+import {
+  lastLessonAt,
+  mayNeedThirty,
+  stoppedWatching,
+  thirtyClosing,
+  thirtyReach,
+  thirtyVideos,
+  type MomentStudent,
+  type ThirtyVideos,
+} from "./dm-moments.ts";
 import type { Student, TriggerConfig } from "./types-erased.ts";
 
 export const maxDuration = 300;
+
+const ID_BATCH = 100;
 
 const ALERT_LABEL: Record<string, string> = {
   no_login_5d: "no platform login in 5 days",
@@ -88,11 +114,12 @@ export async function GET(request: NextRequest) {
     alertsRes,
     milestonesRes,
     regionsRes,
+    videosRes,
   ] = await Promise.all([
     supabase
       .from("students")
       .select(
-        "id, name, joined_at, first_paid_at, membership_status, last_active_at, discord_username, cancel_scheduled_at",
+        "id, name, joined_at, first_paid_at, membership_status, last_active_at, discord_username, cancel_scheduled_at, whop_membership_id",
       )
       .eq("membership_status", "active")
       .eq("csm_exempt", false)
@@ -101,11 +128,14 @@ export async function GET(request: NextRequest) {
       .gte("first_paid_at", csmSprintWindowCutoffIso()),
     supabase
       .from("lessons")
-      .select("id, region_id, requires_action, counts_toward_progress"),
+      .select(
+        "id, region_id, requires_action, counts_toward_progress, type, is_gate, duration_seconds",
+      )
+      .order("sort_order"),
     fetchAllRowsPaginated<QueueTask>(() =>
       supabase
         .from("tasks")
-        .select("student_id, scenario_id, status, dismissed_by")
+        .select("student_id, scenario_id, status, dismissed_by, created_at")
         .or(HAD_TASKS_FILTER)
         .order("id"),
     ),
@@ -134,6 +164,9 @@ export async function GET(request: NextRequest) {
         .order("student_id"),
     ),
     supabase.from("regions").select("id, order_num").order("order_num"),
+    fetchAllRowsPaginated<{ lesson_id: string }>(() =>
+      supabase.from("lesson_videos").select("lesson_id").order("lesson_id"),
+    ),
   ]);
 
   const studentsErr =
@@ -142,7 +175,8 @@ export async function GET(request: NextRequest) {
     templatesRes.error ??
     tasksRes.error ??
     milestonesRes.error ??
-    regionsRes.error;
+    regionsRes.error ??
+    videosRes.error;
   if (studentsErr) {
     await logCronFinish(runId, "failed", { error: studentsErr.message });
     return NextResponse.json({ error: studentsErr.message }, { status: 500 });
@@ -353,12 +387,143 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  const had = messagesHad(hadTasks);
+  const had = messagesHad(hadTasks, (id) => {
+    const snap = snapByStudent.get(id);
+    return snap ? lastLessonAt(snap) : null;
+  });
   const candidates = toInsert.filter((c) => {
     if (had.has(c.student_id, c.scenario_id)) return false;
     had.add(c.student_id, c.scenario_id);
     return true;
   });
+
+  const nowMs = Date.now();
+  const catalog = toDiscountLessons(
+    lessons as unknown as CatalogLessonRow[],
+    new Set(videosRes.data.map((v) => v.lesson_id)),
+  );
+  const videoDoneOf = new Map<string, Set<string>>();
+  const videosOf = new Map<string, ThirtyVideos>();
+  const momentOf = new Map<string, MomentStudent>();
+  for (const student of students) {
+    const snap = snapByStudent.get(student.id);
+    if (!snap) continue;
+    const done = videoDoneIds(completionsByStudent.get(student.id) ?? []);
+    const videos = thirtyVideos(catalog, done);
+    videoDoneOf.set(student.id, done);
+    videosOf.set(student.id, videos);
+    momentOf.set(student.id, {
+      signedIn: Boolean(snap.student.first_sprint_login_at),
+      canceling: snapshotIsCanceling(snap),
+      dayOnCourse: snap.dayOnCourse,
+      lessonsFinished: totalCompletedAcrossRegions(snap),
+      lastLessonAt: lastLessonAt(snap),
+      firstPaidAt: student.first_paid_at ?? null,
+      videos,
+    });
+  }
+  const momentTemplate = (scenarioId: string) =>
+    overriddenScenarios.has(scenarioId) ? undefined : templateBy.get(scenarioId);
+  const momentsOn = [THIRTY_CLOSING, ...STOPPED_WATCHING].some((x) => momentTemplate(x));
+  const thirtyRead = momentsOn
+    ? students.filter((s) => {
+        const m = momentOf.get(s.id);
+        return m ? mayNeedThirty(m, nowMs) : false;
+      }).map((s) => s.id)
+    : [];
+  const membershipOf = new Map(students.map((s) => [s.id, s.whop_membership_id ?? null]));
+  const requestsOf = new Map<string, DiscountRequestRow[]>();
+  const appliedForThirty = new Set<string>();
+  const couponClosesThirty = new Set<string>();
+  for (let i = 0; i < thirtyRead.length; i += ID_BATCH) {
+    const ids = thirtyRead.slice(i, i + ID_BATCH);
+    const [requestsRes, couponsRes] = await Promise.all([
+      fetchAllRowsPaginated<DiscountRequestRow & { student_id: string }>(() =>
+        supabase
+          .from("discount_requests")
+          .select("id, student_id, status, created_at")
+          .in("student_id", ids)
+          .order("id"),
+      ),
+      fetchAllRowsPaginated<{
+        student_id: string;
+        whop_membership_id: string | null;
+        discounted: boolean;
+        promo_code_id: string | null;
+        renewal_price: number | string | null;
+      }>(() =>
+        supabase
+          .from(MEMBERSHIP_DISCOUNTS_TABLE)
+          .select("student_id, whop_membership_id, discounted, promo_code_id, renewal_price")
+          .in("student_id", ids)
+          .order("student_id"),
+      ),
+    ]);
+    const readErr = requestsRes.error ?? couponsRes.error;
+    if (readErr) {
+      const message = `The 30% read failed: ${readErr.message}`;
+      await logCronFinish(runId, "failed", { error: message });
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+    for (const r of requestsRes.data) {
+      requestsOf.set(r.student_id, [...(requestsOf.get(r.student_id) ?? []), r]);
+      if (THIRTY_APPLIED_STATUSES.includes(r.status)) appliedForThirty.add(r.student_id);
+    }
+    for (const row of couponsRes.data) {
+      if (
+        storedRowApplies(row, membershipOf.get(row.student_id)) &&
+        (row.discounted === true || rowShowsUnpaid(row))
+      ) {
+        couponClosesThirty.add(row.student_id);
+      }
+    }
+  }
+  const thirtyReadIds = new Set(thirtyRead);
+
+  const consider = (row: (typeof toInsert)[number]): boolean => {
+    toInsert.push(row);
+    if (had.has(row.student_id, row.scenario_id)) return false;
+    had.add(row.student_id, row.scenario_id);
+    candidates.push(row);
+    return true;
+  };
+  for (const student of momentsOn ? students : []) {
+    const m = momentOf.get(student.id);
+    if (!m) continue;
+    const reach = thirtyReach({
+      now: new Date(nowMs),
+      firstPaidAt: m.firstPaidAt,
+      lessons: catalog,
+      videoDone: videoDoneOf.get(student.id) ?? new Set<string>(),
+      requests: requestsOf.get(student.id) ?? [],
+      applied: appliedForThirty.has(student.id),
+      couponCloses: couponClosesThirty.has(student.id),
+    });
+    const closingTemplate = momentTemplate(THIRTY_CLOSING);
+    const closing = closingTemplate ? thirtyClosing(m, reach, nowMs) : null;
+    if (
+      closingTemplate &&
+      closing &&
+      consider({
+        student_id: student.id,
+        scenario_id: THIRTY_CLOSING,
+        template_id: closingTemplate,
+        behavior_summary: closing,
+      })
+    ) {
+      continue;
+    }
+    const lapse = stoppedWatching(m, reach, nowMs);
+    const lapseTemplate = lapse ? momentTemplate(lapse.scenarioId) : undefined;
+    if (lapse && lapseTemplate) {
+      consider({
+        student_id: student.id,
+        scenario_id: lapse.scenarioId,
+        template_id: lapseTemplate,
+        behavior_summary: lapse.summary,
+      });
+    }
+  }
 
 
   type OpenTaskRow = {
@@ -366,6 +531,7 @@ export async function GET(request: NextRequest) {
     student_id: string;
     scenario_id: string;
     template_id: string | null;
+    created_at: string;
     template: { bucket: string } | { bucket: string }[] | null;
   };
   const { data: openTasksWithBucket, error: openTasksErr } =
@@ -373,7 +539,7 @@ export async function GET(request: NextRequest) {
       supabase
         .from("tasks")
         .select(
-          "id, student_id, scenario_id, template_id, template:templates(bucket)",
+          "id, student_id, scenario_id, template_id, created_at, template:templates(bucket)",
         )
         .eq("status", "open"),
     );
@@ -405,16 +571,15 @@ export async function GET(request: NextRequest) {
   const watcherIds = [
     ...new Set(
       ((openTasksWithBucket ?? []) as unknown as OpenTaskRow[])
-        .filter((t) => t.scenario_id === WHOP_WATCHER)
+        .filter((t) => t.scenario_id === WHOP_WATCHER || t.scenario_id === THIRTY_CLOSING)
         .map((t) => t.student_id),
     ),
-  ];
-  const appliedForThirty = new Set<string>();
-  for (let i = 0; i < watcherIds.length; i += 100) {
+  ].filter((id) => !thirtyReadIds.has(id));
+  for (let i = 0; i < watcherIds.length; i += ID_BATCH) {
     const { data: appliedRows, error: appliedErr } = await supabase
       .from("discount_requests")
       .select("student_id")
-      .in("student_id", watcherIds.slice(i, i + 100))
+      .in("student_id", watcherIds.slice(i, i + ID_BATCH))
       .in("status", [...THIRTY_APPLIED_STATUSES]);
     if (appliedErr) {
       const message = `Discount requests fetch failed: ${appliedErr.message}`;
@@ -426,7 +591,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  type OpenSlot = { id: string; bucket: string };
+  type OpenSlot = { id: string; bucket: string; scenario_id: string };
   const negativeSlot = new Map<string, OpenSlot>();
   for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
     const tpl = Array.isArray(t.template) ? t.template[0] : t.template;
@@ -434,7 +599,7 @@ export async function GET(request: NextRequest) {
     if (bucket === "cancel_path" || bucket === "at_risk") {
       const existing = negativeSlot.get(t.student_id);
       if (!existing || priorityFor(bucket) < priorityFor(existing.bucket)) {
-        negativeSlot.set(t.student_id, { id: t.id, bucket });
+        negativeSlot.set(t.student_id, { id: t.id, bucket, scenario_id: t.scenario_id });
       }
     }
   }
@@ -449,6 +614,15 @@ export async function GET(request: NextRequest) {
   const toDismiss: string[] = [];
 
   for (const c of candidates) {
+    if (c.scenario_id !== THIRTY_CLOSING) continue;
+    const slot = negativeSlot.get(c.student_id);
+    if (slot && slot.id !== "(pending)" && STOPPED_WATCHING.includes(slot.scenario_id)) {
+      toDismiss.push(slot.id);
+      negativeSlot.delete(c.student_id);
+    }
+  }
+
+  for (const c of candidates) {
     const bucket = bucketByScenario.get(c.scenario_id) ?? "";
     if (bucket !== "cancel_path" && bucket !== "at_risk") {
       finalToInsert.push(c);
@@ -457,13 +631,13 @@ export async function GET(request: NextRequest) {
     const slot = negativeSlot.get(c.student_id);
     if (!slot) {
       finalToInsert.push(c);
-      negativeSlot.set(c.student_id, { id: "(pending)", bucket });
+      negativeSlot.set(c.student_id, { id: "(pending)", bucket, scenario_id: c.scenario_id });
       continue;
     }
     if (priorityFor(bucket) < priorityFor(slot.bucket)) {
       if (slot.id !== "(pending)") toDismiss.push(slot.id);
       finalToInsert.push(c);
-      negativeSlot.set(c.student_id, { id: "(pending)", bucket });
+      negativeSlot.set(c.student_id, { id: "(pending)", bucket, scenario_id: c.scenario_id });
     }
   }
 
@@ -605,6 +779,46 @@ export async function GET(request: NextRequest) {
           tpl.trigger_config,
         ).match;
       }
+    }
+
+    if (stillMatches === null && STOPPED_WATCHING.includes(t.scenario_id)) {
+      const last = Date.parse(lastLessonAt(snap) ?? "");
+      if (Number.isFinite(last) && last > Date.parse(t.created_at)) {
+        autoDismissals.set(
+          t.id,
+          `Auto-dismissed: ${t.scenario_id}, the student finished a lesson since.`,
+        );
+      } else if (
+        t.scenario_id === LAPSE_THIRTY &&
+        !discountWindowOpen(student.first_paid_at ?? null, nowMs)
+      ) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: lapse.30, the student's 30% window has closed.",
+        );
+      }
+      continue;
+    }
+
+    if (stillMatches === null && t.scenario_id === THIRTY_CLOSING) {
+      const videos = videosOf.get(student.id);
+      if (!discountWindowOpen(student.first_paid_at ?? null, nowMs)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: thirty.closing, the student's 30% window has closed.",
+        );
+      } else if (appliedForThirty.has(student.id)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: thirty.closing, the student applied for the 30%.",
+        );
+      } else if (videos && videos.needed > 0 && videos.done >= videos.needed) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: thirty.closing, the student reached the 30%'s videos.",
+        );
+      }
+      continue;
     }
 
     if (stillMatches === null && t.scenario_id === WHOP_WATCHER) {

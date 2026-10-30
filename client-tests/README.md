@@ -418,7 +418,8 @@ every run (TypeScript prints the source and the copy without comments, and a
 difference stops the test).
 
 `dm-queue.test.mjs` (the DM queue fix, 2026-10-30, branch `fix/dm-queue`,
-67 checks) runs check-na-tasks and check-csm-tasks the same way, through
+67 checks, 71 since 769e5f9 added the 4 checks of "no Whop note after the
+day 3 message") runs check-na-tasks and check-csm-tasks the same way, through
 their own `GET` on the stand-in network, for the three things the fix
 changed. Whop watchers: a student who never signed in and has a finished
 lesson (`completed_at` or `skipped_at`) gets no stalled task, their open one
@@ -476,6 +477,51 @@ record. `templates-page` (73) rewrites its 2 checks of `nolessons.day3`:
 counted for the panel's warning only while on, an Off badge and Turn on.
 `npm run test:client`: 83 suites, 5580 checks (the ship review's 5511, these
 67 and `template-on-off`'s 2), 0 failed.
+
+`dm-moments.test.mjs` (the stopped-watching and 30% closing DMs, 2026-10-30,
+branch `feat/dm-moments`, 35 checks) runs check-csm-tasks the same way,
+through its own `GET` on the stand-in network, on a course of 61 counted
+videos (watch lessons that count, with a video, the 61st the gate), an
+action item with a video, and 3 lessons after the gate. The rule of
+`dm-queue.ts` first: a stopped-watching task made after the last lesson is
+that break's for either version, a lesson after it starts a new break, two
+had are had for good, a dismissal by the app does not count, a
+`thirty.closing` had in the break takes its place, and `thirty.closing`
+itself goes once ever. In reach (`dm-moments.ts` `thirtyReach`): 39 videos
+of 10 minutes with 8.5 days left are, a counted video with no length is not,
+and the edge of 120 minutes a day left holds both ways. Stopped watching:
+day 6, 10 videos, no lesson for 3 days, in reach: `lapse.30` with its
+summary; a coupon on file, a request pending, 30-minute videos (out of
+reach) or day 16 after 5 days: `lapse.plain`, saying why; day 16 after 4
+days, 2 days without a lesson, never signed in, canceling, or 49 videos:
+nothing; 0 lessons on day 7: only `nolessons.day7`; an action item's video
+watched yesterday, its link not in: no break; one student through three
+breaks: `lapse.30`, nothing on three more runs of that break, `lapse.plain`
+after a lesson (a coupon since), nothing on the third (2 had). The 30%
+closing: 40 hours left, 45 videos, no lesson for 4 days: `thirty.closing`
+with its summary and no stopped-watching task; out of reach (20 videos),
+approved, the unpaid coupon answer, or the window closed: nothing; once
+ever, sent or dismissed by a team member; an open unsent `lapse.30` gives it
+its slot (dismissed as superseded), and no stopped-watching task follows in
+that break. 3c: an open `lapse.30` is dismissed once the student finished a
+lesson after it, and once their window closed (`lapse.plain` at the next
+run); an open `thirty.closing` once the window closed, they applied or they
+reached 49. The route as it stood before step 2d (769e5f9, the DM queue
+fix) is taken from git and leaves every one of them open (3 checks). All
+three templates off, `lapse.30` off with `lapse.plain` on, or the three not
+pasted yet: no task and no error (and no 30% read without them); the
+closing off: the stopped-watching DM instead. 150 students a DM may go to:
+requests and coupon answers read 100 ids at a time, each request line under
+8 KB; `lesson_videos`, the requests or the coupon answers failing: a 500 and
+nothing written. Four breaks of the source (the stopped-watching DM never
+twice, the closing not marking its break, the last counted lesson alone as
+"a lesson finished", no 30% read) each failed the suite. Since step 2d the
+route imports `dm-moments.ts`, `discount-server.ts` and
+`membership-discount.ts`, so `dm-queue.test.mjs` and
+`cron-failed-reads.test.mjs` copy them as `build.mjs` does and rewrite those
+imports in their copies of now; the copy of the route at 769e5f9 is ignored
+by git (`.gitignore`). `npm run test:client`: 84 suites, 5619 checks (5584 at 769e5f9 and these
+35), 0 failed.
 
 `phones-input-zoom.test.mjs` (phones-2) is a source check, since no harness
 renders the action item or the 30% form without the dev server: it parses

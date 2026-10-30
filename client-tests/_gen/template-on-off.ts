@@ -11,7 +11,9 @@
  *     and the alerts mapped to them, only while their template is on. Until
  *     then they found the template by its scenario, on or off, so
  *     nolessons.day14 kept making tasks after it was turned off; a built-in
- *     that has conditions and is off now makes nothing either;
+ *     that has conditions and is off now makes nothing either. Step 2d's
+ *     built-ins (lapse.30, lapse.plain, thirty.closing, src/lib/dm-moments.ts,
+ *     2026-10-30) read the switch the same way;
  *   - check-na-tasks: stalled.discord.dayN, stalled.whop.dayN and
  *     whop.watcher, only while the template is on (a day that is off is
  *     skipped quietly);

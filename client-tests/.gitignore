@@ -17,3 +17,5 @@ _gen/discount-approve-route.a031e8a.ts
 # The two task crons as they stood at production before the DM queue fix (dm-queue.test.mjs takes them from git on every run):
 _gen/check-na-tasks-route.6c07e7a.ts
 _gen/check-csm-tasks-route.6c07e7a.ts
+# check-csm-tasks as it stood before the stopped-watching and 30% closing DMs (dm-moments.test.mjs takes it from git on every run):
+_gen/check-csm-tasks-route.769e5f9.ts

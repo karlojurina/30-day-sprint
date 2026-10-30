@@ -23,13 +23,18 @@
  *      W2.2, W2.6, X.1 fire inline from the lesson-completion / discount /
  *      reactivation hooks — NOT in this cron.
  *
+ *   Step 2d (2026-10-30): the two DMs the owner added, src/lib/dm-moments.ts:
+ *   stopped watching (lapse.30 or lapse.plain) and the 30% closing
+ *   (thirty.closing). 3c dismisses an open one once it no longer fits.
+ *
  * On/off: steps 1 and 2a make a task only for a template that is on
  * (2026-10-30, T-106); step 2b already read only templates that are on.
  *
  * Dedupe: a student never gets a task for a message they already had (open,
  * sent, or dismissed by a team member), the rule of src/lib/dm-queue.ts that
  * check-na-tasks obeys too, applied to every candidate (alert, 2a, 2b) in
- * step 2c. The partial unique index
+ * step 2c and to 2d's in 2d; the stopped-watching DM alone may come again,
+ * once per break and at most twice. The partial unique index
  *   idx_tasks_unique_open ON tasks(student_id, scenario_id) WHERE status = 'open'
  * still refuses a second open task; errors with code 23505 are swallowed.
  *
@@ -53,6 +58,7 @@ import {
   evaluateCustomTrigger,
   snapshotIsCanceling,
   alertTask,
+  totalCompletedAcrossRegions,
   SCENARIO_BUCKET,
 } from "@/lib/csm-triggers";
 import {
@@ -62,19 +68,45 @@ import {
 } from "@/lib/constants";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
 import { PAYING_WHOP_PLAN_IDS_ARRAY } from "@/lib/admin/metrics-definitions";
-import { discountWindowOpen } from "@/lib/world/discount";
+import { discountWindowOpen, type DiscountRequestRow } from "@/lib/world/discount";
+import {
+  toDiscountLessons,
+  videoDoneIds,
+  type CatalogLessonRow,
+} from "@/lib/world/discount-server";
+import {
+  MEMBERSHIP_DISCOUNTS_TABLE,
+  rowShowsUnpaid,
+  storedRowApplies,
+} from "@/lib/membership-discount";
 import {
   HAD_TASKS_FILTER,
+  LAPSE_THIRTY,
+  STOPPED_WATCHING,
   THIRTY_APPLIED_STATUSES,
+  THIRTY_CLOSING,
   WHOP_WATCHER,
   messagesHad,
   type QueueTask,
 } from "@/lib/dm-queue";
+import {
+  lastLessonAt,
+  mayNeedThirty,
+  stoppedWatching,
+  thirtyClosing,
+  thirtyReach,
+  thirtyVideos,
+  type MomentStudent,
+  type ThirtyVideos,
+} from "@/lib/dm-moments";
 import type { Student, TriggerConfig } from "@/types/database";
 
 // v75.32: raised from Vercel's 60s default. The per-student
 // completions fetch + 3 dismissal loops can take 60+s at 2000 members.
 export const maxDuration = 300;
+
+// Ids per .in() read, as check-na-tasks and outreach-insights.ts read them.
+const ID_BATCH = 100;
 
 /** Plain-English label for each disengagement_alerts.alert_type. */
 const ALERT_LABEL: Record<string, string> = {
@@ -145,6 +177,7 @@ export async function GET(request: NextRequest) {
     alertsRes,
     milestonesRes,
     regionsRes,
+    videosRes,
   ] = await Promise.all([
     // Limit to actual paying students who joined on/after the
     // tasks cutoff. csm_exempt = test accounts we never DM.
@@ -156,7 +189,7 @@ export async function GET(request: NextRequest) {
     supabase
       .from("students")
       .select(
-        "id, name, joined_at, first_paid_at, membership_status, last_active_at, discord_username, cancel_scheduled_at",
+        "id, name, joined_at, first_paid_at, membership_status, last_active_at, discord_username, cancel_scheduled_at, whop_membership_id",
       )
       .eq("membership_status", "active")
       .eq("csm_exempt", false)
@@ -174,9 +207,14 @@ export async function GET(request: NextRequest) {
     // could only see ~1000, so students whose completions fell
     // outside that slice appeared as "0 lessons watched" and got
     // bogus nolessons.day3 tasks they couldn't escape.
+    // 2026-10-30: also what the 30% counts (step 2d): the type, the gate and
+    // each video's length, in course order, as discount-server.ts reads them.
     supabase
       .from("lessons")
-      .select("id, region_id, requires_action, counts_toward_progress"),
+      .select(
+        "id, region_id, requires_action, counts_toward_progress, type, is_gate, duration_seconds",
+      )
+      .order("sort_order"),
     // v75.56: tasks + milestones are UNBOUNDED tables (one row per
     // task / per student forever) and a raw .limit(50000) does NOT
     // bypass PostgREST's server-side ~1000-row cap — the limit only
@@ -190,7 +228,7 @@ export async function GET(request: NextRequest) {
     fetchAllRowsPaginated<QueueTask>(() =>
       supabase
         .from("tasks")
-        .select("student_id, scenario_id, status, dismissed_by")
+        .select("student_id, scenario_id, status, dismissed_by, created_at")
         .or(HAD_TASKS_FILTER)
         // Stable order is REQUIRED for .range() pagination — without
         // ORDER BY, Postgres gives no row-order guarantee and rows can
@@ -232,6 +270,12 @@ export async function GET(request: NextRequest) {
     // the switch, a1..a8 after it). The snapshot's region map is built
     // from these rows instead of a literal r1..r4.
     supabase.from("regions").select("id, order_num").order("order_num"),
+    // 2026-10-30, step 2d: the lessons that have a video, which the 30%
+    // counts (discount-server.ts's read). Only the lesson id: the row also
+    // holds the Tella id, which is never read here.
+    fetchAllRowsPaginated<{ lesson_id: string }>(() =>
+      supabase.from("lesson_videos").select("lesson_id").order("lesson_id"),
+    ),
   ]);
 
   // v75.56: tasks + milestones errors now short-circuit too. The
@@ -245,7 +289,8 @@ export async function GET(request: NextRequest) {
     templatesRes.error ??
     tasksRes.error ??
     milestonesRes.error ??
-    regionsRes.error;
+    regionsRes.error ??
+    videosRes.error;
   if (studentsErr) {
     await logCronFinish(runId, "failed", { error: studentsErr.message });
     return NextResponse.json({ error: studentsErr.message }, { status: 500 });
@@ -552,12 +597,171 @@ export async function GET(request: NextRequest) {
   // runs before the cap and the supersession below, so a candidate dropped
   // here never dismisses another task on its way out. A candidate kept is
   // recorded, so a second one of the same message in this run is dropped too.
-  const had = messagesHad(hadTasks);
+  // The stopped-watching DM's break starts at the student's last finished
+  // lesson (src/lib/dm-moments.ts lastLessonAt).
+  const had = messagesHad(hadTasks, (id) => {
+    const snap = snapByStudent.get(id);
+    return snap ? lastLessonAt(snap) : null;
+  });
   const candidates = toInsert.filter((c) => {
     if (had.has(c.student_id, c.scenario_id)) return false;
     had.add(c.student_id, c.scenario_id);
     return true;
   });
+
+  // ─── 2d. Stopped watching and the 30% closing (2026-10-30) ─
+  //
+  // The two DMs the owner added (src/lib/dm-moments.ts): thirty.closing,
+  // once, 2 days or less before a student's 2 weeks for the 30% end while
+  // they can still make it; else the stopped-watching DM, lapse.30 while the
+  // 30% is still in reach and lapse.plain otherwise, once per break and at
+  // most twice. Built-in rules: made only while their template is on
+  // (templateBy, so no template, no task and no error), and not here where
+  // the template has conditions of its own (2b judges those). Each candidate
+  // passes the rule of 2c here, with the same record, the closing first:
+  // once it is kept the student gets no stopped-watching task that run (the
+  // owner: "If #7 is due for the student in the same run, only #7 goes"),
+  // and a closing they had keeps the rest of that break quiet (dm-queue.ts).
+  //
+  // The counted videos are the 30%'s: discount.ts's, over the lessons and
+  // lesson_videos read above, a video done when its completed_at is set, as
+  // discount-server.ts counts them. The 30% is read only for the students one
+  // of the two may go to (mayNeedThirty), 100 ids at a time, in pages: their
+  // discount requests (pending, approved or applied = applied; one that
+  // counts decides, as on the map) and their stored coupon answer, read as
+  // check-na-tasks reads it for whop.watcher (storedRowApplies, then a
+  // discount on the renewal or rowShowsUnpaid; no row closes nothing). A
+  // failed read stops the run before anything is written.
+  const nowMs = Date.now();
+  const catalog = toDiscountLessons(
+    lessons as unknown as CatalogLessonRow[],
+    new Set(videosRes.data.map((v) => v.lesson_id)),
+  );
+  const videoDoneOf = new Map<string, Set<string>>();
+  const videosOf = new Map<string, ThirtyVideos>();
+  const momentOf = new Map<string, MomentStudent>();
+  for (const student of students) {
+    const snap = snapByStudent.get(student.id);
+    if (!snap) continue;
+    const done = videoDoneIds(completionsByStudent.get(student.id) ?? []);
+    const videos = thirtyVideos(catalog, done);
+    videoDoneOf.set(student.id, done);
+    videosOf.set(student.id, videos);
+    momentOf.set(student.id, {
+      signedIn: Boolean(snap.student.first_sprint_login_at),
+      canceling: snapshotIsCanceling(snap),
+      dayOnCourse: snap.dayOnCourse,
+      lessonsFinished: totalCompletedAcrossRegions(snap),
+      lastLessonAt: lastLessonAt(snap),
+      firstPaidAt: student.first_paid_at ?? null,
+      videos,
+    });
+  }
+  /** A moment's template, while it is on and has no conditions of its own. */
+  const momentTemplate = (scenarioId: string) =>
+    overriddenScenarios.has(scenarioId) ? undefined : templateBy.get(scenarioId);
+  const momentsOn = [THIRTY_CLOSING, ...STOPPED_WATCHING].some((x) => momentTemplate(x));
+  const thirtyRead = momentsOn
+    ? students.filter((s) => {
+        const m = momentOf.get(s.id);
+        return m ? mayNeedThirty(m, nowMs) : false;
+      }).map((s) => s.id)
+    : [];
+  const membershipOf = new Map(students.map((s) => [s.id, s.whop_membership_id ?? null]));
+  const requestsOf = new Map<string, DiscountRequestRow[]>();
+  // Also read by 3c, for whop.watcher and thirty.closing.
+  const appliedForThirty = new Set<string>();
+  const couponClosesThirty = new Set<string>();
+  for (let i = 0; i < thirtyRead.length; i += ID_BATCH) {
+    const ids = thirtyRead.slice(i, i + ID_BATCH);
+    const [requestsRes, couponsRes] = await Promise.all([
+      fetchAllRowsPaginated<DiscountRequestRow & { student_id: string }>(() =>
+        supabase
+          .from("discount_requests")
+          .select("id, student_id, status, created_at")
+          .in("student_id", ids)
+          .order("id"),
+      ),
+      fetchAllRowsPaginated<{
+        student_id: string;
+        whop_membership_id: string | null;
+        discounted: boolean;
+        promo_code_id: string | null;
+        renewal_price: number | string | null;
+      }>(() =>
+        supabase
+          .from(MEMBERSHIP_DISCOUNTS_TABLE)
+          .select("student_id, whop_membership_id, discounted, promo_code_id, renewal_price")
+          .in("student_id", ids)
+          .order("student_id"),
+      ),
+    ]);
+    const readErr = requestsRes.error ?? couponsRes.error;
+    if (readErr) {
+      const message = `The 30% read failed: ${readErr.message}`;
+      await logCronFinish(runId, "failed", { error: message });
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+    for (const r of requestsRes.data) {
+      requestsOf.set(r.student_id, [...(requestsOf.get(r.student_id) ?? []), r]);
+      if (THIRTY_APPLIED_STATUSES.includes(r.status)) appliedForThirty.add(r.student_id);
+    }
+    for (const row of couponsRes.data) {
+      if (
+        storedRowApplies(row, membershipOf.get(row.student_id)) &&
+        (row.discounted === true || rowShowsUnpaid(row))
+      ) {
+        couponClosesThirty.add(row.student_id);
+      }
+    }
+  }
+  const thirtyReadIds = new Set(thirtyRead);
+
+  /** A 2d candidate through the rule of 2c, as above: true when it is kept. */
+  const consider = (row: (typeof toInsert)[number]): boolean => {
+    toInsert.push(row);
+    if (had.has(row.student_id, row.scenario_id)) return false;
+    had.add(row.student_id, row.scenario_id);
+    candidates.push(row);
+    return true;
+  };
+  for (const student of momentsOn ? students : []) {
+    const m = momentOf.get(student.id);
+    if (!m) continue;
+    const reach = thirtyReach({
+      now: new Date(nowMs),
+      firstPaidAt: m.firstPaidAt,
+      lessons: catalog,
+      videoDone: videoDoneOf.get(student.id) ?? new Set<string>(),
+      requests: requestsOf.get(student.id) ?? [],
+      applied: appliedForThirty.has(student.id),
+      couponCloses: couponClosesThirty.has(student.id),
+    });
+    const closingTemplate = momentTemplate(THIRTY_CLOSING);
+    const closing = closingTemplate ? thirtyClosing(m, reach, nowMs) : null;
+    if (
+      closingTemplate &&
+      closing &&
+      consider({
+        student_id: student.id,
+        scenario_id: THIRTY_CLOSING,
+        template_id: closingTemplate,
+        behavior_summary: closing,
+      })
+    ) {
+      continue;
+    }
+    const lapse = stoppedWatching(m, reach, nowMs);
+    const lapseTemplate = lapse ? momentTemplate(lapse.scenarioId) : undefined;
+    if (lapse && lapseTemplate) {
+      consider({
+        student_id: student.id,
+        scenario_id: lapse.scenarioId,
+        template_id: lapseTemplate,
+        behavior_summary: lapse.summary,
+      });
+    }
+  }
 
   // ─── 3. Per-student priority cap ──────────────────────────
   //
@@ -583,6 +787,7 @@ export async function GET(request: NextRequest) {
     student_id: string;
     scenario_id: string;
     template_id: string | null;
+    created_at: string;
     template: { bucket: string } | { bucket: string }[] | null;
   };
   const { data: openTasksWithBucket, error: openTasksErr } =
@@ -590,7 +795,7 @@ export async function GET(request: NextRequest) {
       supabase
         .from("tasks")
         .select(
-          "id, student_id, scenario_id, template_id, template:templates(bucket)",
+          "id, student_id, scenario_id, template_id, created_at, template:templates(bucket)",
         )
         .eq("status", "open"),
     );
@@ -632,22 +837,23 @@ export async function GET(request: NextRequest) {
   );
 
   // The students holding an open whop.watcher task (check-na-tasks queues
-  // it) who applied for the 30%: 3c dismisses that task once they applied or
-  // their window closed. Read here, before section 3 writes anything; a failed
-  // read stops the run. 100 ids at a time, as check-na-tasks reads them.
+  // it) or, since 2026-10-30, thirty.closing (2d) who applied for the 30%: 3c
+  // dismisses those tasks once they applied or their window closed. Read
+  // here, before section 3 writes anything; a failed read stops the run. 100
+  // ids at a time, as check-na-tasks reads them. A student 2d read already is
+  // not read again (appliedForThirty holds them).
   const watcherIds = [
     ...new Set(
       ((openTasksWithBucket ?? []) as unknown as OpenTaskRow[])
-        .filter((t) => t.scenario_id === WHOP_WATCHER)
+        .filter((t) => t.scenario_id === WHOP_WATCHER || t.scenario_id === THIRTY_CLOSING)
         .map((t) => t.student_id),
     ),
-  ];
-  const appliedForThirty = new Set<string>();
-  for (let i = 0; i < watcherIds.length; i += 100) {
+  ].filter((id) => !thirtyReadIds.has(id));
+  for (let i = 0; i < watcherIds.length; i += ID_BATCH) {
     const { data: appliedRows, error: appliedErr } = await supabase
       .from("discount_requests")
       .select("student_id")
-      .in("student_id", watcherIds.slice(i, i + 100))
+      .in("student_id", watcherIds.slice(i, i + ID_BATCH))
       .in("status", [...THIRTY_APPLIED_STATUSES]);
     if (appliedErr) {
       const message = `Discount requests fetch failed: ${appliedErr.message}`;
@@ -659,7 +865,7 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  type OpenSlot = { id: string; bucket: string };
+  type OpenSlot = { id: string; bucket: string; scenario_id: string };
   const negativeSlot = new Map<string, OpenSlot>();
   for (const t of (openTasksWithBucket ?? []) as unknown as OpenTaskRow[]) {
     const tpl = Array.isArray(t.template) ? t.template[0] : t.template;
@@ -670,7 +876,7 @@ export async function GET(request: NextRequest) {
       // slot so we don't accidentally let two coexist.
       const existing = negativeSlot.get(t.student_id);
       if (!existing || priorityFor(bucket) < priorityFor(existing.bucket)) {
-        negativeSlot.set(t.student_id, { id: t.id, bucket });
+        negativeSlot.set(t.student_id, { id: t.id, bucket, scenario_id: t.scenario_id });
       }
     }
   }
@@ -686,6 +892,19 @@ export async function GET(request: NextRequest) {
   const finalToInsert: typeof toInsert = [];
   const toDismiss: string[] = [];
 
+  // 2026-10-30: a thirty.closing candidate takes the slot of an open, unsent
+  // stopped-watching task, which is dismissed as superseded (the owner: when
+  // both are due, only the closing goes). The closing then keeps the rest of
+  // that break quiet (src/lib/dm-queue.ts).
+  for (const c of candidates) {
+    if (c.scenario_id !== THIRTY_CLOSING) continue;
+    const slot = negativeSlot.get(c.student_id);
+    if (slot && slot.id !== "(pending)" && STOPPED_WATCHING.includes(slot.scenario_id)) {
+      toDismiss.push(slot.id);
+      negativeSlot.delete(c.student_id);
+    }
+  }
+
   for (const c of candidates) {
     const bucket = bucketByScenario.get(c.scenario_id) ?? "";
     if (bucket !== "cancel_path" && bucket !== "at_risk") {
@@ -696,14 +915,14 @@ export async function GET(request: NextRequest) {
     const slot = negativeSlot.get(c.student_id);
     if (!slot) {
       finalToInsert.push(c);
-      negativeSlot.set(c.student_id, { id: "(pending)", bucket });
+      negativeSlot.set(c.student_id, { id: "(pending)", bucket, scenario_id: c.scenario_id });
       continue;
     }
     if (priorityFor(bucket) < priorityFor(slot.bucket)) {
       // Higher priority — supersede the slot's current task.
       if (slot.id !== "(pending)") toDismiss.push(slot.id);
       finalToInsert.push(c);
-      negativeSlot.set(c.student_id, { id: "(pending)", bucket });
+      negativeSlot.set(c.student_id, { id: "(pending)", bucket, scenario_id: c.scenario_id });
     }
     // else: slot taken by equal or higher priority — drop this candidate.
   }
@@ -813,7 +1032,11 @@ export async function GET(request: NextRequest) {
   //   2. Custom trigger_config on template → evaluateCustomTrigger
   //   3. whop.watcher (2026-10-30): its note is about the 30%, so it is
   //      dismissed once the student's 30% window has closed or they
-  //      applied (appliedForThirty, read above)
+  //      applied (appliedForThirty, read above); and the two DMs of 2d:
+  //      a stopped-watching task once the student finished a lesson after
+  //      it was made, lapse.30 also once their window has closed, and
+  //      thirty.closing once the window has closed, they applied or they
+  //      reached the 30%'s videos
   //   4. Day-tolerance fallback for *.dayN scenarios (catches
   //      stalled.*.dayN which is alert-based, not in triggers map):
   //      if current day > scenario_day + STALE_DAYS, dismiss.
@@ -926,6 +1149,53 @@ export async function GET(request: NextRequest) {
           tpl.trigger_config,
         ).match;
       }
+    }
+
+    // Path 3 (2026-10-30, 2d): a stopped-watching task, while the student
+    // has finished no lesson since it was made; lapse.30, which says the 30%
+    // is still there, only while their window is open (if the break goes on,
+    // lapse.plain follows at the next run: a dismissal by the app does not
+    // count as had).
+    if (stillMatches === null && STOPPED_WATCHING.includes(t.scenario_id)) {
+      const last = Date.parse(lastLessonAt(snap) ?? "");
+      if (Number.isFinite(last) && last > Date.parse(t.created_at)) {
+        autoDismissals.set(
+          t.id,
+          `Auto-dismissed: ${t.scenario_id}, the student finished a lesson since.`,
+        );
+      } else if (
+        t.scenario_id === LAPSE_THIRTY &&
+        !discountWindowOpen(student.first_paid_at ?? null, nowMs)
+      ) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: lapse.30, the student's 30% window has closed.",
+        );
+      }
+      continue;
+    }
+
+    // Path 3 (2026-10-30, 2d): thirty.closing, while the window is open, they
+    // have not applied and they are still under the 30%'s videos.
+    if (stillMatches === null && t.scenario_id === THIRTY_CLOSING) {
+      const videos = videosOf.get(student.id);
+      if (!discountWindowOpen(student.first_paid_at ?? null, nowMs)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: thirty.closing, the student's 30% window has closed.",
+        );
+      } else if (appliedForThirty.has(student.id)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: thirty.closing, the student applied for the 30%.",
+        );
+      } else if (videos && videos.needed > 0 && videos.done >= videos.needed) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: thirty.closing, the student reached the 30%'s videos.",
+        );
+      }
+      continue;
     }
 
     // Path 3: whop.watcher, while the 30% is still open to the student.

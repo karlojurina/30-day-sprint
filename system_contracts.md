@@ -313,7 +313,10 @@ When adding a new table, append it here. When deleting a field, scan
   with an action half is refused, and a tick counts as a streak day
   only on a lesson with no action half, T-079),
   `GET /api/cron/check-lesson-videos` (reads `id`, `type` and
-  `duration_seconds`, by name), and, while the catalog switch names
+  `duration_seconds`, by name), `GET /api/cron/check-csm-tasks` (since
+  branch `feat/dm-moments`, 2026-10-30: also `type`, `is_gate` and
+  `duration_seconds`, ordered by `sort_order`, from `lessons` by name,
+  for the 30%'s counted videos and their lengths, step 2d), and, while the catalog switch names
   this table, `GET /api/student/data`,
   `POST /api/student/lesson-video`,
   `POST /api/student/lesson-watched`, `save-action-link`,
@@ -646,7 +649,10 @@ When adding a new table, append it here. When deleting a field, scan
   a video id.
 - **Depended on by:** `POST /api/student/lesson-video` (reads
   `tella_video_id` for one lesson), `GET /api/student/data` (reads
-  `lesson_id` only, to attach `has_video`), the SQL function
+  `lesson_id` only, to attach `has_video`), `GET /api/cron/check-csm-tasks`
+  (since branch `feat/dm-moments`, 2026-10-30: `lesson_id` only, every
+  row in pages, which lessons the 30% counts for step 2d; a failed read
+  stops the run), the SQL function
   `record_lesson_heartbeat` (a lesson is playable only when it has a
   row here), `GET /api/cron/check-lesson-videos` (reads `lesson_id` and
   `tella_video_id` of every row, ordered by `lock_checked_at` with the
@@ -754,6 +760,19 @@ When adding a new table, append it here. When deleting a field, scan
   2026-10-30 also `whop.watcher` (built-in, no `trigger_config`, bucket
   `on_track`), added by hand with the team's message texts (no
   migration), which `check-na-tasks` queues since the DM queue fix.
+  Since branch `feat/dm-moments` (2026-10-30, not on production) also
+  three built-ins `check-csm-tasks` step 2d queues
+  (`src/lib/dm-moments.ts`), added by the owner's paste
+  `_admin/research/follow-ups/messages_v6_moments.sql` (no migration;
+  undo beside it), each `is_custom = false`, `trigger_config` null,
+  bucket `at_risk`, on: `lapse.30` and `lapse.plain` (the
+  stopped-watching DM's two versions, `week` null) and `thirty.closing`
+  (`week` `D14`). The code reads them by scenario among the templates
+  that are on: none there, or off, makes no task and no error; a
+  `trigger_config` saved on one hands it to step 2b like any built-in.
+  Their bucket is read from the row (they are not in `SCENARIO_BUCKET`,
+  as `whop.watcher` is not), and `at_risk` puts them in the one
+  negative slot per student.
 - **At the course switch (v104):** every active template whose
   `trigger_config -> 'all'` has an element naming `lesson_id` or
   `region`, or the metric `progress_ratio`, `progress_label` or
@@ -1134,7 +1153,12 @@ When adding a new table, append it here. When deleting a field, scan
   branch `fix/dm-queue`): `check-na-tasks` (`student_id` of the pending,
   approved and applied requests of the Whop watchers its one note may go
   to, which holds the note back) and `check-csm-tasks` (the same of the
-  students holding an open `whop.watcher`, whose note 3c then dismisses)
+  students holding an open `whop.watcher`, whose note 3c then dismisses;
+  since branch `feat/dm-moments`, 2026-10-30, also of the students holding
+  an open `thirty.closing`, and `id, student_id, status, created_at` of
+  every request of the students step 2d's DMs may go to, 100 ids at a
+  time, in pages: pending, approved or applied is applied, and a request
+  that counts decides as on the map, a rejected one closing the 30%)
 - **Stable contract:** `student_id`, `status`
   (pending/approved/rejected/applied), `promo_code`, `created_at`; since
   v116 (T-137, not pasted) also `promo_claimed_at` (timestamptz: set with
@@ -1684,7 +1708,11 @@ When adding a new table, append it here. When deleting a field, scan
   discounted, promo_code_id, renewal_price` of the Whop watchers its one
   note may go to, read as `/api/student/data` reads them, by
   `storedRowApplies` and `rowShowsUnpaid`; a row that closes the 30% holds
-  the note back, no row does not, and a failed read stops the run), the request and
+  the note back, no row does not, and a failed read stops the run),
+  `check-csm-tasks` (since branch `feat/dm-moments`, 2026-10-30: the same
+  columns, read the same way, for the students step 2d's DMs may go to,
+  100 ids at a time, in pages; a row that closes the 30% makes the
+  stopped-watching DM `lapse.plain` and holds `thirty.closing` back), the request and
   approve routes (their fallback when Whop does not answer: `whop_membership_id,
   promo_code_id, promo_code, renewal_price, discounted, checked_at, source,
   source_checked_at`, `renewal_price` since 2026-10-26, read again without
@@ -1822,7 +1850,8 @@ When adding a new table, append it here. When deleting a field, scan
   Dashboard's Open tasks tile (`src/app/admin/(authenticated)/page.tsx`,
   a count); the crons `check-csm-tasks` (reads and writes it; since the
   DM queue fix of 2026-10-30 its read also returns the tasks a team member
-  dismissed) and `check-na-tasks` (writes it, and since that fix reads its
+  dismissed, and since branch `feat/dm-moments` it and the open tasks read
+  also select `created_at`, for the stopped-watching DM's break and 3c) and `check-na-tasks` (writes it, and since that fix reads its
   pool's tasks of the messages it sends, in any status: `id, student_id,
   scenario_id, status, dismissed_by`); `src/lib/csm-events.ts` (the event tasks: it writes them, and reads
   and closes a student's open ones when an event comes);
@@ -1872,7 +1901,14 @@ When adding a new table, append it here. When deleting a field, scan
   student signed in) or a bulk reset (v109) did, and the rule holds
   again. A writer that dismisses for the team must set it, and a bulk
   dismissal meant to let the queue refill must leave it null.
-  `whop.watcher` goes to a student once, in any status, and never to one who already had the day 3 message (any of its 3 templates, sent or dismissed by a team member). The crons'
+  `whop.watcher` goes to a student once, in any status, and never to one who already had the day 3 message (any of its 3 templates, sent or dismissed by a team member).
+  One message may come again (branch `feat/dm-moments`, 2026-10-30, not on
+  production): the stopped-watching DM, `lapse.30` and `lapse.plain` being
+  one message, once per break and at most 2 times in all, both versions
+  counted. A task of either version had (as above) and made at or after the
+  student's last finished lesson means that break had it; a `thirty.closing`
+  had in the break takes its place; a task with no readable `created_at`
+  counts as made now. `thirty.closing` itself goes once ever. The crons'
   dismissals (`check-na-tasks`' and sections 3, 3b and 3c of
   `check-csm-tasks`) touch a task only while it is open
   (`status=eq.open` on the update), so a task the team marked sent or

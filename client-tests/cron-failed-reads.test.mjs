@@ -82,6 +82,11 @@ const LIBS = [
   ]],
   ['src/lib/dm-queue.ts', './_gen/dm-queue.ts', []],
   ['src/lib/world/discount.ts', './_gen/discount.ts', [['from "@/lib/constants"', 'from "./constants.ts"']]],
+  ['src/lib/world/discount-server.ts', './_gen/discount-server.ts', [['from "./discount"', 'from "./discount.ts"']]],
+  ['src/lib/dm-moments.ts', './_gen/dm-moments.ts', [
+    ['from "@/lib/world/discount"', 'from "./discount.ts"'],
+    ['from "@/lib/dm-queue"', 'from "./dm-queue.ts"'],
+  ]],
   ['src/lib/whop-members.ts', './_gen/whop-members.ts', [], { dropComments: true }],
   ['src/lib/whop-products.ts', './_gen/whop-products.ts', []],
   ['src/lib/first-payment.ts', './_gen/first-payment.ts', [['from "@/lib/whop-members"', 'from "./whop-members.ts"']]],
@@ -117,6 +122,10 @@ const NOW_ONLY = {
   csm: [
     ['from "@/lib/world/discount"', 'from "./discount.ts"'],
     ['from "@/lib/dm-queue"', 'from "./dm-queue.ts"'],
+    // Since step 2d (2026-10-30, dm-moments.test.mjs): the 30%'s count, the coupon answer and the two DMs.
+    ['from "@/lib/world/discount-server"', 'from "./discount-server.ts"'],
+    ['from "@/lib/membership-discount"', 'from "./membership-discount.ts"'],
+    ['from "@/lib/dm-moments"', 'from "./dm-moments.ts"'],
   ],
 }
 const ROUTES = {

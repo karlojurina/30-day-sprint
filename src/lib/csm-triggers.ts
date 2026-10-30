@@ -132,6 +132,11 @@ export interface StudentSnapshot {
 
   /** Days since last completion (rounded down). null if no completion exists. */
   daysSinceLastCompletion: number | null;
+  /** The latest completed_at on a lesson of the live course, the moment
+   *  daysSinceLastCompletion counts from: when the student last finished a
+   *  video, a counted lesson or not, its action item shipped or not
+   *  (2026-10-30, the stopped-watching DM, src/lib/dm-moments.ts). */
+  lastWatchedAt: string | null;
   /** Days since last_active_at. */
   daysSinceLastActive: number;
   /** Set of scenarios with an OPEN or recently-COMPLETED task — used by X.1 reactivation. */
@@ -262,6 +267,7 @@ export function buildStudentSnapshot(
   const shipped: Record<string, boolean> = {};
   const watched: Record<string, boolean> = {};
   let latestCompletionAt: number | null = null;
+  let lastWatchedAt: string | null = null;
   let latestCountedAt: number | null = null;
   let lastCountedCompletionAt: string | null = null;
 
@@ -284,6 +290,7 @@ export function buildStudentSnapshot(
         const t = new Date(c.completed_at).getTime();
         if (latestCompletionAt === null || t > latestCompletionAt) {
           latestCompletionAt = t;
+          lastWatchedAt = c.completed_at;
         }
       }
     }
@@ -378,6 +385,7 @@ export function buildStudentSnapshot(
     shipped,
     watched,
     daysSinceLastCompletion,
+    lastWatchedAt,
     daysSinceLastActive,
     recentTaskScenarios,
     totalLessonsInCurriculum,
@@ -467,7 +475,10 @@ function regionBelow(
   return r.fullyComplete / r.total < threshold;
 }
 
-function totalCompletedAcrossRegions(snap: StudentSnapshot): number {
+/** The lessons the student finished (watched or skipped), as the
+ *  nolessons.* rules count them: their "0 lessons", and the stopped-watching
+ *  DM's "has started" (src/lib/dm-moments.ts). */
+export function totalCompletedAcrossRegions(snap: StudentSnapshot): number {
   return Object.values(snap.regions).reduce(
     (sum, r) => sum + r.watchedComplete,
     0,

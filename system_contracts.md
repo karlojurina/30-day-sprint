@@ -1712,7 +1712,10 @@ When adding a new table, append it here. When deleting a field, scan
   `check-csm-tasks` (since branch `feat/dm-moments`, 2026-10-30: the same
   columns, read the same way, for the students step 2d's DMs may go to,
   100 ids at a time, in pages; a row that closes the 30% makes the
-  stopped-watching DM `lapse.plain` and holds `thirty.closing` back), the request and
+  stopped-watching DM `lapse.plain` and holds `thirty.closing` back; and,
+  before section 3 writes, for the students holding an open `lapse.30` or
+  `thirty.closing` that 2d did not read, a row that closes the 30% making
+  3c dismiss those tasks; a failed read stops the run), the request and
   approve routes (their fallback when Whop does not answer: `whop_membership_id,
   promo_code_id, promo_code, renewal_price, discounted, checked_at, source,
   source_checked_at`, `renewal_price` since 2026-10-26, read again without
@@ -1856,7 +1859,10 @@ When adding a new table, append it here. When deleting a field, scan
   scenario_id, status, dismissed_by`); `src/lib/csm-events.ts` (the event tasks: it writes them, and reads
   and closes a student's open ones when an event comes);
   `src/lib/csm-task-evaluation.ts` (`reEvaluateStudentOpenTasks`, which
-  dismisses a student's open tasks whose rule no longer holds). Nothing
+  dismisses a student's open tasks whose rule no longer holds; since branch
+  `feat/dm-moments`, 2026-10-30, it also selects `created_at`, and
+  dismisses an open `lapse.30` or `lapse.plain` once the student finished
+  a lesson after it was made). Nothing
   else reads it: the 30% page has read no `tasks` since admin rebuild 2
   (D4) took its last contact away, and Today (`/admin/today`, its `GET
   /api/admin/today` and `POST`/`DELETE /api/admin/today/mark`) was
@@ -1908,7 +1914,9 @@ When adding a new table, append it here. When deleting a field, scan
   counted. A task of either version had (as above) and made at or after the
   student's last finished lesson means that break had it; a `thirty.closing`
   had in the break takes its place; a task with no readable `created_at`
-  counts as made now. `thirty.closing` itself goes once ever. The crons'
+  counts as made now. A finished lesson here is the latest video finished,
+  counted lesson finished or lesson skipped (a skip counts as for
+  `nolessons.*`). `thirty.closing` itself goes once ever. The crons'
   dismissals (`check-na-tasks`' and sections 3, 3b and 3c of
   `check-csm-tasks`) touch a task only while it is open
   (`status=eq.open` on the update), so a task the team marked sent or

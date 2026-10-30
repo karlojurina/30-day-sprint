@@ -48,6 +48,7 @@ import {
   type QueueTask,
 } from "./dm-queue.ts";
 import {
+  closingAhead,
   lastLessonAt,
   mayNeedThirty,
   stoppedWatching,
@@ -416,6 +417,7 @@ export async function GET(request: NextRequest) {
       signedIn: Boolean(snap.student.first_sprint_login_at),
       canceling: snapshotIsCanceling(snap),
       dayOnCourse: snap.dayOnCourse,
+      daysSinceCourseStart: snap.daysSinceCourseStart,
       lessonsFinished: totalCompletedAcrossRegions(snap),
       lastLessonAt: lastLessonAt(snap),
       firstPaidAt: student.first_paid_at ?? null,
@@ -435,6 +437,31 @@ export async function GET(request: NextRequest) {
   const requestsOf = new Map<string, DiscountRequestRow[]>();
   const appliedForThirty = new Set<string>();
   const couponClosesThirty = new Set<string>();
+  type CouponRow = {
+    student_id: string;
+    whop_membership_id: string | null;
+    discounted: boolean;
+    promo_code_id: string | null;
+    renewal_price: number | string | null;
+  };
+  const readCoupons = (ids: string[]) =>
+    fetchAllRowsPaginated<CouponRow>(() =>
+      supabase
+        .from(MEMBERSHIP_DISCOUNTS_TABLE)
+        .select("student_id, whop_membership_id, discounted, promo_code_id, renewal_price")
+        .in("student_id", ids)
+        .order("student_id"),
+    );
+  const noteCoupons = (rows: CouponRow[]) => {
+    for (const row of rows) {
+      if (
+        storedRowApplies(row, membershipOf.get(row.student_id)) &&
+        (row.discounted === true || rowShowsUnpaid(row))
+      ) {
+        couponClosesThirty.add(row.student_id);
+      }
+    }
+  };
   for (let i = 0; i < thirtyRead.length; i += ID_BATCH) {
     const ids = thirtyRead.slice(i, i + ID_BATCH);
     const [requestsRes, couponsRes] = await Promise.all([
@@ -445,19 +472,7 @@ export async function GET(request: NextRequest) {
           .in("student_id", ids)
           .order("id"),
       ),
-      fetchAllRowsPaginated<{
-        student_id: string;
-        whop_membership_id: string | null;
-        discounted: boolean;
-        promo_code_id: string | null;
-        renewal_price: number | string | null;
-      }>(() =>
-        supabase
-          .from(MEMBERSHIP_DISCOUNTS_TABLE)
-          .select("student_id, whop_membership_id, discounted, promo_code_id, renewal_price")
-          .in("student_id", ids)
-          .order("student_id"),
-      ),
+      readCoupons(ids),
     ]);
     const readErr = requestsRes.error ?? couponsRes.error;
     if (readErr) {
@@ -469,14 +484,7 @@ export async function GET(request: NextRequest) {
       requestsOf.set(r.student_id, [...(requestsOf.get(r.student_id) ?? []), r]);
       if (THIRTY_APPLIED_STATUSES.includes(r.status)) appliedForThirty.add(r.student_id);
     }
-    for (const row of couponsRes.data) {
-      if (
-        storedRowApplies(row, membershipOf.get(row.student_id)) &&
-        (row.discounted === true || rowShowsUnpaid(row))
-      ) {
-        couponClosesThirty.add(row.student_id);
-      }
-    }
+    noteCoupons(couponsRes.data);
   }
   const thirtyReadIds = new Set(thirtyRead);
 
@@ -515,6 +523,13 @@ export async function GET(request: NextRequest) {
     }
     const lapse = stoppedWatching(m, reach, nowMs);
     const lapseTemplate = lapse ? momentTemplate(lapse.scenarioId) : undefined;
+    if (
+      closingTemplate &&
+      !had.has(student.id, THIRTY_CLOSING) &&
+      closingAhead(reach, nowMs)
+    ) {
+      continue;
+    }
     if (lapse && lapseTemplate) {
       consider({
         student_id: student.id,
@@ -590,6 +605,24 @@ export async function GET(request: NextRequest) {
       appliedForThirty.add(r.student_id);
     }
   }
+  const couponIds = [
+    ...new Set(
+      ((openTasksWithBucket ?? []) as unknown as OpenTaskRow[])
+        .filter((t) => t.scenario_id === LAPSE_THIRTY || t.scenario_id === THIRTY_CLOSING)
+        .map((t) => t.student_id),
+    ),
+  ].filter((id) => !thirtyReadIds.has(id) && membershipOf.has(id));
+  for (let i = 0; i < couponIds.length; i += ID_BATCH) {
+    const { data: couponRows, error: couponErr } = await readCoupons(
+      couponIds.slice(i, i + ID_BATCH),
+    );
+    if (couponErr) {
+      const message = `Coupon answers fetch failed: ${couponErr.message}`;
+      await logCronFinish(runId, "failed", { error: message });
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+    noteCoupons(couponRows);
+  }
 
   type OpenSlot = { id: string; bucket: string; scenario_id: string };
   const negativeSlot = new Map<string, OpenSlot>();
@@ -614,15 +647,6 @@ export async function GET(request: NextRequest) {
   const toDismiss: string[] = [];
 
   for (const c of candidates) {
-    if (c.scenario_id !== THIRTY_CLOSING) continue;
-    const slot = negativeSlot.get(c.student_id);
-    if (slot && slot.id !== "(pending)" && STOPPED_WATCHING.includes(slot.scenario_id)) {
-      toDismiss.push(slot.id);
-      negativeSlot.delete(c.student_id);
-    }
-  }
-
-  for (const c of candidates) {
     const bucket = bucketByScenario.get(c.scenario_id) ?? "";
     if (bucket !== "cancel_path" && bucket !== "at_risk") {
       finalToInsert.push(c);
@@ -634,7 +658,11 @@ export async function GET(request: NextRequest) {
       negativeSlot.set(c.student_id, { id: "(pending)", bucket, scenario_id: c.scenario_id });
       continue;
     }
-    if (priorityFor(bucket) < priorityFor(slot.bucket)) {
+    const closingOverLapse =
+      c.scenario_id === THIRTY_CLOSING &&
+      slot.id !== "(pending)" &&
+      STOPPED_WATCHING.includes(slot.scenario_id);
+    if (priorityFor(bucket) < priorityFor(slot.bucket) || closingOverLapse) {
       if (slot.id !== "(pending)") toDismiss.push(slot.id);
       finalToInsert.push(c);
       negativeSlot.set(c.student_id, { id: "(pending)", bucket, scenario_id: c.scenario_id });
@@ -796,6 +824,11 @@ export async function GET(request: NextRequest) {
           t.id,
           "Auto-dismissed: lapse.30, the student's 30% window has closed.",
         );
+      } else if (t.scenario_id === LAPSE_THIRTY && couponClosesThirty.has(student.id)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: lapse.30, a coupon or no paid plan is on file for the student.",
+        );
       }
       continue;
     }
@@ -811,6 +844,11 @@ export async function GET(request: NextRequest) {
         autoDismissals.set(
           t.id,
           "Auto-dismissed: thirty.closing, the student applied for the 30%.",
+        );
+      } else if (couponClosesThirty.has(student.id)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: thirty.closing, a coupon or no paid plan is on file for the student.",
         );
       } else if (videos && videos.needed > 0 && videos.done >= videos.needed) {
         autoDismissals.set(

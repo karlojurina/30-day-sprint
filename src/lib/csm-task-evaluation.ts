@@ -19,6 +19,12 @@
  * The cron stays as the safety net — handles students who didn't
  * trigger a state-change endpoint (e.g. progressed via Whop direct,
  * or aged past a day-tolerance threshold).
+ *
+ * 2026-10-30 (the review): the stopped-watching DM (lapse.30, lapse.plain)
+ * too, once the student finished a lesson after it was made, as 3c judges
+ * it. Left to the cron, it stayed on To do up to 2 hours after a lesson, and
+ * the team could send "you haven't been on the videos" to a student who had
+ * just watched one. The 30% closing is left to the cron.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -28,6 +34,8 @@ import {
   triggers,
 } from "@/lib/csm-triggers";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
+import { STOPPED_WATCHING } from "@/lib/dm-queue";
+import { lastLessonAt } from "@/lib/dm-moments";
 import type { Student, TriggerConfig } from "@/types/database";
 
 /**
@@ -44,7 +52,7 @@ export async function reEvaluateStudentOpenTasks(
     // 1. Pull the student's open tasks. Early-exit if none.
     const { data: openTasks } = await supabase
       .from("tasks")
-      .select("id, scenario_id, template_id")
+      .select("id, scenario_id, template_id, created_at")
       .eq("student_id", studentId)
       .eq("status", "open");
 
@@ -178,6 +186,18 @@ export async function reEvaluateStudentOpenTasks(
         if (tpl?.trigger_config) {
           stillMatches = evaluateCustomTrigger(snap, tpl.trigger_config).match;
         }
+      }
+
+      // The stopped-watching DM (above): a lesson finished since it was made.
+      if (stillMatches === null && STOPPED_WATCHING.includes(task.scenario_id)) {
+        const last = Date.parse(lastLessonAt(snap) ?? "");
+        if (Number.isFinite(last) && last > Date.parse(task.created_at)) {
+          toDismiss.push({
+            id: task.id,
+            reason: `${task.scenario_id}, the student finished a lesson since.`,
+          });
+        }
+        continue;
       }
 
       // Path 3: day-tolerance fallback for *.dayN scenarios.

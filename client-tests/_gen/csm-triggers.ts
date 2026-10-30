@@ -137,6 +137,10 @@ export interface StudentSnapshot {
    *  video, a counted lesson or not, its action item shipped or not
    *  (2026-10-30, the stopped-watching DM, src/lib/dm-moments.ts). */
   lastWatchedAt: string | null;
+  /** The latest skipped_at on a lesson of the live course: a skip is a
+   *  finished lesson for nolessons.*, and so for the stopped-watching DM's
+   *  break (2026-10-30, the review). */
+  lastSkippedAt: string | null;
   /** Days since last_active_at. */
   daysSinceLastActive: number;
   /** Set of scenarios with an OPEN or recently-COMPLETED task — used by X.1 reactivation. */
@@ -268,6 +272,7 @@ export function buildStudentSnapshot(
   const watched: Record<string, boolean> = {};
   let latestCompletionAt: number | null = null;
   let lastWatchedAt: string | null = null;
+  let lastSkippedAt: string | null = null;
   let latestCountedAt: number | null = null;
   let lastCountedCompletionAt: string | null = null;
 
@@ -292,6 +297,13 @@ export function buildStudentSnapshot(
           latestCompletionAt = t;
           lastWatchedAt = c.completed_at;
         }
+      }
+      if (
+        c.skipped_at &&
+        (lastSkippedAt === null ||
+          new Date(c.skipped_at).getTime() > new Date(lastSkippedAt).getTime())
+      ) {
+        lastSkippedAt = c.skipped_at;
       }
     }
 
@@ -386,6 +398,7 @@ export function buildStudentSnapshot(
     watched,
     daysSinceLastCompletion,
     lastWatchedAt,
+    lastSkippedAt,
     daysSinceLastActive,
     recentTaskScenarios,
     totalLessonsInCurriculum,

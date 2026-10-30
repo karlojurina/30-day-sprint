@@ -90,6 +90,7 @@ import {
   type QueueTask,
 } from "@/lib/dm-queue";
 import {
+  closingAhead,
   lastLessonAt,
   mayNeedThirty,
   stoppedWatching,
@@ -622,6 +623,9 @@ export async function GET(request: NextRequest) {
   // once it is kept the student gets no stopped-watching task that run (the
   // owner: "If #7 is due for the student in the same run, only #7 goes"),
   // and a closing they had keeps the rest of that break quiet (dm-queue.ts).
+  // A stopped-watching DM due in the day before a closing the student will
+  // get waits for it (dm-moments.ts closingAhead; the review of 2026-10-30:
+  // made a run before, both went out 2 hours apart).
   //
   // The counted videos are the 30%'s: discount.ts's, over the lessons and
   // lesson_videos read above, a video done when its completed_at is set, as
@@ -651,6 +655,7 @@ export async function GET(request: NextRequest) {
       signedIn: Boolean(snap.student.first_sprint_login_at),
       canceling: snapshotIsCanceling(snap),
       dayOnCourse: snap.dayOnCourse,
+      daysSinceCourseStart: snap.daysSinceCourseStart,
       lessonsFinished: totalCompletedAcrossRegions(snap),
       lastLessonAt: lastLessonAt(snap),
       firstPaidAt: student.first_paid_at ?? null,
@@ -669,9 +674,37 @@ export async function GET(request: NextRequest) {
     : [];
   const membershipOf = new Map(students.map((s) => [s.id, s.whop_membership_id ?? null]));
   const requestsOf = new Map<string, DiscountRequestRow[]>();
-  // Also read by 3c, for whop.watcher and thirty.closing.
+  // Also read by 3c: applied for whop.watcher and thirty.closing, the coupon
+  // answer for lapse.30 and thirty.closing.
   const appliedForThirty = new Set<string>();
   const couponClosesThirty = new Set<string>();
+  type CouponRow = {
+    student_id: string;
+    whop_membership_id: string | null;
+    discounted: boolean;
+    promo_code_id: string | null;
+    renewal_price: number | string | null;
+  };
+  /** The stored coupon answers of up to ID_BATCH students, every page. */
+  const readCoupons = (ids: string[]) =>
+    fetchAllRowsPaginated<CouponRow>(() =>
+      supabase
+        .from(MEMBERSHIP_DISCOUNTS_TABLE)
+        .select("student_id, whop_membership_id, discounted, promo_code_id, renewal_price")
+        .in("student_id", ids)
+        .order("student_id"),
+    );
+  /** Records the students whose answer closes the 30%, as check-na-tasks reads it for whop.watcher. */
+  const noteCoupons = (rows: CouponRow[]) => {
+    for (const row of rows) {
+      if (
+        storedRowApplies(row, membershipOf.get(row.student_id)) &&
+        (row.discounted === true || rowShowsUnpaid(row))
+      ) {
+        couponClosesThirty.add(row.student_id);
+      }
+    }
+  };
   for (let i = 0; i < thirtyRead.length; i += ID_BATCH) {
     const ids = thirtyRead.slice(i, i + ID_BATCH);
     const [requestsRes, couponsRes] = await Promise.all([
@@ -682,19 +715,7 @@ export async function GET(request: NextRequest) {
           .in("student_id", ids)
           .order("id"),
       ),
-      fetchAllRowsPaginated<{
-        student_id: string;
-        whop_membership_id: string | null;
-        discounted: boolean;
-        promo_code_id: string | null;
-        renewal_price: number | string | null;
-      }>(() =>
-        supabase
-          .from(MEMBERSHIP_DISCOUNTS_TABLE)
-          .select("student_id, whop_membership_id, discounted, promo_code_id, renewal_price")
-          .in("student_id", ids)
-          .order("student_id"),
-      ),
+      readCoupons(ids),
     ]);
     const readErr = requestsRes.error ?? couponsRes.error;
     if (readErr) {
@@ -706,14 +727,7 @@ export async function GET(request: NextRequest) {
       requestsOf.set(r.student_id, [...(requestsOf.get(r.student_id) ?? []), r]);
       if (THIRTY_APPLIED_STATUSES.includes(r.status)) appliedForThirty.add(r.student_id);
     }
-    for (const row of couponsRes.data) {
-      if (
-        storedRowApplies(row, membershipOf.get(row.student_id)) &&
-        (row.discounted === true || rowShowsUnpaid(row))
-      ) {
-        couponClosesThirty.add(row.student_id);
-      }
-    }
+    noteCoupons(couponsRes.data);
   }
   const thirtyReadIds = new Set(thirtyRead);
 
@@ -753,6 +767,14 @@ export async function GET(request: NextRequest) {
     }
     const lapse = stoppedWatching(m, reach, nowMs);
     const lapseTemplate = lapse ? momentTemplate(lapse.scenarioId) : undefined;
+    // Waits for the closing due within a day (above).
+    if (
+      closingTemplate &&
+      !had.has(student.id, THIRTY_CLOSING) &&
+      closingAhead(reach, nowMs)
+    ) {
+      continue;
+    }
     if (lapse && lapseTemplate) {
       consider({
         student_id: student.id,
@@ -864,6 +886,29 @@ export async function GET(request: NextRequest) {
       appliedForThirty.add(r.student_id);
     }
   }
+  // And the stored coupon answer of a student holding an open lapse.30 or
+  // thirty.closing (the review of 2026-10-30): both are made only while no
+  // coupon closes the 30%, and 3c dismisses them once one does. The students
+  // 2d read already, and those outside the pool (3c dismisses their tasks
+  // anyway), are not read. A failed read stops the run before any write.
+  const couponIds = [
+    ...new Set(
+      ((openTasksWithBucket ?? []) as unknown as OpenTaskRow[])
+        .filter((t) => t.scenario_id === LAPSE_THIRTY || t.scenario_id === THIRTY_CLOSING)
+        .map((t) => t.student_id),
+    ),
+  ].filter((id) => !thirtyReadIds.has(id) && membershipOf.has(id));
+  for (let i = 0; i < couponIds.length; i += ID_BATCH) {
+    const { data: couponRows, error: couponErr } = await readCoupons(
+      couponIds.slice(i, i + ID_BATCH),
+    );
+    if (couponErr) {
+      const message = `Coupon answers fetch failed: ${couponErr.message}`;
+      await logCronFinish(runId, "failed", { error: message });
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
+    noteCoupons(couponRows);
+  }
 
   type OpenSlot = { id: string; bucket: string; scenario_id: string };
   const negativeSlot = new Map<string, OpenSlot>();
@@ -892,19 +937,6 @@ export async function GET(request: NextRequest) {
   const finalToInsert: typeof toInsert = [];
   const toDismiss: string[] = [];
 
-  // 2026-10-30: a thirty.closing candidate takes the slot of an open, unsent
-  // stopped-watching task, which is dismissed as superseded (the owner: when
-  // both are due, only the closing goes). The closing then keeps the rest of
-  // that break quiet (src/lib/dm-queue.ts).
-  for (const c of candidates) {
-    if (c.scenario_id !== THIRTY_CLOSING) continue;
-    const slot = negativeSlot.get(c.student_id);
-    if (slot && slot.id !== "(pending)" && STOPPED_WATCHING.includes(slot.scenario_id)) {
-      toDismiss.push(slot.id);
-      negativeSlot.delete(c.student_id);
-    }
-  }
-
   for (const c of candidates) {
     const bucket = bucketByScenario.get(c.scenario_id) ?? "";
     if (bucket !== "cancel_path" && bucket !== "at_risk") {
@@ -918,7 +950,19 @@ export async function GET(request: NextRequest) {
       negativeSlot.set(c.student_id, { id: "(pending)", bucket, scenario_id: c.scenario_id });
       continue;
     }
-    if (priorityFor(bucket) < priorityFor(slot.bucket)) {
+    // 2026-10-30: a thirty.closing also takes the slot of an open, unsent
+    // stopped-watching task, which is dismissed as superseded (the owner: when
+    // both are due, only the closing goes); the closing then keeps the rest
+    // of that break quiet (src/lib/dm-queue.ts). Decided here, where the
+    // closing gets the slot: an at_risk candidate before it in this run (an
+    // alert, 2a or 2b) meets the open task, as before, and is dropped. One that
+    // took an empty slot keeps it, and the closing is dropped, as any at_risk
+    // candidate after another is.
+    const closingOverLapse =
+      c.scenario_id === THIRTY_CLOSING &&
+      slot.id !== "(pending)" &&
+      STOPPED_WATCHING.includes(slot.scenario_id);
+    if (priorityFor(bucket) < priorityFor(slot.bucket) || closingOverLapse) {
       // Higher priority — supersede the slot's current task.
       if (slot.id !== "(pending)") toDismiss.push(slot.id);
       finalToInsert.push(c);
@@ -1034,9 +1078,9 @@ export async function GET(request: NextRequest) {
   //      dismissed once the student's 30% window has closed or they
   //      applied (appliedForThirty, read above); and the two DMs of 2d:
   //      a stopped-watching task once the student finished a lesson after
-  //      it was made, lapse.30 also once their window has closed, and
-  //      thirty.closing once the window has closed, they applied or they
-  //      reached the 30%'s videos
+  //      it was made, lapse.30 also once their window has closed or a coupon
+  //      closes their 30%, and thirty.closing once the window has closed, they
+  //      applied, a coupon closes their 30% or they reached the 30%'s videos
   //   4. Day-tolerance fallback for *.dayN scenarios (catches
   //      stalled.*.dayN which is alert-based, not in triggers map):
   //      if current day > scenario_day + STALE_DAYS, dismiss.
@@ -1153,9 +1197,9 @@ export async function GET(request: NextRequest) {
 
     // Path 3 (2026-10-30, 2d): a stopped-watching task, while the student
     // has finished no lesson since it was made; lapse.30, which says the 30%
-    // is still there, only while their window is open (if the break goes on,
-    // lapse.plain follows at the next run: a dismissal by the app does not
-    // count as had).
+    // is still there, only while their window is open and no coupon closes
+    // it (if the break goes on, lapse.plain follows at the next run: a
+    // dismissal by the app does not count as had).
     if (stillMatches === null && STOPPED_WATCHING.includes(t.scenario_id)) {
       const last = Date.parse(lastLessonAt(snap) ?? "");
       if (Number.isFinite(last) && last > Date.parse(t.created_at)) {
@@ -1171,12 +1215,18 @@ export async function GET(request: NextRequest) {
           t.id,
           "Auto-dismissed: lapse.30, the student's 30% window has closed.",
         );
+      } else if (t.scenario_id === LAPSE_THIRTY && couponClosesThirty.has(student.id)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: lapse.30, a coupon or no paid plan is on file for the student.",
+        );
       }
       continue;
     }
 
     // Path 3 (2026-10-30, 2d): thirty.closing, while the window is open, they
-    // have not applied and they are still under the 30%'s videos.
+    // have not applied, no coupon closes their 30% and they are still under
+    // the 30%'s videos.
     if (stillMatches === null && t.scenario_id === THIRTY_CLOSING) {
       const videos = videosOf.get(student.id);
       if (!discountWindowOpen(student.first_paid_at ?? null, nowMs)) {
@@ -1188,6 +1238,11 @@ export async function GET(request: NextRequest) {
         autoDismissals.set(
           t.id,
           "Auto-dismissed: thirty.closing, the student applied for the 30%.",
+        );
+      } else if (couponClosesThirty.has(student.id)) {
+        autoDismissals.set(
+          t.id,
+          "Auto-dismissed: thirty.closing, a coupon or no paid plan is on file for the student.",
         );
       } else if (videos && videos.needed > 0 && videos.done >= videos.needed) {
         autoDismissals.set(

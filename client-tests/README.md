@@ -479,7 +479,7 @@ counted for the panel's warning only while on, an Off badge and Turn on.
 67 and `template-on-off`'s 2), 0 failed.
 
 `dm-moments.test.mjs` (the stopped-watching and 30% closing DMs, 2026-10-30,
-branch `feat/dm-moments`, 35 checks) runs check-csm-tasks the same way,
+branch `feat/dm-moments`, 46 checks) runs check-csm-tasks the same way,
 through its own `GET` on the stand-in network, on a course of 61 counted
 videos (watch lessons that count, with a video, the 61st the gate), an
 action item with a video, and 3 lessons after the gate. The rule of
@@ -488,8 +488,10 @@ that break's for either version, a lesson after it starts a new break, two
 had are had for good, a dismissal by the app does not count, a
 `thirty.closing` had in the break takes its place, and `thirty.closing`
 itself goes once ever. In reach (`dm-moments.ts` `thirtyReach`): 39 videos
-of 10 minutes with 8.5 days left are, a counted video with no length is not,
-and the edge of 120 minutes a day left holds both ways. Stopped watching:
+of 10 minutes with 8.5 days left are, and still are with one of the videos
+left having no length (ranked last, `knownShortestSeconds`); 13 with no
+length (38 known for the 39 needed) are not; the edge of 120 minutes a day
+left holds both ways. Stopped watching:
 day 6, 10 videos, no lesson for 3 days, in reach: `lapse.30` with its
 summary; a coupon on file, a request pending, 30-minute videos (out of
 reach) or day 16 after 5 days: `lapse.plain`, saying why; day 16 after 4
@@ -522,6 +524,24 @@ route imports `dm-moments.ts`, `discount-server.ts` and
 imports in their copies of now; the copy of the route at 769e5f9 is ignored
 by git (`.gitignore`). `npm run test:client`: 84 suites, 5619 checks (5584 at 769e5f9 and these
 35), 0 failed.
+
+The review of the build (2026-10-30) added 11 checks, each run once on the
+build as reviewed (292d5d0, its sources swapped in) and failing there: a
+custom at_risk template due beside an open `lapse.30` and a due closing (the
+closing takes the slot; before, the lapse was dismissed and the closing
+dropped); a coupon answer landing after `lapse.30` or `thirty.closing` was
+made (discounted, or the unpaid answer: dismissed; `lapse.plain` stays),
+and the same with the three templates off, read in 3c; one counted video
+with no length (`lapse.30` and the closing still made); lessons only
+skipped (`lapse.30`) and a skip yesterday (no break); a lapse due a run
+before the closing (nothing, then the closing alone; 70 hours with 20
+videos and 80 hours with 44 still get `lapse.30`); lessons watched before
+the first payment (no lapse on day 2, `lapse.30` on day 4); the real-time
+evaluator (`csm-task-evaluation.ts`, copied as `_gen/csm-task-evaluation.ts`
+with no comment lines) dismissing an open lapse right after a lesson or a
+skip and keeping one with no lesson since; 3c's coupon read failing (a 500,
+nothing written); and the 2 unit checks above. `npm run test:client`: 84
+suites, 5630 checks, 0 failed.
 
 `phones-input-zoom.test.mjs` (phones-2) is a source check, since no harness
 renders the action item or the 30% form without the dev server: it parses

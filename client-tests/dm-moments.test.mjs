@@ -86,6 +86,15 @@ const LIBS = [
   ]],
 ]
 for (const [src, out, rw, opts] of LIBS) write(fromSrc(src), src, out, rw, opts)
+// The real-time evaluator a finished lesson runs (src/lib/complete-lesson.ts):
+// since the review of 2026-10-30 it dismisses an open stopped-watching task.
+write(fromSrc('src/lib/csm-task-evaluation.ts'), 'src/lib/csm-task-evaluation.ts', './_gen/csm-task-evaluation.ts', [
+  ['from "@/lib/csm-triggers"', 'from "./csm-triggers.ts"'],
+  ['from "@/lib/curriculum-reset"', 'from "./curriculum-reset.ts"'],
+  ['from "@/lib/dm-queue"', 'from "./dm-queue.ts"'],
+  ['from "@/lib/dm-moments"', 'from "./dm-moments.ts"'],
+  ['"@/types/database"', '"./types-erased.ts"'],
+], { dropComments: true })
 const ROUTE = 'src/app/api/cron/check-csm-tasks/route.ts'
 // Both copies' rewrites, then those only the copy of now needs. The copy of
 // now is the one dm-queue.test.mjs and cron-failed-reads.test.mjs write.
@@ -124,6 +133,8 @@ const QUEUE = await import('./_gen/dm-queue.ts')
 const MOMENTS = await import('./_gen/dm-moments.ts')
 const NOW_ROUTE = await import('./_gen/check-csm-tasks-route.ts')
 const BASE_ROUTE = await import(`./_gen/check-csm-tasks-route.${BASE}.ts`)
+const EVAL = await import('./_gen/csm-task-evaluation.ts')
+const { createServiceClient } = await import('./_gen/supabase-server.ts')
 
 let pass = 0
 const fails = []
@@ -274,8 +285,17 @@ console.log('\n=== src/lib/dm-moments.ts: in reach ===')
   const base = { now: new Date(NOW), firstPaidAt: iso(NOW - 5.5 * D), lessons, videoDone: new Set(COUNTED.slice(0, 10)), requests: [], applied: false, couponCloses: false }
   const r = MOMENTS.thirtyReach(base)
   ok(r.inReach === true && r.left === 39 && r.secondsLeft === 39 * 600, '10 of 61 on day 6, 10-minute videos: in reach, 39 left, 6.5 hours', show(r))
-  const unknown = MOMENTS.thirtyReach({ ...base, lessons: lessons.map((l) => (l.id === 'v60' ? { ...l, duration_seconds: null } : l)) })
-  ok(unknown.inReach === false && unknown.why === 'a counted video has no known length', 'a counted video not watched with no length: not in reach', show(unknown))
+  // The review of 2026-10-30: a video with no length is ranked last, so one missing length no longer makes the time unknown for everyone.
+  const oneUnknown = MOMENTS.thirtyReach({ ...base, lessons: lessons.map((l) => (l.id === 'v60' ? { ...l, duration_seconds: null } : l)) })
+  ok(oneUnknown.inReach === true && oneUnknown.left === 39 && oneUnknown.secondsLeft === 39 * 600,
+     'a counted video not watched with no length: the 39 shortest with a length decide (in reach, 6.5 hours)', show(oneUnknown))
+  const noLength = new Set(COUNTED.slice(48, 61))
+  const unknown = MOMENTS.thirtyReach({ ...base, lessons: lessons.map((l) => (noLength.has(l.id) ? { ...l, duration_seconds: null } : l)) })
+  ok(unknown.inReach === false && unknown.why === 'too few of the counted videos left have a known length',
+     '13 of the 51 left with no length (38 known for the 39 needed): not in reach', show(unknown))
+  ok(MOMENTS.knownShortestSeconds([{ duration_seconds: null }, { duration_seconds: 300 }, { duration_seconds: 60 }], 2) === 360
+      && MOMENTS.knownShortestSeconds([{ duration_seconds: null }, { duration_seconds: 300 }], 2) === null,
+     'knownShortestSeconds: the shortest with a length; null when too few have one')
   const edge = MOMENTS.thirtyReach({ ...base, lessons: catalog(10).map((l) => ({ ...l, has_video: true, duration_seconds: Math.floor((120 * 60 * 8.5) / 39) })) })
   ok(edge.inReach === true, 'the shortest still needed take just under 120 minutes a day left: in reach', show(edge))
   const over = MOMENTS.thirtyReach({ ...base, lessons: catalog(10).map((l) => ({ ...l, has_video: true, duration_seconds: Math.ceil((120 * 60 * 8.5) / 39) + 1 })) })
@@ -482,6 +502,120 @@ await rule('the three templates not there (the paste not run yet): no task, no e
     detail: show({ status: r.status, tasks: db.rows('tasks').length, run: db.rows('cron_runs').at(-1).status, reads: db.reads('discount_requests').length }) }
 })
 
+// ═══════════════════════════ the review of 2026-10-30 ═══════════════════════════
+console.log('\n=== The review of the build (2026-10-30): each check failed on the build as it was reviewed ===')
+await rule('a custom at_risk template due, an open lapse.30 and the closing due: the closing takes the slot (the lapse superseded, the custom dropped); BEFORE the lapse was dismissed and the closing dropped', async (R) => {
+  const a = sid('r1'), b = sid('r2')
+  const custom = { id: 'tpl-C-aaaaaa', scenario_id: 'C-aaaaaa', is_custom: true, is_active: true, is_admin_only: false, bucket: 'at_risk',
+    trigger_config: { all: [{ metric: 'days_since_last_completion', op: 'at_least', value: 3 }] } }
+  db = world({ students: [closingIn(a, 40), closingIn(b, 40)], completions: [...watched(a, 45, NOW - 4 * D), ...watched(b, 45, NOW - 4 * D)],
+    tasks: [task(a, 'lapse.30', 'open', { created_at: iso(NOW - D) })], templates: [...TEMPLATES, custom] })
+  await run(R)
+  // b has no open lapse: the custom, made first in the run, keeps the empty slot and nothing is dismissed (the cap's rule, unchanged).
+  return { pass: show(tasksOf(a)) === show(['lapse.30:dismissed', 'thirty.closing:open']) && taskOf(a, 'lapse.30')?.notes === 'Superseded by a higher-priority CSM task.'
+      && show(tasksOf(b)) === show(['C-aaaaaa:open']),
+    detail: show({ a: tasksOf(a), b: tasksOf(b) }) }
+})
+await rule('a coupon lands after the DM was made: an open lapse.30 and an open thirty.closing (discounted, or the unpaid answer) are dismissed; an open lapse.plain stays', async (R) => {
+  const a = sid('r3'), b = sid('r4'), c = sid('r5'), d = sid('r6')
+  db = world({
+    students: [student(a, 6, { whop_membership_id: 'mem_aaa333' }), closingIn(b, 30, { whop_membership_id: 'mem_bbb333' }),
+      closingIn(c, 30, { whop_membership_id: 'mem_ccc333' }), student(d, 6, { whop_membership_id: 'mem_ddd333' })],
+    completions: [...watched(a, 10, NOW - 3 * D - H), ...watched(b, 45, NOW - D), ...watched(c, 45, NOW - D), ...watched(d, 10, NOW - 3 * D - H)],
+    tasks: [task(b, 'thirty.closing', 'open', { created_at: iso(NOW - 10 * H) }), task(c, 'thirty.closing', 'open', { created_at: iso(NOW - 10 * H) }),
+      task(d, 'lapse.plain', 'open', { created_at: iso(NOW - 10 * H) })],
+  })
+  await run(R)
+  const made = tasksOf(a)
+  db.rows('student_membership_discounts').push(
+    { student_id: a, whop_membership_id: 'mem_aaa333', discounted: true, promo_code_id: 'promo_a', renewal_price: 67.9 },
+    { student_id: b, whop_membership_id: 'mem_bbb333', discounted: true, promo_code_id: 'promo_b', renewal_price: 67.9 },
+    { student_id: c, whop_membership_id: 'mem_ccc333', discounted: false, promo_code_id: null, renewal_price: null },
+    { student_id: d, whop_membership_id: 'mem_ddd333', discounted: true, promo_code_id: 'promo_d', renewal_price: 67.9 },
+  )
+  await run(R)
+  const got = [a, b, c, d].map((id) => db.rows('tasks').filter((t) => t.student_id === id).map((t) => `${t.scenario_id}:${t.status}${t.notes ? ` (${t.notes})` : ''}`).join(' | '))
+  return { pass: show(made) === show(['lapse.30:open']) && show(got) === show([
+      'lapse.30:dismissed (Auto-dismissed: lapse.30, a coupon or no paid plan is on file for the student.)',
+      'thirty.closing:dismissed (Auto-dismissed: thirty.closing, a coupon or no paid plan is on file for the student.)',
+      'thirty.closing:dismissed (Auto-dismissed: thirty.closing, a coupon or no paid plan is on file for the student.)',
+      'lapse.plain:open']),
+    detail: show({ made, got }) }
+})
+await rule('the three templates off (so 2d reads nothing): the open lapse.30 and thirty.closing are still judged on their coupon answer, read in 3c in one read', async (R) => {
+  const a = sid('r7'), b = sid('r8')
+  db = world({
+    students: [student(a, 6, { whop_membership_id: 'mem_aaa444' }), closingIn(b, 30, { whop_membership_id: 'mem_bbb444' })],
+    completions: [...watched(a, 10, NOW - 3 * D - H), ...watched(b, 45, NOW - D)],
+    coupons: [{ student_id: a, whop_membership_id: 'mem_aaa444', discounted: true, promo_code_id: 'promo_a', renewal_price: 67.9 },
+      { student_id: b, whop_membership_id: 'mem_bbb444', discounted: true, promo_code_id: 'promo_b', renewal_price: 67.9 }],
+    tasks: [task(a, 'lapse.30', 'open', { created_at: iso(NOW - 10 * H) }), task(b, 'thirty.closing', 'open', { created_at: iso(NOW - 10 * H) })],
+    templates: switched(MOMENTS_TEMPLATES),
+  })
+  await run(R)
+  return { pass: show(tasksOf(a)) === show(['lapse.30:dismissed']) && show(tasksOf(b)) === show(['thirty.closing:dismissed'])
+      && db.reads('student_membership_discounts').length === 1,
+    detail: show({ a: tasksOf(a), b: tasksOf(b), reads: db.reads('student_membership_discounts').length }) }
+})
+await rule('one counted video with no length (the gate): day 6 with 10 videos still gets lapse.30, and 40 hours before the end with 45 still gets the closing; BEFORE both got lapse.plain', async (R) => {
+  const a = sid('r9'), b = sid('ra')
+  db = world({ students: [student(a, 6), closingIn(b, 40)], completions: [...watched(a, 10, NOW - 3 * D - H), ...watched(b, 45, NOW - 4 * D)] })
+  db.rows('lessons').find((l) => l.id === 'v61').duration_seconds = null
+  await run(R)
+  return { pass: show(tasksOf(a)) === show(['lapse.30:open']) && show(tasksOf(b)) === show(['thirty.closing:open'])
+      && taskOf(b, 'thirty.closing')?.behavior_summary.endsWith('the 4 shortest left take about 40 minutes.'),
+    detail: show({ a: tasksOf(a), b: tasksOf(b), summary: taskOf(b, 'thirty.closing')?.behavior_summary }) }
+})
+await rule('lessons only skipped (5, skipped 6 days ago, day 9): lapse.30; a lesson skipped yesterday after 4 days without a video: no break; BEFORE the first never got a DM', async (R) => {
+  const a = sid('rb'), b = sid('rc')
+  const skipped = (student_id, ids, ms) => ids.map((lesson_id) => ({ student_id, lesson_id, completed_at: null, action_completed_at: null, skipped_at: iso(ms) }))
+  db = world({ students: [student(a, 9), student(b, 9)],
+    completions: [...skipped(a, COUNTED.slice(0, 5), NOW - 6 * D), ...watched(b, 10, NOW - 4 * D), ...skipped(b, ['v11'], NOW - D)] })
+  await run(R)
+  return { pass: show(tasksOf(a)) === show(['lapse.30:open']) && taskOf(a, 'lapse.30')?.behavior_summary.startsWith('Day 9 · no lesson finished in 6 days · 0 of 49 videos')
+      && tasksOf(b).length === 0,
+    detail: show({ a: tasksOf(a), summary: taskOf(a, 'lapse.30')?.behavior_summary, b: tasksOf(b) }) }
+})
+await rule('the lapse due a run before the closing (50 hours before the end, 44 videos, 4 days quiet): nothing, then the closing alone 4 hours later; 70 hours with 20 videos (the closing will not come) and 80 hours with 44: lapse.30; BEFORE the first got lapse.30 and then the closing', async (R) => {
+  const a = sid('rd'), b = sid('re'), c = sid('rf')
+  db = world({ students: [closingIn(a, 50), closingIn(b, 70), closingIn(c, 80)],
+    completions: [...watched(a, 44, NOW - 4 * D), ...watched(b, 20, NOW - 4 * D), ...watched(c, 44, NOW - 4 * D)] })
+  await run(R)
+  const first = tasksOf(a)
+  const st = db.rows('students').find((s) => s.id === a)
+  st.first_paid_at = st.joined_at = st.created_at = iso(Date.parse(st.first_paid_at) - 4 * H)
+  await run(R)
+  return { pass: show(first) === show([]) && show(tasksOf(a)) === show(['thirty.closing:open'])
+      && show(tasksOf(b)) === show(['lapse.30:open']) && show(tasksOf(c)) === show(['lapse.30:open']),
+    detail: show({ first, then: tasksOf(a), b: tasksOf(b), c: tasksOf(c) }) }
+})
+await rule('lessons watched before the first payment (6, 8 days ago; joined 10 days ago): no lapse on day 2; on day 4 (3 days since day 1 began) lapse.30; BEFORE day 2 got one', async (R) => {
+  const a = sid('rg'), b = sid('rh')
+  const paidFreeFirst = (id, paidAgoDays) => studentPaid(id, NOW - paidAgoDays * D, { joined_at: iso(NOW - 10 * D), created_at: iso(NOW - 10 * D) })
+  db = world({ students: [paidFreeFirst(a, 1.5), paidFreeFirst(b, 3.5)], completions: [...watched(a, 6, NOW - 8 * D), ...watched(b, 6, NOW - 8 * D)] })
+  await run(R)
+  return { pass: tasksOf(a).length === 0 && show(tasksOf(b)) === show(['lapse.30:open'])
+      && taskOf(b, 'lapse.30')?.behavior_summary.startsWith('Day 4 · no lesson finished in 3 days'),
+    detail: show({ a: tasksOf(a), b: tasksOf(b), summary: taskOf(b, 'lapse.30')?.behavior_summary }) }
+})
+{
+  // The real-time evaluator, as a finished lesson runs it.
+  const a = sid('ri'), b = sid('rj'), c = sid('rk')
+  db = world({ students: [student(a, 8), student(b, 8), student(c, 8)],
+    completions: [...watched(a, 10, NOW - 5 * D), ...watched(a, 1, NOW - 5 * 60_000, 10), ...watched(b, 10, NOW - 5 * D), ...watched(c, 10, NOW - 5 * D),
+      { student_id: c, lesson_id: 'v11', completed_at: null, action_completed_at: null, skipped_at: iso(NOW - 60_000) }],
+    tasks: [task(a, 'lapse.30', 'open', { created_at: iso(NOW - D) }), task(b, 'lapse.plain', 'open', { created_at: iso(NOW - D) }),
+      task(c, 'lapse.plain', 'open', { created_at: iso(NOW - D) })] })
+  const results = []
+  for (const id of [a, b, c]) results.push(await EVAL.reEvaluateStudentOpenTasks(createServiceClient(), id))
+  const t = taskOf(a, 'lapse.30')
+  ok(t?.status === 'dismissed' && t?.notes === 'Auto-dismissed (real-time): lapse.30, the student finished a lesson since.'
+      && show(tasksOf(b)) === show(['lapse.plain:open']) && show(tasksOf(c)) === show(['lapse.plain:dismissed'])
+      && results.every((r) => !('error' in r)),
+     'the real-time evaluator after a lesson: an open lapse.30 dismissed at once (and a lapse.plain after a skip); one with no lesson since kept; BEFORE it was left to the next cron run',
+     show({ a: `${t?.status}: ${t?.notes}`, b: tasksOf(b), c: tasksOf(c), results }))
+}
+
 // ═══════════════════════════ the reads ═══════════════════════════
 console.log('\n=== check-csm-tasks 2d: the reads ===')
 await rule('150 students a DM may go to: their requests and coupon answers read 100 ids at a time (2 reads each, each request line under 8 KB), and every one gets lapse.30', async (R) => {
@@ -508,12 +642,23 @@ for (const [what, match] of [
      `${what} read failing: a 500, cron_runs failed, and nothing written (no nolessons.day7, no lapse, the stale open lapse left as it was)`,
      show({ status: r.status, error: r.body.error, writes: db.writes().map((w) => `${w.method} ${w.table}`) }))
 }
+{
+  // 3c's read of the coupon answers (the review of 2026-10-30): the templates off, so 2d reads nothing.
+  const a = sid('fc'), b = sid('fd')
+  db = world({ students: [student(a, 6, { whop_membership_id: 'mem_fff111' }), student(b, 7)], completions: watched(a, 10, NOW - 3 * D - H),
+    tasks: [task(a, 'lapse.30', 'open', { created_at: iso(NOW - 10 * H) })], templates: switched(MOMENTS_TEMPLATES) })
+  db.failWhen = failing((r) => r.table === 'student_membership_discounts')
+  const r = await run()
+  ok(r.status === 500 && r.body.error === `Coupon answers fetch failed: ${FAILED_READ}` && db.rows('cron_runs').at(-1).status === 'failed' && db.writes().length === 0,
+     '3c\'s coupon read failing: a 500, cron_runs failed, and nothing written (no nolessons.day7, the open lapse.30 left as it was)',
+     show({ status: r.status, error: r.body.error, writes: db.writes().map((w) => `${w.method} ${w.table}`) }))
+}
 
 console.log('\n=== The copies ===')
 {
-  const copies = ['check-csm-tasks-route.ts', `check-csm-tasks-route.${BASE}.ts`]
+  const copies = ['check-csm-tasks-route.ts', `check-csm-tasks-route.${BASE}.ts`, 'csm-task-evaluation.ts']
   const left = copies.map((f) => fs.readFileSync(here(`./_gen/${f}`), 'utf8').split('\n').filter((l) => /^(\/\/|\/\*|\*)/.test(l.trimStart())).length)
-  ok(left.every((n) => n === 0), 'the two route copies keep no comment line (each ran above)', show(left))
+  ok(left.every((n) => n === 0), 'the two route copies and the evaluator\'s keep no comment line (each ran above)', show(left))
 }
 
 console.log(`\n${'='.repeat(58)}\n  PASS ${pass}   FAIL ${fails.length}`)

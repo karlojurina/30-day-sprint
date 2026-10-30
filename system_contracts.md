@@ -1872,7 +1872,7 @@ When adding a new table, append it here. When deleting a field, scan
   student signed in) or a bulk reset (v109) did, and the rule holds
   again. A writer that dismisses for the team must set it, and a bulk
   dismissal meant to let the queue refill must leave it null.
-  `whop.watcher` goes to a student once, in any status. The crons'
+  `whop.watcher` goes to a student once, in any status, and never to one who already had the day 3 message (any of its 3 templates, sent or dismissed by a team member). The crons'
   dismissals (`check-na-tasks`' and sections 3, 3b and 3c of
   `check-csm-tasks`) touch a task only while it is open
   (`status=eq.open` on the update), so a task the team marked sent or

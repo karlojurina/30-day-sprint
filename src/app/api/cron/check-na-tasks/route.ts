@@ -307,7 +307,16 @@ export async function GET(request: NextRequest) {
       (lessonsWatched.get(s.id) ?? 0) > 0 &&
       dayOf(s) >= 3 &&
       discountWindowOpen(s.first_paid_at, nowMs) &&
-      !(tasksByStudent.get(s.id) ?? []).some((t) => t.scenario_id === WHOP_WATCHER),
+      !(tasksByStudent.get(s.id) ?? []).some((t) => t.scenario_id === WHOP_WATCHER) &&
+      // The owner, 2026-10-30: a student who already had the day 3 message
+      // (any of its 3 templates, sent or dismissed by a team member) gets no
+      // note, since that message already told them about the 30%. An open
+      // stalled day 3 task does not count here: it is dismissed below, unsent.
+      !(tasksByStudent.get(s.id) ?? []).some(
+        (t) =>
+          sameMessage("nolessons.day3").includes(t.scenario_id) &&
+          (t.status === "completed" || (t.status === "dismissed" && t.dismissed_by != null)),
+      ),
   );
   const thirtyClosed = new Set<string>();
   for (let i = 0; i < watcherMayGet.length; i += ID_BATCH) {

@@ -193,7 +193,12 @@ export async function GET(request: NextRequest) {
       (lessonsWatched.get(s.id) ?? 0) > 0 &&
       dayOf(s) >= 3 &&
       discountWindowOpen(s.first_paid_at, nowMs) &&
-      !(tasksByStudent.get(s.id) ?? []).some((t) => t.scenario_id === WHOP_WATCHER),
+      !(tasksByStudent.get(s.id) ?? []).some((t) => t.scenario_id === WHOP_WATCHER) &&
+      !(tasksByStudent.get(s.id) ?? []).some(
+        (t) =>
+          sameMessage("nolessons.day3").includes(t.scenario_id) &&
+          (t.status === "completed" || (t.status === "dismissed" && t.dismissed_by != null)),
+      ),
   );
   const thirtyClosed = new Set<string>();
   for (let i = 0; i < watcherMayGet.length; i += ID_BATCH) {

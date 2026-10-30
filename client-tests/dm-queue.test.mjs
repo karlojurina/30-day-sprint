@@ -408,6 +408,21 @@ for (const [state, label] of [['sent', 'sent'], ['team-dismissed', 'dismissed by
     return { pass: tasksOf(a).length === 1 && tasksOf(a)[0].startsWith('whop.watcher:'), detail: show(tasksOf(a)) }
   })
 }
+for (const [scenario, state, label] of [['stalled.discord.day3', 'sent', 'sent on Discord'], ['stalled.whop.day3', 'team-dismissed', 'dismissed by a team member'], ['nolessons.day3', 'sent', 'sent as the no-lessons version']]) {
+  await rule(`a student who had the day 3 message (${label}) and then watches on Whop: no whop.watcher note, no stalled task`, async (R) => {
+    const a = sid('d3')
+    db = world({ students: [student(a, 5)], lessons: { [a]: ['a1l01', 'a1l02'] }, tasks: [task(a, scenario, state)] })
+    await run(R, 'na')
+    await run(R, 'na')
+    return { pass: tasksOf(a).length === 1 && tasksOf(a)[0].startsWith(`${scenario}:`), detail: show(tasksOf(a)) }
+  })
+}
+await rule('an OPEN, unsent stalled day 3 task does not block the note: it is dismissed and the note queued', async (R) => {
+  const a = sid('d3o')
+  db = world({ students: [student(a, 4)], lessons: { [a]: ['a1l01'] }, tasks: [task(a, 'stalled.whop.day3', 'open')] })
+  await run(R, 'na')
+  return { pass: show(tasksOf(a)) === show(['stalled.whop.day3:dismissed', 'whop.watcher:open']), detail: show(tasksOf(a)) }
+})
 await rule('day 2: nothing yet (the note waits for day 3), and no stalled task either', async (R) => {
   const a = sid('w2')
   db = world({ students: [student(a, 2)], lessons: { [a]: ['a1l01'] } })

@@ -34,7 +34,7 @@ import {
   triggers,
 } from "@/lib/csm-triggers";
 import { getCurriculumResetAt } from "@/lib/curriculum-reset";
-import { STOPPED_WATCHING } from "@/lib/dm-queue";
+import { STOPPED_AFTER, STOPPED_WATCHING } from "@/lib/dm-queue";
 import { lastLessonAt } from "@/lib/dm-moments";
 import type { Student, TriggerConfig } from "@/types/database";
 
@@ -188,8 +188,9 @@ export async function reEvaluateStudentOpenTasks(
         }
       }
 
-      // The stopped-watching DM (above): a lesson finished since it was made.
-      if (stillMatches === null && STOPPED_WATCHING.includes(task.scenario_id)) {
+      // The stopped-watching DMs (above; since 2026-11-03 also the one after
+      // Video Ads II): a lesson finished since it was made.
+      if (stillMatches === null && (STOPPED_WATCHING.includes(task.scenario_id) || STOPPED_AFTER.includes(task.scenario_id))) {
         const last = Date.parse(lastLessonAt(snap) ?? "");
         if (Number.isFinite(last) && last > Date.parse(task.created_at)) {
           toDismiss.push({

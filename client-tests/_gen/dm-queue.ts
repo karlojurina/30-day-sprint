@@ -37,6 +37,13 @@
  * for the student in the same run, only #7 goes." Had means the same here as
  * everywhere: open, sent, or dismissed by a team member. Every other message,
  * thirty.closing included, still goes once ever.
+ *
+ * Since 2026-11-03 a second message comes again the same way: stopped
+ * watching after Video Ads II (the owner: "I think we need 1 more after the
+ * video ads 2"), whose two versions (lapse.after, and lapse.after.again when
+ * the first stopped-watching DM went out in the last few days) are one
+ * message, once per break and at most STOPPED_AFTER_MAX times. A 30% closing
+ * does not take its place (a student past Video Ads II has the 30%'s videos).
  */
 
 /** The one note for a student who never signed in to the app but watches lessons on Whop (check-na-tasks queues it). */
@@ -53,11 +60,27 @@ export const STOPPED_WATCHING_MAX = 2;
 /** The 30% closing DM, 2 days or less before the student's 2 weeks end (check-csm-tasks 2d queues it). */
 export const THIRTY_CLOSING = "thirty.closing";
 
+/** Stopped watching after Video Ads II (#2; check-csm-tasks 2d queues it, src/lib/dm-moments.ts). */
+export const LAPSE_AFTER = "lapse.after";
+/** The same when the first stopped-watching DM went out in the last few days (#2.1: "I know I sent this a few days ago"). */
+export const LAPSE_AFTER_AGAIN = "lapse.after.again";
+/** Stopped watching after Video Ads II, its two versions: one message, once per break. */
+export const STOPPED_AFTER: readonly string[] = [LAPSE_AFTER, LAPSE_AFTER_AGAIN];
+/** How many times a student may have it, both versions counted together (as the first one: at most 2 in month 1). */
+export const STOPPED_AFTER_MAX = 2;
+
+/** The messages that may come again, once per break: their versions, their cap, and a message whose having in the break takes their place. */
+const BREAK_MESSAGES: ReadonlyArray<{ versions: readonly string[]; max: number; takesItsPlace: readonly string[] }> = [
+  { versions: STOPPED_WATCHING, max: STOPPED_WATCHING_MAX, takesItsPlace: [THIRTY_CLOSING] },
+  { versions: STOPPED_AFTER, max: STOPPED_AFTER_MAX, takesItsPlace: [] },
+];
+
 /** Scenarios whose templates send one and the same text (messages_v4.sql), and the stopped-watching DM's two versions. */
 const SAME_MESSAGE: ReadonlyArray<ReadonlyArray<string>> = [
   ["stalled.discord.day3", "stalled.whop.day3", "nolessons.day3"],
   ["stalled.discord.day7", "stalled.whop.day7", "nolessons.day7"],
   STOPPED_WATCHING,
+  STOPPED_AFTER,
 ];
 
 /** Every scenario that sends the same message as `scenarioId`, itself included. */
@@ -71,8 +94,10 @@ export interface QueueTask {
   scenario_id: string;
   status: string;
   dismissed_by: string | null;
-  /** When the task was made: read only for the stopped-watching DM's break. Left out or not a date: as if made now. */
+  /** When the task was made: read only for the stopped-watching DMs' break. Left out or not a date: as if made now. */
   created_at?: string | null;
+  /** When the team marked it sent: read only for lastSentAt. */
+  completed_at?: string | null;
 }
 
 /** Whether `task` means its student had its message: open, sent, or dismissed by a team member. */
@@ -97,10 +122,10 @@ export const HAD_TASKS_FILTER = "status.in.(open,completed),dismissed_by.not.is.
  * candidate of the same message is not made beside it.
  *
  * `lastLessonAt` says when a student last finished a lesson, for the
- * stopped-watching DM's break (check-csm-tasks hands it the snapshot's;
- * check-na-tasks, which never sends that DM, leaves it out). A task of that
- * DM, or a thirty.closing, made at or after that moment is in the same break;
- * with no lesson finished, every one is.
+ * stopped-watching DMs' break (check-csm-tasks hands it the snapshot's;
+ * check-na-tasks, which never sends them, leaves it out). A task of one of
+ * them (or, for the first, a thirty.closing) made at or after that moment is
+ * in the same break; with no lesson finished, every one is.
  */
 export function messagesHad(
   tasks: Iterable<QueueTask>,
@@ -110,12 +135,25 @@ export function messagesHad(
   add: (studentId: string, scenarioId: string) => void;
 } {
   const had = new Set<string>();
-  // Per student: how many stopped-watching DMs they had, and when each of
-  // those and each thirty.closing they had was made.
-  const stoppedCount = new Map<string, number>();
+  // Per student and message that may come again (BREAK_MESSAGES): how many
+  // they had, and when each of those, and each one that takes its place, was made.
+  const counts = new Map<string, number>();
   const breakMarks = new Map<string, number[]>();
-  const mark = (studentId: string, at: number) =>
-    breakMarks.set(studentId, [...(breakMarks.get(studentId) ?? []), at]);
+  const groupOf = (scenarioId: string) => BREAK_MESSAGES.findIndex((g) => g.versions.includes(scenarioId));
+  const marksFor = (scenarioId: string) =>
+    BREAK_MESSAGES.flatMap((g, i) => (g.versions.includes(scenarioId) || g.takesItsPlace.includes(scenarioId) ? [i] : []));
+  const mark = (studentId: string, scenarioId: string, at: number) => {
+    for (const i of marksFor(scenarioId)) {
+      const key = `${studentId}|${i}`;
+      breakMarks.set(key, [...(breakMarks.get(key) ?? []), at]);
+    }
+  };
+  const count = (studentId: string, scenarioId: string) => {
+    const i = groupOf(scenarioId);
+    if (i < 0) return;
+    const key = `${studentId}|${i}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  };
   const madeAt = (createdAt: string | null | undefined) => {
     const t = Date.parse(createdAt ?? "");
     return Number.isFinite(t) ? t : Date.now();
@@ -125,33 +163,41 @@ export function messagesHad(
   for (const t of tasks) {
     if (!countsAsHad(t)) continue;
     had.add(`${t.student_id}|${t.scenario_id}`);
-    if (STOPPED_WATCHING.includes(t.scenario_id)) {
-      stoppedCount.set(t.student_id, (stoppedCount.get(t.student_id) ?? 0) + 1);
-    }
-    if (STOPPED_WATCHING.includes(t.scenario_id) || t.scenario_id === THIRTY_CLOSING) {
-      mark(t.student_id, madeAt(t.created_at));
-    }
+    count(t.student_id, t.scenario_id);
+    mark(t.student_id, t.scenario_id, madeAt(t.created_at));
   }
   return {
     has: (studentId, scenarioId) => {
-      if (!STOPPED_WATCHING.includes(scenarioId)) {
-        return keys(studentId, scenarioId).some((k) => had.has(k));
-      }
-      if ((stoppedCount.get(studentId) ?? 0) >= STOPPED_WATCHING_MAX) return true;
+      const i = groupOf(scenarioId);
+      if (i < 0) return keys(studentId, scenarioId).some((k) => had.has(k));
+      const key = `${studentId}|${i}`;
+      if ((counts.get(key) ?? 0) >= BREAK_MESSAGES[i].max) return true;
       const last = Date.parse(lastLessonAt(studentId) ?? "");
-      const marks = breakMarks.get(studentId) ?? [];
+      const marks = breakMarks.get(key) ?? [];
       return Number.isFinite(last) ? marks.some((m) => m >= last) : marks.length > 0;
     },
     add: (studentId, scenarioId) => {
       had.add(`${studentId}|${scenarioId}`);
-      if (STOPPED_WATCHING.includes(scenarioId)) {
-        stoppedCount.set(studentId, (stoppedCount.get(studentId) ?? 0) + 1);
-      }
-      if (STOPPED_WATCHING.includes(scenarioId) || scenarioId === THIRTY_CLOSING) {
-        mark(studentId, Date.now());
-      }
+      count(studentId, scenarioId);
+      mark(studentId, scenarioId, Date.now());
     },
   };
+}
+
+/**
+ * When each student was last sent one of `scenarios` (a task the team marked
+ * sent, by its completed_at), in ms. A task with no readable completed_at is
+ * left out.
+ */
+export function lastSentAt(tasks: Iterable<QueueTask>, scenarios: readonly string[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const t of tasks) {
+    if (t.status !== "completed" || !scenarios.includes(t.scenario_id)) continue;
+    const at = Date.parse(t.completed_at ?? "");
+    if (!Number.isFinite(at)) continue;
+    if (at > (out.get(t.student_id) ?? -Infinity)) out.set(t.student_id, at);
+  }
+  return out;
 }
 
 /** A discount request in one of these means the student applied for the 30% (the database refuses another while one exists). */

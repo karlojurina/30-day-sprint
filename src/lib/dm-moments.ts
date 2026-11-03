@@ -1,14 +1,17 @@
 /**
- * The two DMs the owner added to the team's queue on 2026-10-30, as
- * check-csm-tasks step 2d decides them. Pure: the route reads, this judges.
+ * The DMs the owner added to the team's queue on 2026-10-30 (stopped
+ * watching, the 30% closing) and 2026-11-03 (stopped watching after Video
+ * Ads II), as check-csm-tasks step 2d decides them. Pure: the route reads,
+ * this judges.
  *
  * STOPPED WATCHING ("Alright nice, that's good - code it and make the
  * message"): a student who signed in to the app (one who never did gets only
  * the Whop note: "I don't want to spam them"), has started (a finished lesson,
  * counted as the nolessons.* rules count one) and watched at least 1 of the
  * counted videos (the owner, 2026-11-03: a student with only a skip or a
- * lesson with no video gets no "You made a nice start"), is under the 30%'s share of the
- * counted videos (videosNeeded: 49 of 61 today), and has finished no lesson
+ * lesson with no video gets no "You made a nice start"), has not got past
+ * Video Ads II (pastVideoAdsII; the owner, 2026-11-03: "#1 is for before
+ * that", so a student at 49 to 60 of the 61 gets it too), and has finished no lesson
  * for 3 days on course days 1 to 14, or for 5 days on days 15 to 30 (the
  * snapshot's dayOnCourse, as nolessons.* read it). The days are counted from
  * course day 1 at the earliest: lessons watched before it (on a free
@@ -26,6 +29,20 @@
  * Nor in the day before it (closingAhead): a stopped-watching DM due a run or a
  * day before the closing would send the student two DMs about the 30% hours
  * apart, so it waits for the closing.
+ *
+ * STOPPED WATCHING AFTER VIDEO ADS II (the owner, 2026-11-03: "I think we
+ * need 1 more after the video ads 2"): a student who signed in, is past Video
+ * Ads II ("finished the last lesson in Video Ads II and is about to watch
+ * Static ads": a lesson at or after the gate, a4l17 today, watched, skipped
+ * or shipped) and has finished no lesson for 4 days, any day of month 1, only
+ * while the break is new (STOPPED_NEW_DAYS). Two versions, one message
+ * (dm-queue.ts): lapse.after.again when the first stopped-watching DM went
+ * out in the last RECENT_FIRST_MS ("I know I sent this a few days ago"),
+ * lapse.after otherwise ("this is where the real sauce begins"). Not while
+ * the first went out less than HOLD_AFTER_FIRST_MS ago ("we don't send it
+ * YET"); a student who had it watched a lesson since and then went 4 days
+ * without one, so that can only happen when the team marked it sent late.
+ * Once per break, at most twice. Not to a canceling student.
  *
  * IN REACH (the owner's definition): they can still get to the share by
  * watching about 2 hours a day until their deadline, counted from the lengths
@@ -56,7 +73,7 @@ import {
   type DiscountLesson,
   type DiscountRequestRow,
 } from "@/lib/world/discount";
-import { LAPSE_PLAIN, LAPSE_THIRTY } from "@/lib/dm-queue";
+import { LAPSE_AFTER, LAPSE_AFTER_AGAIN, LAPSE_PLAIN, LAPSE_THIRTY } from "@/lib/dm-queue";
 
 const DAY_MS = 86_400_000;
 
@@ -82,6 +99,12 @@ export const CLOSING_WITHIN_MS = 2 * DAY_MS;
 export const CLOSING_HOLD_MS = DAY_MS;
 /** "About 2 hours a day": what a student can still watch each day left. */
 export const WATCH_MINUTES_A_DAY = 120;
+/** Days without a lesson that make a break past Video Ads II (the owner: "if they're inactive for 4 days"). */
+export const AFTER_DAYS = 4;
+/** The first stopped-watching DM sent less than this ago holds the one after Video Ads II back ("we don't send it YET"). */
+export const HOLD_AFTER_FIRST_MS = 4 * DAY_MS;
+/** The first stopped-watching DM sent this recently makes the one after Video Ads II say so ("a few days ago"). */
+export const RECENT_FIRST_MS = 7 * DAY_MS;
 
 /** When the student last finished a lesson: the latest of the three moments (above). Null when they finished none. */
 export function lastLessonAt(snap: {
@@ -141,6 +164,28 @@ export function thirtyVideos(
   };
 }
 
+/**
+ * Whether the student is past Video Ads II: a lesson at or after the gate
+ * (the last lesson of Video Ads II), in course order, watched, skipped or
+ * shipped. False when the catalog has no gate.
+ */
+export function pastVideoAdsII(
+  lessons: readonly DiscountLesson[],
+  completions: ReadonlyArray<{
+    lesson_id: string;
+    completed_at: string | null;
+    skipped_at?: string | null;
+    action_completed_at?: string | null;
+  }>,
+): boolean {
+  const gate = lessons.findIndex((l) => l.is_gate);
+  if (gate < 0) return false;
+  const after = new Set(lessons.slice(gate).map((l) => l.id));
+  return completions.some(
+    (c) => after.has(c.lesson_id) && Boolean(c.completed_at || c.skipped_at || c.action_completed_at),
+  );
+}
+
 /** What the two DMs read of a student, from the snapshot and the counted videos. */
 export interface MomentStudent {
   signedIn: boolean;
@@ -154,6 +199,8 @@ export interface MomentStudent {
   lastLessonAt: string | null;
   firstPaidAt: string | null;
   videos: ThirtyVideos;
+  /** pastVideoAdsII of the student's lessons. */
+  pastVideoAdsII: boolean;
 }
 
 /** Whole days without a lesson, when they make a stopped-watching break today; else null. */
@@ -161,9 +208,10 @@ export function stoppedWatchingBreak(m: MomentStudent, nowMs: number): number | 
   if (!m.signedIn || m.canceling) return null;
   if (m.lessonsFinished <= 0) return null;
   // At least 1 counted video (above): a skip alone is no start for this DM.
+  // With no counted videos (no gate) none is ever done, so nothing is judged.
   if (m.videos.done < 1) return null;
-  // No counted videos (needed 0) is never under the share: nothing is judged.
-  if (m.videos.done >= m.videos.needed) return null;
+  // Past Video Ads II: the one after it (stoppedAfterVideoAdsII) instead.
+  if (m.pastVideoAdsII) return null;
   if (m.dayOnCourse < 1 || m.dayOnCourse > MONTH_ONE_LAST_DAY) return null;
   const last = Date.parse(m.lastLessonAt ?? "");
   if (!Number.isFinite(last)) return null;
@@ -269,7 +317,35 @@ export function stoppedWatching(
   const quietDays = stoppedWatchingBreak(m, nowMs);
   if (quietDays === null) return null;
   // The owner's line, 2026-11-03: "Day 14 · stopped watching 3 days ago · 6 of 49, 30% out of reach".
-  const head = `Day ${m.dayOnCourse} · stopped watching ${quietDays} days ago · ${m.videos.done} of ${m.videos.needed}`;
+  // Past the 30%'s share (49 to 60 of the 61): out of all of them, as "55 of 49" reads wrong.
+  const of = m.videos.done >= m.videos.needed ? m.videos.total : m.videos.needed;
+  const head = `Day ${m.dayOnCourse} · stopped watching ${quietDays} days ago · ${m.videos.done} of ${of}`;
   if (reach.inReach) return { scenarioId: LAPSE_THIRTY, summary: `${head}, 30% still possible` };
   return { scenarioId: LAPSE_PLAIN, summary: `${head}, ${reach.why}` };
+}
+
+/**
+ * Stopped watching after Video Ads II (above), the version and its line, else
+ * null. `firstSentAt`: when the student was last sent the first
+ * stopped-watching DM (dm-queue.ts lastSentAt over lapse.30 and lapse.plain),
+ * or null.
+ */
+export function stoppedAfterVideoAdsII(
+  m: MomentStudent,
+  nowMs: number,
+  firstSentAt: number | null,
+): { scenarioId: string; summary: string } | null {
+  if (!m.signedIn || m.canceling || !m.pastVideoAdsII) return null;
+  if (m.dayOnCourse < 1 || m.dayOnCourse > MONTH_ONE_LAST_DAY) return null;
+  const last = Date.parse(m.lastLessonAt ?? "");
+  if (!Number.isFinite(last)) return null;
+  const quietDays = Math.min(Math.floor((nowMs - last) / DAY_MS), m.daysSinceCourseStart);
+  if (quietDays < AFTER_DAYS || quietDays > AFTER_DAYS + STOPPED_NEW_DAYS) return null;
+  const sinceFirst = firstSentAt === null ? null : nowMs - firstSentAt;
+  if (sinceFirst !== null && sinceFirst < HOLD_AFTER_FIRST_MS) return null;
+  const head = `Day ${m.dayOnCourse} · stopped watching ${quietDays} days ago · past Video Ads II`;
+  if (sinceFirst !== null && sinceFirst <= RECENT_FIRST_MS) {
+    return { scenarioId: LAPSE_AFTER_AGAIN, summary: `${head}, first one sent ${Math.floor(sinceFirst / DAY_MS)} days ago` };
+  }
+  return { scenarioId: LAPSE_AFTER, summary: head };
 }

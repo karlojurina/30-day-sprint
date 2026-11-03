@@ -264,13 +264,22 @@ const ON_SECTIONS: ReadonlyArray<{ key: string; label: string; has: (t: Template
     has: (t) => ["stalled.discord.day3", "stalled.whop.day3", "nolessons.day3"].includes(t.scenario_id),
   },
   { key: "whop-watcher", label: "From day 3 · Watching on Whop, never signed in", has: (t) => t.scenario_id === "whop.watcher" },
-  { key: "stopped-watching", label: "Days 4 to 30 · Stopped watching", has: (t) => ["lapse.30", "lapse.plain"].includes(t.scenario_id) },
+  {
+    key: "stopped-watching",
+    label: "Days 4 to 30 · Stopped watching, before the end of Video Ads II",
+    has: (t) => ["lapse.30", "lapse.plain"].includes(t.scenario_id),
+  },
   {
     key: "hasnt-started-7",
     label: "Day 7 · Still hasn't started, the last one",
     has: (t) => ["stalled.discord.day7", "stalled.whop.day7", "nolessons.day7"].includes(t.scenario_id),
   },
   { key: "thirty-closing", label: "Last 2 days of the 30% · 30% closing", has: (t) => t.scenario_id === "thirty.closing" },
+  {
+    key: "stopped-after",
+    label: "After Video Ads II · Stopped watching",
+    has: (t) => ["lapse.after", "lapse.after.again"].includes(t.scenario_id),
+  },
   { key: "clicked-cancel", label: "Any day · Clicked cancel", has: asksCanceling },
 ];
 

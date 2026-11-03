@@ -6,7 +6,7 @@ import {
   triggers,
 } from "./csm-triggers.ts";
 import { getCurriculumResetAt } from "./curriculum-reset.ts";
-import { STOPPED_WATCHING } from "./dm-queue.ts";
+import { STOPPED_AFTER, STOPPED_WATCHING } from "./dm-queue.ts";
 import { lastLessonAt } from "./dm-moments.ts";
 import type { Student, TriggerConfig } from "./types-erased.ts";
 
@@ -137,7 +137,7 @@ export async function reEvaluateStudentOpenTasks(
         }
       }
 
-      if (stillMatches === null && STOPPED_WATCHING.includes(task.scenario_id)) {
+      if (stillMatches === null && (STOPPED_WATCHING.includes(task.scenario_id) || STOPPED_AFTER.includes(task.scenario_id))) {
         const last = Date.parse(lastLessonAt(snap) ?? "");
         if (Number.isFinite(last) && last > Date.parse(task.created_at)) {
           toDismiss.push({

@@ -40,10 +40,12 @@ import {
 import {
   HAD_TASKS_FILTER,
   LAPSE_THIRTY,
+  STOPPED_AFTER,
   STOPPED_WATCHING,
   THIRTY_APPLIED_STATUSES,
   THIRTY_CLOSING,
   WHOP_WATCHER,
+  lastSentAt,
   messagesHad,
   type QueueTask,
 } from "./dm-queue.ts";
@@ -51,6 +53,8 @@ import {
   closingAhead,
   lastLessonAt,
   mayNeedThirty,
+  pastVideoAdsII,
+  stoppedAfterVideoAdsII,
   stoppedWatching,
   thirtyClosing,
   thirtyReach,
@@ -136,7 +140,7 @@ export async function GET(request: NextRequest) {
     fetchAllRowsPaginated<QueueTask>(() =>
       supabase
         .from("tasks")
-        .select("student_id, scenario_id, status, dismissed_by, created_at")
+        .select("student_id, scenario_id, status, dismissed_by, created_at, completed_at")
         .or(HAD_TASKS_FILTER)
         .order("id"),
     ),
@@ -422,11 +426,13 @@ export async function GET(request: NextRequest) {
       lastLessonAt: lastLessonAt(snap),
       firstPaidAt: student.first_paid_at ?? null,
       videos,
+      pastVideoAdsII: pastVideoAdsII(catalog, completionsByStudent.get(student.id) ?? []),
     });
   }
+  const firstSentAt = lastSentAt(hadTasks, STOPPED_WATCHING);
   const momentTemplate = (scenarioId: string) =>
     overriddenScenarios.has(scenarioId) ? undefined : templateBy.get(scenarioId);
-  const momentsOn = [THIRTY_CLOSING, ...STOPPED_WATCHING].some((x) => momentTemplate(x));
+  const momentsOn = [THIRTY_CLOSING, ...STOPPED_WATCHING, ...STOPPED_AFTER].some((x) => momentTemplate(x));
   const thirtyRead = momentsOn
     ? students.filter((s) => {
         const m = momentOf.get(s.id);
@@ -536,6 +542,17 @@ export async function GET(request: NextRequest) {
         scenario_id: lapse.scenarioId,
         template_id: lapseTemplate,
         behavior_summary: lapse.summary,
+      });
+      continue;
+    }
+    const after = stoppedAfterVideoAdsII(m, nowMs, firstSentAt.get(student.id) ?? null);
+    const afterTemplate = after ? momentTemplate(after.scenarioId) : undefined;
+    if (after && afterTemplate) {
+      consider({
+        student_id: student.id,
+        scenario_id: after.scenarioId,
+        template_id: afterTemplate,
+        behavior_summary: after.summary,
       });
     }
   }
@@ -809,7 +826,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    if (stillMatches === null && STOPPED_WATCHING.includes(t.scenario_id)) {
+    if (stillMatches === null && (STOPPED_WATCHING.includes(t.scenario_id) || STOPPED_AFTER.includes(t.scenario_id))) {
       const last = Date.parse(lastLessonAt(snap) ?? "");
       if (Number.isFinite(last) && last > Date.parse(t.created_at)) {
         autoDismissals.set(

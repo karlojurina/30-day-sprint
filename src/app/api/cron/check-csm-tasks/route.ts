@@ -25,7 +25,9 @@
  *
  *   Step 2d (2026-10-30): the two DMs the owner added, src/lib/dm-moments.ts:
  *   stopped watching (lapse.30 or lapse.plain) and the 30% closing
- *   (thirty.closing). 3c dismisses an open one once it no longer fits.
+ *   (thirty.closing); since 2026-11-03 also stopped watching after Video
+ *   Ads II (lapse.after or lapse.after.again). 3c dismisses an open one once
+ *   it no longer fits.
  *
  * On/off: steps 1 and 2a make a task only for a template that is on
  * (2026-10-30, T-106); step 2b already read only templates that are on.
@@ -82,10 +84,12 @@ import {
 import {
   HAD_TASKS_FILTER,
   LAPSE_THIRTY,
+  STOPPED_AFTER,
   STOPPED_WATCHING,
   THIRTY_APPLIED_STATUSES,
   THIRTY_CLOSING,
   WHOP_WATCHER,
+  lastSentAt,
   messagesHad,
   type QueueTask,
 } from "@/lib/dm-queue";
@@ -93,6 +97,8 @@ import {
   closingAhead,
   lastLessonAt,
   mayNeedThirty,
+  pastVideoAdsII,
+  stoppedAfterVideoAdsII,
   stoppedWatching,
   thirtyClosing,
   thirtyReach,
@@ -229,7 +235,7 @@ export async function GET(request: NextRequest) {
     fetchAllRowsPaginated<QueueTask>(() =>
       supabase
         .from("tasks")
-        .select("student_id, scenario_id, status, dismissed_by, created_at")
+        .select("student_id, scenario_id, status, dismissed_by, created_at, completed_at")
         .or(HAD_TASKS_FILTER)
         // Stable order is REQUIRED for .range() pagination — without
         // ORDER BY, Postgres gives no row-order guarantee and rows can
@@ -660,12 +666,15 @@ export async function GET(request: NextRequest) {
       lastLessonAt: lastLessonAt(snap),
       firstPaidAt: student.first_paid_at ?? null,
       videos,
+      pastVideoAdsII: pastVideoAdsII(catalog, completionsByStudent.get(student.id) ?? []),
     });
   }
+  // When each student was last sent the first stopped-watching DM, for the one after Video Ads II.
+  const firstSentAt = lastSentAt(hadTasks, STOPPED_WATCHING);
   /** A moment's template, while it is on and has no conditions of its own. */
   const momentTemplate = (scenarioId: string) =>
     overriddenScenarios.has(scenarioId) ? undefined : templateBy.get(scenarioId);
-  const momentsOn = [THIRTY_CLOSING, ...STOPPED_WATCHING].some((x) => momentTemplate(x));
+  const momentsOn = [THIRTY_CLOSING, ...STOPPED_WATCHING, ...STOPPED_AFTER].some((x) => momentTemplate(x));
   const thirtyRead = momentsOn
     ? students.filter((s) => {
         const m = momentOf.get(s.id);
@@ -781,6 +790,20 @@ export async function GET(request: NextRequest) {
         scenario_id: lapse.scenarioId,
         template_id: lapseTemplate,
         behavior_summary: lapse.summary,
+      });
+      continue;
+    }
+    // Past Video Ads II (2026-11-03): the stopped-watching DM after it. The
+    // first one never goes to such a student (pastVideoAdsII), so the two
+    // never meet in one run.
+    const after = stoppedAfterVideoAdsII(m, nowMs, firstSentAt.get(student.id) ?? null);
+    const afterTemplate = after ? momentTemplate(after.scenarioId) : undefined;
+    if (after && afterTemplate) {
+      consider({
+        student_id: student.id,
+        scenario_id: after.scenarioId,
+        template_id: afterTemplate,
+        behavior_summary: after.summary,
       });
     }
   }
@@ -1200,7 +1223,7 @@ export async function GET(request: NextRequest) {
     // is still there, only while their window is open and no coupon closes
     // it (if the break goes on, lapse.plain follows at the next run: a
     // dismissal by the app does not count as had).
-    if (stillMatches === null && STOPPED_WATCHING.includes(t.scenario_id)) {
+    if (stillMatches === null && (STOPPED_WATCHING.includes(t.scenario_id) || STOPPED_AFTER.includes(t.scenario_id))) {
       const last = Date.parse(lastLessonAt(snap) ?? "");
       if (Number.isFinite(last) && last > Date.parse(t.created_at)) {
         autoDismissals.set(

@@ -198,7 +198,7 @@ const watched = (student_id, n, ms, from = 0) => COUNTED.slice(from, from + n).m
   student_id, lesson_id, completed_at: iso(ms), action_completed_at: null, skipped_at: null,
 }))
 
-const MOMENTS_TEMPLATES = ['lapse.30', 'lapse.plain', 'thirty.closing']
+const MOMENTS_TEMPLATES = ['lapse.30', 'lapse.plain', 'thirty.closing', 'lapse.after', 'lapse.after.again']
 const TEMPLATES = [
   ...[['nolessons.day3', true], ['nolessons.day7', true], ['nolessons.day14', false]],
   ...MOMENTS_TEMPLATES.map((s) => [s, true]),
@@ -364,11 +364,13 @@ await rule('2 days without a lesson, never signed in, or canceling: nothing', as
   const r = await run(R)
   return { pass: r.status === 200 && db.rows('tasks').length === 0, detail: show(db.rows('tasks').map((t) => t.scenario_id)) }
 })
-await rule('0 lessons (day 7): only the hasn\'t-started message, nolessons.day7; 49 videos: nothing', async (R) => {
+await rule('0 lessons (day 7): only the hasn\'t-started message, nolessons.day7; 49 videos, not past Video Ads II: lapse.plain, out of the 61 (the owner, 2026-11-03: "#1 is for before that")', async (R) => {
   const zero = sid('l0'), done = sid('l9')
   db = world({ students: [student(zero, 7), student(done, 6)], completions: watched(done, 49, NOW - 3 * D - H) })
   await run(R)
-  return { pass: show(tasksOf(zero)) === show(['nolessons.day7:open']) && tasksOf(done).length === 0, detail: show({ zero: tasksOf(zero), done: tasksOf(done) }) }
+  return { pass: show(tasksOf(zero)) === show(['nolessons.day7:open']) && show(tasksOf(done)) === show(['lapse.plain:open'])
+      && taskOf(done, 'lapse.plain')?.behavior_summary === 'Day 6 · stopped watching 3 days ago · 49 of 61, reached the 30%',
+    detail: show({ zero: tasksOf(zero), done: tasksOf(done), summary: taskOf(done, 'lapse.plain')?.behavior_summary }) }
 })
 await rule('an action item\'s video watched yesterday, its link not in: no break (BEFORE the later of the two moments, the last counted lesson 4 days ago made one)', async (R) => {
   const a = sid('ac')
@@ -586,13 +588,13 @@ await rule('one counted video with no length (the gate): day 6 with 10 videos st
 // counted video. A student who only skipped, or only finished lessons the 30%
 // does not count, gets no "You made a nice start". Before it, the first two
 // below got lapse.30 with "0 of 49".
-await rule('no counted video (5 skipped 4 days ago; or only an action item and a lesson after the gate, 4 days ago), day 9: no DM; 1 counted video 4 days ago: lapse.30; a lesson skipped yesterday after 4 days without a video: no break', async (R) => {
+await rule('no counted video (5 skipped 4 days ago; or only an action item, 4 days ago), day 9: no DM; 1 counted video 4 days ago: lapse.30; a lesson skipped yesterday after 4 days without a video: no break', async (R) => {
   const a = sid('rb'), b = sid('rc'), c = sid('rl'), d = sid('rm')
   const skipped = (student_id, ids, ms) => ids.map((lesson_id) => ({ student_id, lesson_id, completed_at: null, action_completed_at: null, skipped_at: iso(ms) }))
   const finished = (student_id, ids, ms) => ids.map((lesson_id) => ({ student_id, lesson_id, completed_at: iso(ms), action_completed_at: iso(ms), skipped_at: null }))
   db = world({ students: [student(a, 9), student(b, 9), student(c, 9), student(d, 9)],
     completions: [...skipped(a, COUNTED.slice(0, 5), NOW - 4 * D), ...watched(b, 10, NOW - 4 * D), ...skipped(b, ['v11'], NOW - D),
-      ...finished(c, ['act1', 'x1'], NOW - 4 * D), ...watched(d, 1, NOW - 4 * D)] })
+      ...finished(c, ['act1'], NOW - 4 * D), ...watched(d, 1, NOW - 4 * D)] })
   await run(R)
   return { pass: tasksOf(a).length === 0 && tasksOf(b).length === 0 && tasksOf(c).length === 0
       && show(tasksOf(d)) === show(['lapse.30:open']) && taskOf(d, 'lapse.30')?.behavior_summary === 'Day 9 · stopped watching 4 days ago · 1 of 49, 30% still possible',
@@ -636,6 +638,111 @@ await rule('lessons watched before the first payment (6, 8 days ago; joined 10 d
       && results.every((r) => !('error' in r)),
      'the real-time evaluator after a lesson: an open lapse.30 dismissed at once (and a lapse.plain after a skip); one with no lesson since kept; BEFORE it was left to the next cron run',
      show({ a: `${t?.status}: ${t?.notes}`, b: tasksOf(b), c: tasksOf(c), results }))
+}
+
+// ═══════════════════════ stopped watching after Video Ads II ═══════════════════════
+// The owner, 2026-11-03: "I think we need 1 more after the video ads 2 ... if
+// they're inactive for 4 days is when we send them a message. IF we sent them
+// stopped watching #1 in the past 4 days then we don't send it YET ... if we
+// sent them #1 then we have a stopped watching #2.1 ... Otherwise ... #2", and
+// "Past Video ads 2 is past video 61, so finished the last lesson in Video ads
+// 2 and is about to watch Static ads. And #1 is for before that".
+console.log('\n=== check-csm-tasks 2d: stopped watching after Video Ads II ===')
+{
+  const lessons = catalog(10).map((l) => ({ ...l, has_video: true }))
+  const row = (lesson_id, o = {}) => ({ lesson_id, completed_at: null, skipped_at: null, action_completed_at: null, ...o })
+  ok(!MOMENTS.pastVideoAdsII(lessons, [row('v60', { completed_at: iso(NOW) })]) && MOMENTS.pastVideoAdsII(lessons, [row('v61', { completed_at: iso(NOW) })])
+      && MOMENTS.pastVideoAdsII(lessons, [row('v61', { skipped_at: iso(NOW) })]) && MOMENTS.pastVideoAdsII(lessons, [row('x2', { action_completed_at: iso(NOW) })])
+      && !MOMENTS.pastVideoAdsII(lessons.map((l) => ({ ...l, is_gate: false })), [row('x2', { completed_at: iso(NOW) })]),
+     'pastVideoAdsII: the gate (the last lesson of Video Ads II) or a lesson after it, watched, skipped or shipped; not video 60; never with no gate')
+}
+await rule('past Video Ads II (all 61, or the gate skipped), quiet 4 or 5 days on day 20: lapse.after; quiet 3 or 6: nothing; 55 of 61 quiet 5 days: lapse.plain, the first one', async (R) => {
+  const ids = { q4: sid('p4'), q5: sid('p5'), q3: sid('p3'), q6: sid('p6'), skip: sid('ps'), before: sid('pb') }
+  const skippedGate = (id, ms) => [...watched(id, 60, ms), { student_id: id, lesson_id: 'v61', completed_at: null, action_completed_at: null, skipped_at: iso(ms) }]
+  db = world({ students: Object.values(ids).map((id) => student(id, 20)),
+    completions: [...watched(ids.q4, 61, NOW - 4 * D - H), ...watched(ids.q5, 61, NOW - 5 * D - H), ...watched(ids.q3, 61, NOW - 3 * D - H), ...watched(ids.q6, 61, NOW - 6 * D - H),
+      ...skippedGate(ids.skip, NOW - 4 * D - H), ...watched(ids.before, 55, NOW - 5 * D - H)] })
+  await run(R)
+  const got = Object.fromEntries(Object.entries(ids).map(([k, id]) => [k, tasksOf(id)]))
+  return { pass: show(got.q4) === show(['lapse.after:open']) && show(got.q5) === show(['lapse.after:open']) && got.q3.length === 0 && got.q6.length === 0
+      && show(got.skip) === show(['lapse.after:open']) && show(got.before) === show(['lapse.plain:open'])
+      && taskOf(ids.q4, 'lapse.after')?.behavior_summary === 'Day 20 · stopped watching 4 days ago · past Video Ads II'
+      && taskOf(ids.before, 'lapse.plain')?.behavior_summary === 'Day 20 · stopped watching 5 days ago · 55 of 61, 30% closed',
+    detail: show({ got, q4: taskOf(ids.q4, 'lapse.after')?.behavior_summary, before: taskOf(ids.before, 'lapse.plain')?.behavior_summary }) }
+})
+await rule('the first stopped-watching DM sent 6 days ago: lapse.after.again ("I know I sent this a few days ago"); sent 10 days ago, or only dismissed by the team: lapse.after; sent 3 days ago: not yet', async (R) => {
+  const again = sid('pa'), old = sid('po'), dismissed = sid('pd'), hold = sid('ph')
+  db = world({ students: [again, old, dismissed, hold].map((id) => student(id, 20)),
+    completions: [again, old, dismissed, hold].flatMap((id) => watched(id, 61, NOW - 4 * D - H)),
+    tasks: [
+      task(again, 'lapse.plain', 'sent', { created_at: iso(NOW - 7 * D), completed_at: iso(NOW - 6 * D - H) }),
+      task(old, 'lapse.30', 'sent', { created_at: iso(NOW - 11 * D), completed_at: iso(NOW - 10 * D) }),
+      task(dismissed, 'lapse.plain', 'team-dismissed', { created_at: iso(NOW - 7 * D), dismissed_at: iso(NOW - 6 * D) }),
+      task(hold, 'lapse.plain', 'sent', { created_at: iso(NOW - 7 * D), completed_at: iso(NOW - 3 * D) }),
+    ] })
+  await run(R)
+  return { pass: show(tasksOf(again)) === show(['lapse.plain:completed', 'lapse.after.again:open'])
+      && taskOf(again, 'lapse.after.again')?.behavior_summary === 'Day 20 · stopped watching 4 days ago · past Video Ads II, first one sent 6 days ago'
+      && show(tasksOf(old)) === show(['lapse.30:completed', 'lapse.after:open'])
+      && show(tasksOf(dismissed)) === show(['lapse.plain:dismissed', 'lapse.after:open'])
+      && show(tasksOf(hold)) === show(['lapse.plain:completed']),
+    detail: show({ again: tasksOf(again), summary: taskOf(again, 'lapse.after.again')?.behavior_summary, old: tasksOf(old), dismissed: tasksOf(dismissed), hold: tasksOf(hold) }) }
+})
+await rule('once per break, at most 2, both versions counted: lapse.after, then nothing (open, then sent); a lesson and 4 quiet days: lapse.after again; a third break: nothing', async (R) => {
+  const a = sid('pc')
+  db = world({ students: [student(a, 22)], completions: watched(a, 61, NOW - 4 * D - H) })
+  await run(R)
+  const first = tasksOf(a)
+  markSent(a, 'lapse.after')
+  await run(R)
+  const sameBreak = tasksOf(a)
+  Object.assign(taskOf(a, 'lapse.after') ?? {}, { created_at: iso(NOW - 6 * D), completed_at: iso(NOW - 6 * D) })
+  setLessons(a, [...watched(a, 61, NOW - 7 * D), { student_id: a, lesson_id: 'x1', completed_at: iso(NOW - 4 * D - H), action_completed_at: null, skipped_at: null }])
+  await run(R)
+  const second = tasksOf(a)
+  db.rows('tasks').filter((t) => t.student_id === a && t.status === 'open').forEach((t) => Object.assign(t, { status: 'completed', completed_at: iso(NOW - 5 * D), created_at: iso(NOW - 5 * D) }))
+  setLessons(a, [...watched(a, 61, NOW - 9 * D), { student_id: a, lesson_id: 'x2', completed_at: iso(NOW - 4 * D - H), action_completed_at: null, skipped_at: null }])
+  await run(R)
+  return { pass: show(first) === show(['lapse.after:open']) && show(sameBreak) === show(['lapse.after:completed'])
+      && show(second) === show(['lapse.after:completed', 'lapse.after:open']) && show(tasksOf(a)) === show(['lapse.after:completed', 'lapse.after:completed']),
+    detail: show({ first, sameBreak, second, third: tasksOf(a) }) }
+})
+await rule('past Video Ads II but never signed in, canceling, or both templates off: nothing', async (R) => {
+  const never = sid('pn'), cancel = sid('px'), off = sid('pf')
+  db = world({ students: [student(never, 20), student(cancel, 20, { cancel_scheduled_at: iso(NOW - H) })], loggedIn: [cancel],
+    completions: [...watched(never, 61, NOW - 4 * D - H), ...watched(cancel, 61, NOW - 4 * D - H)] })
+  await run(R)
+  const first = [tasksOf(never), tasksOf(cancel)]
+  db = world({ students: [student(off, 20)], completions: watched(off, 61, NOW - 4 * D - H), templates: switched(['lapse.after', 'lapse.after.again']) })
+  await run(R)
+  return { pass: show(first) === show([[], []]) && tasksOf(off).length === 0, detail: show({ first, off: tasksOf(off) }) }
+})
+await rule('an open lapse.after, a lesson finished since: dismissed by 3c, and by the real-time evaluator after a lesson', async (R) => {
+  const a = sid('pr'), b = sid('pt')
+  db = world({ students: [student(a, 20), student(b, 20)],
+    completions: [...watched(a, 61, NOW - 6 * D), { student_id: a, lesson_id: 'x1', completed_at: iso(NOW - 2 * H), action_completed_at: null, skipped_at: null },
+      ...watched(b, 61, NOW - 6 * D), { student_id: b, lesson_id: 'x1', completed_at: iso(NOW - 60_000), action_completed_at: null, skipped_at: null }],
+    tasks: [task(a, 'lapse.after', 'open', { created_at: iso(NOW - D) }), task(b, 'lapse.after.again', 'open', { created_at: iso(NOW - D) })] })
+  const live = await EVAL.reEvaluateStudentOpenTasks(createServiceClient(), b)
+  const realTime = taskOf(b, 'lapse.after.again')
+  await run(R)
+  const t = taskOf(a, 'lapse.after')
+  return { pass: t?.status === 'dismissed' && t?.notes === 'Auto-dismissed: lapse.after, the student finished a lesson since.'
+      && realTime?.status === 'dismissed' && !('error' in live),
+    detail: show({ a: `${t?.status}: ${t?.notes}`, b: `${realTime?.status}: ${realTime?.notes}`, live }) }
+})
+{
+  const s = 'student-2'
+  const T = NOW - 5 * D
+  const had = (tasks, lastLesson) => QUEUE.messagesHad(tasks, () => iso(lastLesson))
+  const t = (scenario, state, at) => task(s, scenario, state, { created_at: iso(at) })
+  ok(had([t('lapse.after', 'sent', T)], T - D).has(s, 'lapse.after.again') && !had([t('lapse.after', 'sent', T)], T + H).has(s, 'lapse.after')
+      && !had([t('lapse.plain', 'sent', T)], T - D).has(s, 'lapse.after') && !had([t('thirty.closing', 'sent', T)], T - D).has(s, 'lapse.after')
+      && had([t('lapse.after', 'sent', T - 3 * D), t('lapse.after.again', 'sent', T)], T + H).has(s, 'lapse.after'),
+     'dm-queue.ts: lapse.after and lapse.after.again are one message, once per break and at most 2; the first stopped-watching DM and a closing do not take its place')
+  const sent = QUEUE.lastSentAt([task(s, 'lapse.plain', 'sent', { completed_at: iso(T) }), task(s, 'lapse.30', 'sent', { completed_at: iso(T + D) }),
+    task(s, 'lapse.30', 'open', { completed_at: null }), task(s, 'lapse.after', 'sent', { completed_at: iso(T + 2 * D) })], QUEUE.STOPPED_WATCHING)
+  ok(sent.get(s) === T + D, 'lastSentAt: the latest sent of the first stopped-watching DM, an open one and other messages left out', show([...sent]))
 }
 
 // ═══════════════════════════ the reads ═══════════════════════════

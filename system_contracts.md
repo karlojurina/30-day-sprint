@@ -772,7 +772,11 @@ When adding a new table, append it here. When deleting a field, scan
   `trigger_config` saved on one hands it to step 2b like any built-in.
   Their bucket is read from the row (they are not in `SCENARIO_BUCKET`,
   as `whop.watcher` is not), and `at_risk` puts them in the one
-  negative slot per student.
+  negative slot per student. Since branch `fix/dm-after-ii` (2026-11-03)
+  two more the same way, from the paste
+  `_admin/research/follow-ups/messages_v7_after_ii.sql` (undo beside it):
+  `lapse.after` and `lapse.after.again`, stopped watching after Video Ads
+  II, `week` null, bucket `at_risk`.
 - **At the course switch (v104):** every active template whose
   `trigger_config -> 'all'` has an element naming `lesson_id` or
   `region`, or the metric `progress_ratio`, `progress_label` or

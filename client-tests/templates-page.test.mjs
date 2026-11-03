@@ -563,6 +563,8 @@ console.log('\n=== The list: the ones that are on by day and job, the old ones u
     tpl('lapse.plain', 'Hey {firstName}.', { week: null }),
     tpl('lapse.30', 'Hey {firstName}.', { week: null }),
     tpl('thirty.closing', 'Hey {firstName}.', { week: 'D14' }),
+    tpl('lapse.after.again', 'Hey {firstName}.', { week: null }),
+    tpl('lapse.after', 'Hey {firstName}.', { week: null }),
     { ...CUSTOM },
     tpl('C-old111', 'Hey {firstName}, an old cancel note.', { week: 'X', is_custom: true, is_active: false, trigger_config: { all: [{ metric: 'is_canceling', op: 'is' }] } }),
     tpl('C-on2222', 'Hey {firstName}, another.', { week: 'X', is_custom: true, trigger_config: { all: [{ metric: 'day_number', op: 'gte', value: 5 }] } }),
@@ -572,9 +574,10 @@ console.log('\n=== The list: the ones that are on by day and job, the old ones u
   ok(show(on) === show([
     "Day 3 · Hasn't started: nolessons.day3, stalled.discord.day3, stalled.whop.day3",
     'From day 3 · Watching on Whop, never signed in: whop.watcher',
-    'Days 4 to 30 · Stopped watching: lapse.30, lapse.plain',
+    'Days 4 to 30 · Stopped watching, before the end of Video Ads II: lapse.30, lapse.plain',
     "Day 7 · Still hasn't started, the last one: nolessons.day7, stalled.discord.day7, stalled.whop.day7",
     'Last 2 days of the 30% · 30% closing: thirty.closing',
+    'After Video Ads II · Stopped watching: lapse.after, lapse.after.again',
     'Any day · Clicked cancel: C-a1b2c3',
     'Custom templates: C-on2222',
   ]), "on: the new set by day and job in a student's order, then any other one that is on under its day", show(on))

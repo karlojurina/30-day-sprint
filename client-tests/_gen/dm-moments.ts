@@ -5,7 +5,9 @@
  * STOPPED WATCHING ("Alright nice, that's good - code it and make the
  * message"): a student who signed in to the app (one who never did gets only
  * the Whop note: "I don't want to spam them"), has started (a finished lesson,
- * counted as the nolessons.* rules count one), is under the 30%'s share of the
+ * counted as the nolessons.* rules count one) and watched at least 1 of the
+ * counted videos (the owner, 2026-11-03: a student with only a skip or a
+ * lesson with no video gets no "You made a nice start"), is under the 30%'s share of the
  * counted videos (videosNeeded: 49 of 61 today), and has finished no lesson
  * for 3 days on course days 1 to 14, or for 5 days on days 15 to 30 (the
  * snapshot's dayOnCourse, as nolessons.* read it). The days are counted from
@@ -158,6 +160,8 @@ export interface MomentStudent {
 export function stoppedWatchingBreak(m: MomentStudent, nowMs: number): number | null {
   if (!m.signedIn || m.canceling) return null;
   if (m.lessonsFinished <= 0) return null;
+  // At least 1 counted video (above): a skip alone is no start for this DM.
+  if (m.videos.done < 1) return null;
   // No counted videos (needed 0) is never under the share: nothing is judged.
   if (m.videos.done >= m.videos.needed) return null;
   if (m.dayOnCourse < 1 || m.dayOnCourse > MONTH_ONE_LAST_DAY) return null;
@@ -200,10 +204,10 @@ export type ThirtyReach =
   | { inReach: true; endsAt: Date; left: number; secondsLeft: number }
   | { inReach: false; why: string };
 
-/** Whether the 30% is still open to the student and in reach (above), and if not, why, in words for the task's summary. */
+/** Whether the 30% is still open to the student and in reach (above), and if not, why, in a few words for the task's line. */
 export function thirtyReach(f: ThirtyFacts): ThirtyReach {
-  if (f.applied) return { inReach: false, why: "applied for the 30%" };
-  if (f.couponCloses) return { inReach: false, why: "a coupon or no paid plan on file" };
+  if (f.applied) return { inReach: false, why: "applied for 30%" };
+  if (f.couponCloses) return { inReach: false, why: "30% closed" };
   const state = discountState({
     now: f.now,
     firstPaidAt: f.firstPaidAt,
@@ -212,19 +216,19 @@ export function thirtyReach(f: ThirtyFacts): ThirtyReach {
     requests: f.requests,
   });
   if (state.kind === "pending" || state.kind === "approved" || state.kind === "applied") {
-    return { inReach: false, why: "applied for the 30%" };
+    return { inReach: false, why: "applied for 30%" };
   }
-  if (state.kind === "rejected") return { inReach: false, why: "their 30% request was turned down" };
-  if (state.kind === "ready") return { inReach: false, why: "reached the 30%'s videos" };
-  if (state.kind !== "locked") return { inReach: false, why: "the 30% is closed to them" };
+  if (state.kind === "rejected") return { inReach: false, why: "30% turned down" };
+  if (state.kind === "ready") return { inReach: false, why: "reached the 30%" };
+  if (state.kind !== "locked") return { inReach: false, why: "30% closed" };
   const left = requiredLessons(f.lessons).filter((l) => !f.videoDone.has(l.id));
   const secondsLeft = knownShortestSeconds(left, state.lessonsLeft);
   if (secondsLeft === null) {
-    return { inReach: false, why: "too few of the counted videos left have a known length" };
+    return { inReach: false, why: "video lengths unknown" };
   }
   const daysLeft = (Date.parse(state.endsAt) - f.now.getTime()) / DAY_MS;
   if (secondsLeft > WATCH_MINUTES_A_DAY * 60 * daysLeft) {
-    return { inReach: false, why: "out of reach at about 2 hours a day" };
+    return { inReach: false, why: "30% out of reach" };
   }
   return { inReach: true, endsAt: new Date(state.endsAt), left: state.lessonsLeft, secondsLeft };
 }
@@ -246,16 +250,6 @@ export function closingAhead(reach: ThirtyReach, nowMs: number): boolean {
   );
 }
 
-/** "about 50 minutes", "about 7.5 hours". */
-function videoTime(seconds: number): string {
-  if (seconds < 3600) {
-    const minutes = Math.max(1, Math.round(seconds / 60));
-    return `about ${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  }
-  const hours = Math.round(seconds / 360) / 10;
-  return `about ${hours} ${hours === 1 ? "hour" : "hours"}`;
-}
-
 /** The 30% closing DM's summary when it is due for the student, else null. */
 export function thirtyClosing(m: MomentStudent, reach: ThirtyReach, nowMs: number): string | null {
   if (!m.signedIn || m.canceling) return null;
@@ -263,10 +257,7 @@ export function thirtyClosing(m: MomentStudent, reach: ThirtyReach, nowMs: numbe
   const msLeft = reach.endsAt.getTime() - nowMs;
   if (msLeft < 0 || msLeft > CLOSING_WITHIN_MS) return null;
   const hours = Math.max(1, Math.round(msLeft / 3_600_000));
-  return (
-    `Day ${m.dayOnCourse} · the 30% closes in ${hours} ${hours === 1 ? "hour" : "hours"} · ` +
-    `${m.videos.done} of ${m.videos.needed} videos, the ${reach.left} shortest left take ${videoTime(reach.secondsLeft)}.`
-  );
+  return `Day ${m.dayOnCourse} · 30% closes in ${hours} ${hours === 1 ? "hour" : "hours"} · ${m.videos.done} of ${m.videos.needed}`;
 }
 
 /** The stopped-watching DM due for the student, the version and its summary, else null. */
@@ -277,13 +268,8 @@ export function stoppedWatching(
 ): { scenarioId: string; summary: string } | null {
   const quietDays = stoppedWatchingBreak(m, nowMs);
   if (quietDays === null) return null;
-  const head = `Day ${m.dayOnCourse} · no lesson finished in ${quietDays} days · ${m.videos.done} of ${m.videos.needed} videos for the 30%`;
-  if (reach.inReach) {
-    const daysLeft = Math.round(((reach.endsAt.getTime() - nowMs) / DAY_MS) * 10) / 10;
-    return {
-      scenarioId: LAPSE_THIRTY,
-      summary: `${head}, the ${reach.left} shortest left take ${videoTime(reach.secondsLeft)}, ${daysLeft} days to go.`,
-    };
-  }
-  return { scenarioId: LAPSE_PLAIN, summary: `${head} (${reach.why}).` };
+  // The owner's line, 2026-11-03: "Day 14 · stopped watching 3 days ago · 6 of 49, 30% out of reach".
+  const head = `Day ${m.dayOnCourse} · stopped watching ${quietDays} days ago · ${m.videos.done} of ${m.videos.needed}`;
+  if (reach.inReach) return { scenarioId: LAPSE_THIRTY, summary: `${head}, 30% still possible` };
+  return { scenarioId: LAPSE_PLAIN, summary: `${head}, ${reach.why}` };
 }

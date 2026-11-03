@@ -760,7 +760,7 @@ When adding a new table, append it here. When deleting a field, scan
   2026-10-30 also `whop.watcher` (built-in, no `trigger_config`, bucket
   `on_track`), added by hand with the team's message texts (no
   migration), which `check-na-tasks` queues since the DM queue fix.
-  Since branch `feat/dm-moments` (2026-10-30, not on production) also
+  Since branch `feat/dm-moments` (2026-10-30, on production since 2026-11-02) also
   three built-ins `check-csm-tasks` step 2d queues
   (`src/lib/dm-moments.ts`), added by the owner's paste
   `_admin/research/follow-ups/messages_v6_moments.sql` (no migration;
@@ -783,7 +783,7 @@ When adding a new table, append it here. When deleting a field, scan
   template row exists for their scenario (`check-csm-tasks`), which is
   why the clock built-ins are stopped in code (`courseIsNew`) and not
   here. Since the DM queue fix (2026-10-30, T-106, branch `fix/dm-queue`,
-  not on production) turning one off does stop it: `check-csm-tasks`'
+  on production since 2026-10-30) turning one off does stop it: `check-csm-tasks`'
   steps 1 and 2a find the template among those that are on, and
   `check-na-tasks` skips a day whose template is off without an error.
   `csm-events.ts` (W2.2, W2.6, X.1) still finds its templates by

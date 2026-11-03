@@ -3,7 +3,8 @@
 // and the rule of src/lib/dm-queue.ts they obey).
 //
 //   Stopped watching ("Alright nice, that's good - code it and make the
-//   message"): a student who signed in, has started, is under 49 of the 61
+//   message"): a student who signed in, has started with at least 1 counted
+//   video (the owner, 2026-11-03), is under 49 of the 61
 //   counted videos and has finished no lesson for 3 days on course days 1 to
 //   14, or 5 days on days 15 to 30. lapse.30 while the 30% is still open, in
 //   reach, not applied for and no coupon on file; lapse.plain otherwise. One
@@ -291,7 +292,7 @@ console.log('\n=== src/lib/dm-moments.ts: in reach ===')
      'a counted video not watched with no length: the 39 shortest with a length decide (in reach, 6.5 hours)', show(oneUnknown))
   const noLength = new Set(COUNTED.slice(48, 61))
   const unknown = MOMENTS.thirtyReach({ ...base, lessons: lessons.map((l) => (noLength.has(l.id) ? { ...l, duration_seconds: null } : l)) })
-  ok(unknown.inReach === false && unknown.why === 'too few of the counted videos left have a known length',
+  ok(unknown.inReach === false && unknown.why === 'video lengths unknown',
      '13 of the 51 left with no length (38 known for the 39 needed): not in reach', show(unknown))
   ok(MOMENTS.knownShortestSeconds([{ duration_seconds: null }, { duration_seconds: 300 }, { duration_seconds: 60 }], 2) === 360
       && MOMENTS.knownShortestSeconds([{ duration_seconds: null }, { duration_seconds: 300 }], 2) === null,
@@ -299,18 +300,18 @@ console.log('\n=== src/lib/dm-moments.ts: in reach ===')
   const edge = MOMENTS.thirtyReach({ ...base, lessons: catalog(10).map((l) => ({ ...l, has_video: true, duration_seconds: Math.floor((120 * 60 * 8.5) / 39) })) })
   ok(edge.inReach === true, 'the shortest still needed take just under 120 minutes a day left: in reach', show(edge))
   const over = MOMENTS.thirtyReach({ ...base, lessons: catalog(10).map((l) => ({ ...l, has_video: true, duration_seconds: Math.ceil((120 * 60 * 8.5) / 39) + 1 })) })
-  ok(over.inReach === false && over.why === 'out of reach at about 2 hours a day', 'just over: out of reach', show(over))
+  ok(over.inReach === false && over.why === '30% out of reach', 'just over: out of reach', show(over))
 }
 
 // ═══════════════════════════ stopped watching ═══════════════════════════
 console.log('\n=== check-csm-tasks 2d: stopped watching ===')
-await rule('day 6, 10 videos, no lesson for 3 days, the 30% in reach: lapse.30, with its summary', async (R) => {
+await rule('day 6, 10 videos, no lesson for 3 days, the 30% in reach: lapse.30, with its line (the owner, 2026-11-03: "Much simpler and smaller")', async (R) => {
   const a = sid('la')
   db = world({ students: [student(a, 6)], completions: watched(a, 10, NOW - 3 * D - H) })
   const r = await run(R)
   const t = taskOf(a, 'lapse.30')
   return { pass: r.status === 200 && show(tasksOf(a)) === show(['lapse.30:open']) && t?.template_id === 'tpl-lapse.30'
-      && t?.behavior_summary === 'Day 6 · no lesson finished in 3 days · 10 of 49 videos for the 30%, the 39 shortest left take about 6.5 hours, 8.5 days to go.',
+      && t?.behavior_summary === 'Day 6 · stopped watching 3 days ago · 10 of 49, 30% still possible',
     detail: show({ tasks: tasksOf(a), summary: t?.behavior_summary }) }
 })
 await rule('the same with a coupon on file, a request pending, or day 16 after 5 days: lapse.plain, saying why; day 16 after 4 days: nothing', async (R) => {
@@ -324,9 +325,9 @@ await rule('the same with a coupon on file, a request pending, or day 16 after 5
   await run(R)
   const got = [coupon, applied, late, early].map((id) => db.rows('tasks').filter((t) => t.student_id === id).map((t) => `${t.scenario_id}: ${t.behavior_summary}`).join(' | ') || 'none')
   return { pass: show(got) === show([
-      'lapse.plain: Day 6 · no lesson finished in 3 days · 10 of 49 videos for the 30% (a coupon or no paid plan on file).',
-      'lapse.plain: Day 6 · no lesson finished in 3 days · 10 of 49 videos for the 30% (applied for the 30%).',
-      'lapse.plain: Day 16 · no lesson finished in 5 days · 10 of 49 videos for the 30% (the 30% is closed to them).',
+      'lapse.plain: Day 6 · stopped watching 3 days ago · 10 of 49, 30% closed',
+      'lapse.plain: Day 6 · stopped watching 3 days ago · 10 of 49, applied for 30%',
+      'lapse.plain: Day 16 · stopped watching 5 days ago · 10 of 49, 30% closed',
       'none']),
     detail: show(got) }
 })
@@ -335,7 +336,7 @@ await rule('the same not in reach (30-minute videos: 39 x 30 minutes over 8.5 da
   db = world({ students: [student(a, 6)], completions: watched(a, 10, NOW - 3 * D - H), minutes: 30 })
   await run(R)
   const t = taskOf(a, 'lapse.plain')
-  return { pass: show(tasksOf(a)) === show(['lapse.plain:open']) && t?.behavior_summary.endsWith('(out of reach at about 2 hours a day).'),
+  return { pass: show(tasksOf(a)) === show(['lapse.plain:open']) && t?.behavior_summary === 'Day 6 · stopped watching 3 days ago · 10 of 49, 30% out of reach',
     detail: show({ tasks: tasksOf(a), summary: t?.behavior_summary }) }
 })
 await rule('only a NEW break (the owner, 2026-10-30: "Only new ones from 3 days ago"): quiet 3 or 4 days in the first 2 weeks, 5 or 6 after; longer: nothing, so go-live sends nothing to the backlog', async (R) => {
@@ -406,13 +407,13 @@ await rule('one per break, at most 2, both versions counted: lapse.30, then noth
 
 // ═══════════════════════════ the 30% closing ═══════════════════════════
 console.log('\n=== check-csm-tasks 2d: the 30% closing ===')
-await rule('40 hours before the end, 45 videos, no lesson for 4 days: thirty.closing, with its summary, and no stopped-watching task that run', async (R) => {
+await rule('40 hours before the end, 45 videos, no lesson for 4 days: thirty.closing, with its line, and no stopped-watching task that run', async (R) => {
   const a = sid('ca')
   db = world({ students: [closingIn(a, 40)], completions: watched(a, 45, NOW - 4 * D) })
   await run(R)
   const t = taskOf(a, 'thirty.closing')
   return { pass: show(tasksOf(a)) === show(['thirty.closing:open']) && t?.template_id === 'tpl-thirty.closing'
-      && t?.behavior_summary === 'Day 13 · the 30% closes in 40 hours · 45 of 49 videos, the 4 shortest left take about 40 minutes.',
+      && t?.behavior_summary === 'Day 13 · 30% closes in 40 hours · 45 of 49',
     detail: show({ tasks: tasksOf(a), summary: t?.behavior_summary }) }
 })
 await rule('not in reach (20 videos: 29 x 10 minutes in 40 hours), applied, a coupon on file, or the window closed 2 hours ago: nothing', async (R) => {
@@ -578,18 +579,24 @@ await rule('one counted video with no length (the gate): day 6 with 10 videos st
   db.rows('lessons').find((l) => l.id === 'v61').duration_seconds = null
   await run(R)
   return { pass: show(tasksOf(a)) === show(['lapse.30:open']) && show(tasksOf(b)) === show(['thirty.closing:open'])
-      && taskOf(b, 'thirty.closing')?.behavior_summary.endsWith('the 4 shortest left take about 40 minutes.'),
+      && taskOf(b, 'thirty.closing')?.behavior_summary === 'Day 13 · 30% closes in 40 hours · 45 of 49',
     detail: show({ a: tasksOf(a), b: tasksOf(b), summary: taskOf(b, 'thirty.closing')?.behavior_summary }) }
 })
-await rule('lessons only skipped (5, skipped 4 days ago, day 9): lapse.30; a lesson skipped yesterday after 4 days without a video: no break; BEFORE the first never got a DM', async (R) => {
-  const a = sid('rb'), b = sid('rc')
+// The owner, 2026-11-03 ("Yes"): the stopped-watching DM needs at least 1
+// counted video. A student who only skipped, or only finished lessons the 30%
+// does not count, gets no "You made a nice start". Before it, the first two
+// below got lapse.30 with "0 of 49".
+await rule('no counted video (5 skipped 4 days ago; or only an action item and a lesson after the gate, 4 days ago), day 9: no DM; 1 counted video 4 days ago: lapse.30; a lesson skipped yesterday after 4 days without a video: no break', async (R) => {
+  const a = sid('rb'), b = sid('rc'), c = sid('rl'), d = sid('rm')
   const skipped = (student_id, ids, ms) => ids.map((lesson_id) => ({ student_id, lesson_id, completed_at: null, action_completed_at: null, skipped_at: iso(ms) }))
-  db = world({ students: [student(a, 9), student(b, 9)],
-    completions: [...skipped(a, COUNTED.slice(0, 5), NOW - 4 * D), ...watched(b, 10, NOW - 4 * D), ...skipped(b, ['v11'], NOW - D)] })
+  const finished = (student_id, ids, ms) => ids.map((lesson_id) => ({ student_id, lesson_id, completed_at: iso(ms), action_completed_at: iso(ms), skipped_at: null }))
+  db = world({ students: [student(a, 9), student(b, 9), student(c, 9), student(d, 9)],
+    completions: [...skipped(a, COUNTED.slice(0, 5), NOW - 4 * D), ...watched(b, 10, NOW - 4 * D), ...skipped(b, ['v11'], NOW - D),
+      ...finished(c, ['act1', 'x1'], NOW - 4 * D), ...watched(d, 1, NOW - 4 * D)] })
   await run(R)
-  return { pass: show(tasksOf(a)) === show(['lapse.30:open']) && taskOf(a, 'lapse.30')?.behavior_summary.startsWith('Day 9 · no lesson finished in 4 days · 0 of 49 videos')
-      && tasksOf(b).length === 0,
-    detail: show({ a: tasksOf(a), summary: taskOf(a, 'lapse.30')?.behavior_summary, b: tasksOf(b) }) }
+  return { pass: tasksOf(a).length === 0 && tasksOf(b).length === 0 && tasksOf(c).length === 0
+      && show(tasksOf(d)) === show(['lapse.30:open']) && taskOf(d, 'lapse.30')?.behavior_summary === 'Day 9 · stopped watching 4 days ago · 1 of 49, 30% still possible',
+    detail: show({ a: tasksOf(a), b: tasksOf(b), c: tasksOf(c), d: tasksOf(d), summary: taskOf(d, 'lapse.30')?.behavior_summary }) }
 })
 await rule('the lapse due a run before the closing (50 hours before the end, 44 videos, 4 days quiet): nothing, then the closing alone 4 hours later; 70 hours with 20 videos (the closing will not come) and 80 hours with 44: lapse.30; BEFORE the first got lapse.30 and then the closing', async (R) => {
   const a = sid('rd'), b = sid('re'), c = sid('rf')
@@ -610,7 +617,7 @@ await rule('lessons watched before the first payment (6, 8 days ago; joined 10 d
   db = world({ students: [paidFreeFirst(a, 1.5), paidFreeFirst(b, 3.5)], completions: [...watched(a, 6, NOW - 8 * D), ...watched(b, 6, NOW - 8 * D)] })
   await run(R)
   return { pass: tasksOf(a).length === 0 && show(tasksOf(b)) === show(['lapse.30:open'])
-      && taskOf(b, 'lapse.30')?.behavior_summary.startsWith('Day 4 · no lesson finished in 3 days'),
+      && taskOf(b, 'lapse.30')?.behavior_summary.startsWith('Day 4 · stopped watching 3 days ago · 6 of 49'),
     detail: show({ a: tasksOf(a), b: tasksOf(b), summary: taskOf(b, 'lapse.30')?.behavior_summary }) }
 })
 {

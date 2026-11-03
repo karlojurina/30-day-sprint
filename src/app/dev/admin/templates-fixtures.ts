@@ -116,6 +116,11 @@ function templates(): Template[] {
     tpl("pace.day14", "D14", "at_risk", "Behind on pace - Day 14 (discount slipped)", "Hey {firstName}, a made-up note on pace, day 14."),
     tpl("pace.day21", "D21", "at_risk", "Behind on pace - Day 21 (last push)", "Hey {firstName}, a made-up note on pace, day 21."),
     tpl("month2.entry", "M2", "event", "Month 2 entry (Spencer math + Playbook)", "Hey {firstName}! A made-up month 2 note.\n\nUse {unknownThing} here."),
+    // The DMs added on 2026-10-30, so the page shows their sections (groupTemplates).
+    tpl("whop.watcher", "", "on_track", "Watching on Whop, never signed in (once)", "Hey {firstName}, a made-up note for a student who watches on Whop.\n\n{programLink}", { week: null }),
+    tpl("lapse.30", "", "at_risk", "Stopped watching, 30% still in reach", "Hey {firstName}, a made-up note after a few quiet days.\n\n{programLink}", { week: null }),
+    tpl("lapse.plain", "", "at_risk", "Stopped watching", "Hey {firstName}, a made-up note after a few quiet days, no 30%.\n\n{programLink}", { week: null }),
+    tpl("thirty.closing", "D14", "at_risk", "30% closing, still in reach", "Hey {firstName}, a made-up note 2 days before the 30% closes.\n\n{programLink}"),
     tpl("C-a1b2c3", "X", "cancel_path", "Is cancelling", "Hey {firstName}, a made-up note for a member who is cancelling.", {
       is_custom: true,
       trigger_config: {

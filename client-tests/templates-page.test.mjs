@@ -553,6 +553,47 @@ console.log('\n=== The trigger editor takes its catalog from the page ===')
   ok(html.includes('The areas and lessons could not be loaded, so their dropdowns are off: areas: timeout'), 'a catalog that could not be read: its reason, and the dropdowns off', html.slice(0, 200))
 }
 
+console.log('\n=== The list: the ones that are on by day and job, the old ones under Old at the bottom (the owner, 2026-11-03) ===')
+{
+  // The live set of 2026-11-03: the day 3 and day 7 texts, the Whop note, stopped watching, the 30% closing and the cancel DM on.
+  const LIVE = ['stalled.discord.day3', 'stalled.whop.day3', 'nolessons.day3', 'stalled.discord.day7', 'stalled.whop.day7', 'nolessons.day7']
+  const rows = [
+    ...builtIns().map((t) => ({ ...t, is_active: LIVE.includes(t.scenario_id) })),
+    tpl('whop.watcher', 'Hey {firstName}, Whop.', { week: null, bucket: 'on_track' }),
+    tpl('lapse.plain', 'Hey {firstName}.', { week: null }),
+    tpl('lapse.30', 'Hey {firstName}.', { week: null }),
+    tpl('thirty.closing', 'Hey {firstName}.', { week: 'D14' }),
+    { ...CUSTOM },
+    tpl('C-old111', 'Hey {firstName}, an old cancel note.', { week: 'X', is_custom: true, is_active: false, trigger_config: { all: [{ metric: 'is_canceling', op: 'is' }] } }),
+    tpl('C-on2222', 'Hey {firstName}, another.', { week: 'X', is_custom: true, trigger_config: { all: [{ metric: 'day_number', op: 'gte', value: 5 }] } }),
+  ]
+  const g = DATA.groupTemplates(rows)
+  const on = g.on.map((s) => `${s.label}: ${s.templates.map((t) => t.scenario_id).join(', ')}`)
+  ok(show(on) === show([
+    "Day 3 · Hasn't started: nolessons.day3, stalled.discord.day3, stalled.whop.day3",
+    'From day 3 · Watching on Whop, never signed in: whop.watcher',
+    'Days 4 to 30 · Stopped watching: lapse.30, lapse.plain',
+    "Day 7 · Still hasn't started, the last one: nolessons.day7, stalled.discord.day7, stalled.whop.day7",
+    'Last 2 days of the 30% · 30% closing: thirty.closing',
+    'Any day · Clicked cancel: C-a1b2c3',
+    'Custom templates: C-on2222',
+  ]), "on: the new set by day and job in a student's order, then any other one that is on under its day", show(on))
+  const off = rows.filter((t) => !t.is_active)
+  ok(show(g.old.map((t) => t.scenario_id)) === show(DATA.sortTemplates(off).map((t) => t.scenario_id)) && g.old.length === 13
+      && g.old.every((t) => !t.is_active) && g.on.every((s) => s.templates.every((t) => t.is_active)),
+     'old: the 13 that are off (12 built-ins and the old cancel note) in day order, none of them on, and no off one at the top', show(g.old.map((t) => t.scenario_id)))
+  const every = [...g.on.flatMap((s) => s.templates), ...g.old].map((t) => t.id)
+  ok(every.length === rows.length && new Set(every).size === rows.length, 'every template shows exactly once')
+  const closingOff = DATA.groupTemplates(rows.map((t) => (t.scenario_id === 'thirty.closing' ? { ...t, is_active: false } : t)))
+  ok(!closingOff.on.some((s) => s.key === 'thirty-closing') && closingOff.old.some((t) => t.scenario_id === 'thirty.closing'),
+     'a new one turned off moves down to Old, and its section goes')
+  const allOn = DATA.groupTemplates(rows.map((t) => ({ ...t, is_active: true })))
+  ok(allOn.old.length === 0, 'nothing off: no Old section')
+  const view = fromSrc('src/components/admin/templates/TemplatesView.tsx')
+  ok(/\{groups\.old\.length > 0 && \(\s*<section aria-label="Old, switched off">\s*<details>/.test(view) && view.includes('Old, switched off ({groups.old.length})'),
+     'in the source, Old is one folded section at the bottom, with its count')
+}
+
 console.log('\n=== The words the team reads ===')
 {
   const files = [

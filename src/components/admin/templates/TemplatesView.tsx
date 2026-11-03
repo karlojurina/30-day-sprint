@@ -44,8 +44,10 @@ import { TemplateRow } from "./TemplateRow";
  * and the 4 automated Discord switches behind a button, with their warnings
  * always shown, read by every team role and changed by founders and admins
  * (MessageSettings.tsx; folded when the page opens, for every role, so the
- * first template is on the first screen). Then every template, grouped by the day it comes
- * up: what it is, its numbers, Off where its switch works, and when opened,
+ * first template is on the first screen). Then the templates that are on, by
+ * the day they come up and what they are for, and every template that is off
+ * folded under Old at the bottom (groupTemplates): what it is, its numbers,
+ * Off where its switch works, and when opened,
  * its editor (TemplateRow.tsx). A built-in template cannot be deleted, only
  * a custom one. Save sends only what changed. "New template" is the page's
  * one ink button; under 480px wide it and Refresh go under the description.
@@ -265,6 +267,29 @@ export function TemplatesView({ transport, role }: { transport: TemplatesTranspo
 
   const data = loaded.data;
   const custom = data.templates.filter((t) => t.is_custom).length;
+  // On at the top by day and job, everything off under Old at the bottom (groupTemplates).
+  const groups = groupTemplates(data.templates);
+  const row = (t: Template) => (
+    <TemplateRow
+      key={t.id}
+      template={t}
+      draft={drafts[t.id] ?? draftOf(t)}
+      open={open === t.id}
+      stat={stats?.ok ? stats.byId[t.id] : undefined}
+      live={data.live}
+      trigger={data.trigger}
+      settings={data.settings}
+      canEdit={canEdit}
+      busy={busy === t.id}
+      handlers={{
+        onToggleOpen: () => setOpen((cur) => (cur === t.id ? null : t.id)),
+        onDraft: (next) => setDrafts((d) => ({ ...d, [t.id]: next })),
+        onSave: () => save(t),
+        onSetActive: () => void setActive(t),
+        onDelete: () => remove(t),
+      }}
+    />
+  );
   const meta = [
     `${data.templates.length} ${data.templates.length === 1 ? "template" : "templates"}, ${custom} custom`,
     stats && !stats.ok ? "the send numbers could not be loaded" : null,
@@ -293,34 +318,22 @@ export function TemplatesView({ transport, role }: { transport: TemplatesTranspo
         </Card>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          {groupTemplates(data.templates).map((g) => (
+          {groups.on.map((g) => (
             <section key={g.key} aria-label={g.label}>
               <h2 style={{ ...T.eyebrow, color: "var(--color-text-secondary)", marginBottom: 8 }}>{g.label}</h2>
-              <Card padding={0}>
-                {g.templates.map((t) => (
-                  <TemplateRow
-                    key={t.id}
-                    template={t}
-                    draft={drafts[t.id] ?? draftOf(t)}
-                    open={open === t.id}
-                    stat={stats?.ok ? stats.byId[t.id] : undefined}
-                    live={data.live}
-                    trigger={data.trigger}
-                    settings={data.settings}
-                    canEdit={canEdit}
-                    busy={busy === t.id}
-                    handlers={{
-                      onToggleOpen: () => setOpen((cur) => (cur === t.id ? null : t.id)),
-                      onDraft: (next) => setDrafts((d) => ({ ...d, [t.id]: next })),
-                      onSave: () => save(t),
-                      onSetActive: () => void setActive(t),
-                      onDelete: () => remove(t),
-                    }}
-                  />
-                ))}
-              </Card>
+              <Card padding={0}>{g.templates.map(row)}</Card>
             </section>
           ))}
+          {groups.old.length > 0 && (
+            <section aria-label="Old, switched off">
+              <details>
+                <FoldSummary>
+                  Old, switched off ({groups.old.length})
+                </FoldSummary>
+                <Card padding={0}>{groups.old.map(row)}</Card>
+              </details>
+            </section>
+          )}
         </div>
       )}
 

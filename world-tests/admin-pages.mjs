@@ -2679,7 +2679,8 @@ if (LANE_PARTS.some(wanted)) {
 
   if (wanted('templates')) {
     const W_DISCORD = '4 messages send an empty Discord link.'
-    const W_PROGRAM = 'The program link is not on sprint.ecomuniversity.com. 9 messages send it.'
+    // 13 since the 4 DMs of 2026-10-30 joined the made-up templates (each sends the program link).
+    const W_PROGRAM = 'The program link is not on sprint.ecomuniversity.com. 13 messages send it.'
     for (const size of SIZES) {
       const label = `templates, full, founder, ${size.join('x')}`
       console.log(`\n${label}`)
@@ -2825,7 +2826,7 @@ if (LANE_PARTS.some(wanted)) {
       await press(saveDiscord)
       await page.waitForFunction(() => document.body.innerText.includes('Saved the Discord link.'), { timeout: 5000 })
       const afterLink = await bodyText()
-      expect(!afterLink.includes('4 messages send an empty Discord link.') && afterLink.includes('9 messages send it.'),
+      expect(!afterLink.includes('4 messages send an empty Discord link.') && afterLink.includes('13 messages send it.'),
         'the Discord link saved: its warning goes, the program link\'s stays')
       expect((await laneCalls()).some((c) => c.name === 'saveSetting' && c.args[0] === 'discord_invite_link' && c.args[1] === 'https://discord.gg/madeup123'),
         'through the settings call with the 1 key and its value')

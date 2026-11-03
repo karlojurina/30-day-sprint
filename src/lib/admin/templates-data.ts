@@ -240,16 +240,64 @@ export function sortTemplates(rows: Template[]): Template[] {
   );
 }
 
-/** The groups the page shows, in order. A custom template goes under Custom templates whatever its week. */
-export function groupTemplates(rows: Template[]): Array<{ key: string; label: string; templates: Template[] }> {
-  const groups = new Map<string, Template[]>();
-  for (const r of rows) {
-    const key = r.is_custom ? "CUSTOM" : (r.week ?? "OTHER");
-    groups.set(key, [...(groups.get(key) ?? []), r]);
+/** A group of templates the page shows under one heading. */
+export interface TemplateGroup {
+  key: string;
+  label: string;
+  templates: Template[];
+}
+
+/** Whether a template's own conditions ask "is canceling" (the cancel DM; check-csm-tasks reads them the same way). */
+function asksCanceling(t: Pick<Template, "trigger_config">): boolean {
+  return Boolean(t.trigger_config?.all?.some((c) => c.metric === "is_canceling"));
+}
+
+/**
+ * The DMs that are on, by when they come up and what they are for (the owner,
+ * 2026-11-03: "at the top we have the new ones by days/function"), in a
+ * student's order. Only templates that are on go in them.
+ */
+const ON_SECTIONS: ReadonlyArray<{ key: string; label: string; has: (t: Template) => boolean }> = [
+  {
+    key: "hasnt-started-3",
+    label: "Day 3 · Hasn't started",
+    has: (t) => ["stalled.discord.day3", "stalled.whop.day3", "nolessons.day3"].includes(t.scenario_id),
+  },
+  { key: "whop-watcher", label: "From day 3 · Watching on Whop, never signed in", has: (t) => t.scenario_id === "whop.watcher" },
+  { key: "stopped-watching", label: "Days 4 to 30 · Stopped watching", has: (t) => ["lapse.30", "lapse.plain"].includes(t.scenario_id) },
+  {
+    key: "hasnt-started-7",
+    label: "Day 7 · Still hasn't started, the last one",
+    has: (t) => ["stalled.discord.day7", "stalled.whop.day7", "nolessons.day7"].includes(t.scenario_id),
+  },
+  { key: "thirty-closing", label: "Last 2 days of the 30% · 30% closing", has: (t) => t.scenario_id === "thirty.closing" },
+  { key: "clicked-cancel", label: "Any day · Clicked cancel", has: asksCanceling },
+];
+
+/**
+ * The page's list: the templates that are on, in the sections above and then,
+ * for any other one that is on, its day (a custom one under Custom templates
+ * whatever its week); and every template that is off, under Old at the bottom
+ * (the owner, 2026-11-03: "put them at the bottom as old"), in day order.
+ */
+export function groupTemplates(rows: Template[]): { on: TemplateGroup[]; old: Template[] } {
+  const on = rows.filter((r) => r.is_active);
+  const placed = new Set<string>();
+  const sections: TemplateGroup[] = [];
+  for (const s of ON_SECTIONS) {
+    const templates = sortTemplates(on.filter((t) => !placed.has(t.id) && s.has(t)));
+    templates.forEach((t) => placed.add(t.id));
+    if (templates.length > 0) sections.push({ key: s.key, label: s.label, templates });
   }
-  return [...groups.entries()]
+  const byDay = new Map<string, Template[]>();
+  for (const r of sortTemplates(on.filter((t) => !placed.has(t.id)))) {
+    const key = r.is_custom ? "CUSTOM" : (r.week ?? "OTHER");
+    byDay.set(key, [...(byDay.get(key) ?? []), r]);
+  }
+  const rest = [...byDay.entries()]
     .sort(([a], [b]) => weekRank(a) - weekRank(b) || a.localeCompare(b))
     .map(([key, templates]) => ({ key, label: GROUP_LABEL[key] ?? "Other", templates }));
+  return { on: [...sections, ...rest], old: sortTemplates(rows.filter((r) => !r.is_active)) };
 }
 
 /** The bucket in words, never the glyph alone. */
